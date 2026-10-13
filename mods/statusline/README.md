@@ -126,8 +126,9 @@ terminal and the web view draw it with different fonts.
 
 If Desktop shows the wrong glyphs (for example the unicode set while `icons` is `nerd`): the mod
 reads its options from two places, what Claude Code hands it at load and its entry under
-`pluginConfigs` in `settings.json` (`statusline@iuliandita-mods`), and the stored entry wins from the
-first refresh on. A Desktop session was seen drawing the unicode set with `icons: nerd` stored, while
+`pluginConfigs` in your user `settings.json` (`statusline@iuliandita-mods`), and the stored entry wins
+from the first refresh on. Only the user file counts: a repository's own `.claude/settings.json`
+cannot change these options. A Desktop session was seen drawing the unicode set with `icons: nerd` stored, while
 the same engine handed the option over in every other way it was run, so the mod no longer depends on
 the first. If it still happens, check that only one `statusline@...` entry exists under
 `pluginConfigs` (with two, neither is used), and restart the Desktop session: a session keeps the mod

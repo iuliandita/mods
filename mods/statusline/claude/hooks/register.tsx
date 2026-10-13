@@ -423,9 +423,10 @@ async function refresh($: Engine, s: Snap): Promise<void> {
       s.settingsEffort = typeof set.effortLevel === 'string' ? set.effortLevel : null
       // The merged settings carry both window keys; only these two are kept.
       s.windowSettings = { autoCompactWindow: set.autoCompactWindow, modelSettings: set.modelSettings }
-      // The options as settings.json stores them, over the ones register was given: Claude Desktop has been seen
-      // drawing the band without the user's options (icons: nerd drawn as unicode).
-      const stored = storedOptions(set.pluginConfigs, $.plugin.name)
+      // The options as the user's settings.json stores them, over the ones register was given: Claude Desktop has
+      // been seen drawing the band without the user's options (icons: nerd drawn as unicode). Only the user source:
+      // the merge also carries a repository's own .claude/settings.json, which must not change a user's options.
+      const stored = storedOptions((await $.settings.read({ source: 'user' })).pluginConfigs, $.plugin.name)
       if (stored) s.cfg = parseConfig({ ...s.options, ...stored })
       if (!s.agent && typeof set.agent === 'string') s.agent = set.agent
     }).then(() =>
