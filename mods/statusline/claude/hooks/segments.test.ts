@@ -376,8 +376,9 @@ test('session totals: requests that ran before the mod loaded, after the last sn
 // ---- the hooks, through the test kit ----
 
 // A transcript under another project folder than the session's root names: a session resumed elsewhere.
-// stored: settings.json pluginConfigs, as $.settings.read() returns them.
-type Ctl = { kube: 'ok' | 'fail'; settings?: 'fail'; fresh?: boolean; transcript?: string; remote?: string; stored?: Record<string, unknown> }
+// stored: the user's settings.json pluginConfigs, as $.settings.read({ source: 'user' }) returns them; repoStored:
+// the same key in a repository's own settings, which only the merged read carries.
+type Ctl = { kube: 'ok' | 'fail'; settings?: 'fail'; fresh?: boolean; transcript?: string; remote?: string; stored?: Record<string, unknown>; repoStored?: Record<string, unknown> }
 const ELSEWHERE = '/u/.claude/projects/-elsewhere/sid.jsonl'
 const ok = (stdout: string, exitCode = 0, stderr = '') => ({ value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false } }) as never
 
@@ -395,7 +396,12 @@ function engine(on: On, ctl: Ctl = { kube: 'ok' }) {
     ? { startedAt: NOW, context: { window: 200_000 }, rateLimits: [] }
     : { startedAt: NOW - 2 * H, context: { tokens: 1000, window: 200_000, percent: 1 }, rateLimits: [{ kind: 'five_hour', percentUsed: 36, resetsAt: new Date(NOW + 3 * H).toISOString() }], cost: { usd: 1.5 } }
   on('session.usage', () => ({ value: usage }) as never)
-  on('settings.read', () => (ctl.settings === 'fail' ? { deny: 'unreadable' } : { value: ctl.stored ? { pluginConfigs: ctl.stored } : {} }) as never)
+  on('settings.read', (_$, e) => {
+    if (ctl.settings === 'fail') return { deny: 'unreadable' } as never
+    const merged = (e as { source?: string }).source === undefined
+    const pluginConfigs = merged ? (ctl.repoStored ?? ctl.stored) : ctl.stored
+    return { value: pluginConfigs ? { pluginConfigs } : {} } as never
+  })
   on('config.list', () => ({ value: [{ key: 'outputStyle', label: 'Output style', kind: 'enum', value: 'Explanatory', provider: { plugin: 'engine', tier: 'core' } }] }) as never)
   on('env.get', (_$, e) => ({ value: (e as { name: string }).name === 'HOME' ? '/u' : undefined }) as never)
   const size = ctl.transcript === undefined ? 0 : new TextEncoder().encode(ctl.transcript).length
@@ -532,6 +538,19 @@ test('Desktop with icons: nerd only in settings.json pluginConfigs draws the Ner
   const { desktop, terminal } = await bothSurfaces($, 140)
   for (const mark of NERD_MARKS) expect(desktop[0]).toContain(mark)
   expect(terminal).toEqual(desktop)
+})
+
+test("a repository's own pluginConfigs does not change the user's options", async ($, on) => {
+  const key = 'statusline@iuliandita-mods'
+  const { clock, runs } = engine(on, {
+    kube: 'ok',
+    remote: 'https://github.com/owner/repo.git',
+    stored: { [key]: { options: { forge: 'off' } } },
+    repoStored: { [key]: { options: { forge: 'on', icons: 'ascii' } } },
+  })
+  await started($, clock)
+  await clock.advance(1_000)
+  expect(runs.some((a) => a[0] === 'gh' || a[0] === 'glab')).toBe(false)
 })
 
 test('Desktop shows the forge counts in a repository on GitHub, also under 120 columns', async ($, on) => {
