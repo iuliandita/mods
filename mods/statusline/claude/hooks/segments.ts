@@ -486,13 +486,23 @@ export function buildRows(st: Style, v: View, cols: number, rows: 1 | 2 = 2, lin
 
   const ident: Seg[] = [safe('model', () => modelSeg(st, v.model, v.effort))]
   if (v.fast) ident.push(seg('fast', 7, [c(st, P.YELLOW, '⚡')]))
-  if (v.cwd && folder !== v.worktree) ident.push(seg('folder', 8, [c(st, null, `${st.glyph.folder}${clip(folder, 32)}`), c(st, null, clip(folder, 12))]))
+  // The folder is always drawn, also beside a worktree badge of the same name (the script hid it then).
+  if (v.cwd) ident.push(seg('folder', 8, [c(st, null, `${st.glyph.folder}${clip(folder, 32)}`), c(st, null, clip(folder, 12))]))
   const lines = safe('lines', () => linesSeg(st, v.lines))
-  if (linesRow === 1) lines.prio = 8.5
-  ident.push(safe('git', () => gitSeg(st, v.git, v.worktree)))
-  if (linesRow === 1) ident.push(lines)
-  ident.push(safe('kube', () => kubeSeg(st, v.kube)), safe('pr', () => prSeg(st, v.pr)))
-  if (v.agent) ident.push(seg('agent', 4, [c(st, P.YELLOW, `@${clip(clean(v.agent), 24)}`)]))
+  const git = safe('git', () => gitSeg(st, v.git, v.worktree))
+  const kube = safe('kube', () => kubeSeg(st, v.kube))
+  const pr = safe('pr', () => prSeg(st, v.pr))
+  const agent = v.agent ? [seg('agent', 4, [c(st, P.YELLOW, `@${clip(clean(v.agent), 24)}`)])] : []
+  // The repository's PR and issue counts, from 120 columns. In the owner's layout they sit right after the
+  // branch and its PR, as garnish: on a short row they go before kube, the session name and the style.
+  const forge = cols < FORGE_MIN_COLS ? [] : [safe('forge', () => forgeSeg(st, v.forge))]
+  if (linesRow === 1) {
+    lines.prio = 8.5
+    for (const f of forge) Object.assign(f, { optional: true, prio: 3.5 })
+    ident.push(git, pr, ...forge, lines, kube, ...agent)
+  } else {
+    ident.push(git, kube, pr, ...agent)
+  }
 
   const extras: Seg[] = []
   if (v.sessionName) {
@@ -502,7 +512,8 @@ export function buildRows(st: Style, v: View, cols: number, rows: 1 | 2 = 2, lin
   const style = clean(v.outputStyle ?? '')
   if (style && style.toLowerCase() !== 'default') extras.push(seg('style', 5, [c(st, P.DIM, `✎ ${clip(style, 20)}`)], { optional: true }))
   if (v.vim) extras.push(seg('vim', 3, [c(st, P.DIM, `[${clean(v.vim).slice(0, 1)}]`)], { optional: true }))
-  const forge = cols < FORGE_MIN_COLS ? [] : [safe('forge', () => forgeSeg(st, v.forge))]
+  // The script draws the counts at the far right, after the garnish.
+  const tail = linesRow === 1 ? [] : forge
 
   const budgets = [
     safe('ctx', () => ctxSeg(st, v.context)),
@@ -519,7 +530,7 @@ export function buildRows(st: Style, v: View, cols: number, rows: 1 | 2 = 2, lin
   // segment is missing.
   const names = [...new Set(failed)]
   const notice = names.length ? [seg('failed', 9, [c(st, 'faint', names.map((n) => `✗${n}`).join(' '))])] : []
-  const out = rows === 1 ? [fit(st, [...ident, ...extras, ...forge, ...notice, ...budgets, ...stats], budget)] : [fit(st, [...ident, ...extras, ...forge, ...notice], budget), fit(st, [...budgets, ...stats], budget)]
+  const out = rows === 1 ? [fit(st, [...ident, ...extras, ...tail, ...notice, ...budgets, ...stats], budget)] : [fit(st, [...ident, ...extras, ...tail, ...notice], budget), fit(st, [...budgets, ...stats], budget)]
   return out.filter((r) => r.length)
 }
 
@@ -662,10 +673,22 @@ export type Transcript = {
   create: number
   input: number
   misses: number
+  // Lines from edit and write results since the last cost snapshot (or since the start without one).
   added: number
   removed: number
+  // The engine's own running totals, as its latest `cost-state` entry saved them; `snapshots` counts them.
+  snapshot: { apiMs: number; linesAdded: number; linesRemoved: number } | null
+  snapshots: number
 }
-export const emptyTranscript = (): Transcript => ({ title: null, effort: null, fast: false, ts: null, ttl: 300, recent: [], requests: 0, read: 0, create: 0, input: 0, misses: 0, added: 0, removed: 0 })
+export const emptyTranscript = (): Transcript => ({ title: null, effort: null, fast: false, ts: null, ttl: 300, recent: [], requests: 0, read: 0, create: 0, input: 0, misses: 0, added: 0, removed: 0, snapshot: null, snapshots: 0 })
+
+// Session totals for the status line: the engine's last snapshot plus what came after it (lines from the
+// transcript, API time from the requests this mod timed since the snapshot was read); without a snapshot,
+// the transcript's lines and the mod's own API time.
+export function sessionTotals(t: Transcript, liveApiMs: number, apiAtSnapshot: number): { apiMs: number; added: number; removed: number } {
+  if (!t.snapshot) return { apiMs: liveApiMs, added: t.added, removed: t.removed }
+  return { apiMs: t.snapshot.apiMs + Math.max(0, liveApiMs - apiAtSnapshot), added: t.snapshot.linesAdded + t.added, removed: t.snapshot.linesRemoved + t.removed }
+}
 
 type Obj = Record<string, unknown>
 const obj = (v: unknown): Obj => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Obj) : {})
@@ -696,6 +719,12 @@ export function absorb(s: Transcript, line: string): void {
     s.read += read
     s.create += create
     s.input += num(usage.input_tokens)
+  } else if (kind === 'cost-state') {
+    // Cumulative, as the terminal's status line input has them (total_api_duration_ms, total_lines_*).
+    s.snapshot = { apiMs: num(entry.totalAPIDuration), linesAdded: num(entry.totalLinesAdded), linesRemoved: num(entry.totalLinesRemoved) }
+    s.snapshots++
+    s.added = 0
+    s.removed = 0
   } else if (kind === 'user' && entry.toolUseResult && typeof entry.toolUseResult === 'object') {
     const result = obj(entry.toolUseResult)
     for (const hunk of Array.isArray(result.structuredPatch) ? result.structuredPatch : []) {

@@ -18,14 +18,14 @@ Row 1, the repository and the session:
 | --- | --- | --- |
 | Model and effort, low to max | `◆ Sonnet 5.5  ▰▰▱▱▱` | `$.session.model()`; effort from each main-loop request (`turn.step`), else the transcript, else `effortLevel` in settings |
 | Fast mode | `⚡` | the transcript (`usage.speed`) |
-| Folder | `repo` | `$.session.cwd()`; hidden when it is the worktree's name |
+| Folder, always (also beside a worktree badge of the same name) | `repo` | `$.session.cwd()` |
 | Worktree and branch badges, then `+staged ~modified ?untracked =conflicts ↑ahead ↓behind` | ` ⌥ feature `  ` ⎇ feat/x  +1 ~2 ?3` | `git status --porcelain=v2 --branch`, `git rev-parse` (a linked worktree's name) |
-| Lines added and removed | `+412 -87` | the session transcript's edit and write results; `Δ+21 -6` (uncommitted lines, `git diff --numstat HEAD`) until the session has changed any |
-| Kube context and namespace | `k8s lab/apps` (a red badge for a `prod` context) | `kubectl config view --minify`, else the kubeconfig text |
 | The branch's PR or MR | `#12 ✓`, `!87 ●` | `gh pr list` / `glab api` |
+| Open PRs (MRs) and issues, at 120 columns and up | `⑂ 7 ⊙ 23` (`≈` marks counts that could not be refreshed for 30 minutes) | `gh api graphql` / `glab api` |
+| Lines added and removed in the session | `+412 -87` | the engine's own totals as its last `cost-state` entry in the transcript saved them, plus edit and write results after it; `Δ+21 -6` (uncommitted lines, `git diff --numstat HEAD`) until the session has changed any |
+| Kube context and namespace | `k8s lab/apps` (a red badge for a `prod` context) | `kubectl config view --minify`, else the kubeconfig text |
 | Agent of an `--agent` session | `@reviewer` | the classic hook input's `agent_type` |
 | Session name (italic), output style, when room is left | `refactor auth`  `✎ Explanatory` | transcript title, else the session's title; the `outputStyle` row of `/config` (a style chosen in the session is there, not in a settings file), else settings |
-| Open PRs (MRs) and issues, at 120 columns and up | `⑂ 7 ⊙ 23` (`≈` marks counts that could not be refreshed for 30 minutes) | `gh api graphql` / `glab api` |
 
 Row 2, context and harness:
 
@@ -36,7 +36,15 @@ Row 2, context and harness:
 | Spend limit of a gateway | `spend ━━── 40%` | the same |
 | Cache | `◔ 99% w 59m ⊘2`: `w` (green) while warm, with the time left; `◔ 99% c` (blue) once cold | the transcript's cache reads, writes and inputs, and the cache lifetime its last response wrote (5m or 1h) |
 | Cost | `$88.25` | `$.session.usage().cost` |
-| Session time / API time | `14h17m/4h50m` | `startedAt`; API time summed over main-loop requests |
+| Session time / API time | `14h17m/4h50m` | `startedAt`; API time as below |
+
+API time is the time spent waiting for API responses over the whole session, the figure the
+terminal's own status line input carries as `total_api_duration_ms`. The engine API does not expose
+it, but Claude Code saves its running totals in the transcript as `cost-state` entries
+(`totalAPIDuration`, `totalLinesAdded`, `totalLinesRemoved`), at session start and resume. The mod
+takes the latest of these and adds the main-loop requests it timed after it. A session with no such
+entry yet counts the requests this mod has timed. The per-turn `turn_duration` entries are wall time
+including tools, so they are not used.
 
 The pace marks read as in the script: the bar's tick is the share of the window elapsed; `(+2)`
 is usage points ahead of the clock (green behind, plain on pace, yellow or red ahead); `↻` is the
@@ -44,10 +52,10 @@ time to the reset; `▲22m` is when the limit is hit at the average pace so far 
 pace ends 10% or more over); `■` means the limit is reached. Bars run green, yellow, red.
 
 What does not fit is dropped, least important first, and the rest widen into richer forms. On
-row 1 the order of dropping is: agent, PR badge, kube context (kept longer when it is a `prod`
-context), fast mode, folder and the PR/issue counts, then lines changed, then the worktree and
-branch; the model is never dropped. Session name and output style are drawn only in width left
-over.
+row 1 the PR/issue counts, the session name and the output style are drawn only in width left over,
+the counts last, so on a short row they go first. Then the order of dropping is: agent, PR badge,
+kube context (kept longer when it is a `prod` context), fast mode, folder, lines changed, then the
+worktree and branch; the model is never dropped.
 
 A segment whose data fails is left out and named by its source at the end of row 1, dim:
 `✗kube`, `✗git`, `✗transcript`, `✗forge`, and so on for any source or segment. So a screenshot
@@ -115,8 +123,10 @@ to `dark` (or keep `auto` with `STATUSLINE_THEME=dark` in the environment).
 
 ## Differences from the script
 
-- Lines added and removed sit on row 1 beside the git segment; the script puts them at the end of
-  row 2.
+- Row 1 runs model, folder, worktree, branch, its PR, the PR/issue counts, lines changed, kube,
+  agent, session name and style; the script puts the counts at the far right of row 1 and the lines
+  at the end of row 2.
+- The folder is always shown; the script hid it when it matched the worktree's name.
 - The width is the band's own width; the script used the terminal's columns less 4.
 - Vim mode is not shown: the engine exposes neither the vim setting's current mode nor the prompt's
   state.
@@ -124,9 +134,11 @@ to `dark` (or keep `auto` with `STATUSLINE_THEME=dark` in the environment).
 - Cache misses count main-loop responses after the first that wrote the cache without reading any;
   the terminal's own counter is not exposed, so the number can differ from what the script showed
   there.
-- API time and the cache, lines and title figures are rebuilt from the transcript and the requests
-  this mod sees: API time starts from zero when the mod loads mid-session; the transcript ones
-  are complete once the transcript has been read (4 MiB per refresh).
+- API time and the cache, lines and title figures are rebuilt from the transcript (the engine's
+  last cost snapshot and what follows it) and the requests this mod times; they are complete once
+  the transcript has been read (4 MiB per refresh). Requests made between the last snapshot and the
+  mod's load, as after a mid-session reload of the mod, are not counted.
+- `✗ctxwin` marks a context window that could not be resolved (settings unreadable or no model id).
 - Symbols replace the script's words: `⎇`/`⌥` before branch and worktree (no `wt:`), `⑂ n ⊙ n` for
   the PR and issue counts (no `PRs`), `◔` for the cache, with `w` or `c` for warm or cold (no `cold`).
 - Failures are named on row 1 for every source, not only kube and forge on row 2.

@@ -2,7 +2,7 @@ import type { EngineInterface as Engine, Register, SessionUsage, Timer } from 'c
 
 import type { Config, Forge, GitInfo, Palette, Pr, Span, Style, ThemeHints, Transcript, View } from './segments'
 import {
-  absorbChunk, buildRows, cacheFrom, effectiveWindow, emptyTranscript, GH_QUERY, ICONS, kubeFromTexts, modelName, noctaliaPalette, PALETTES,
+  absorbChunk, buildRows, cacheFrom, effectiveWindow, sessionTotals, emptyTranscript, GH_QUERY, ICONS, kubeFromTexts, modelName, noctaliaPalette, PALETTES,
   parseConfig, parseGhCounts, parseGhPr, parseGlabMr, parseKubectl, parseNumstat, parsePorcelain, parseRemote, parseWorktree,
   pickTheme, providerFor, rule, systemDark, transcriptPath,
 } from './segments'
@@ -61,7 +61,7 @@ type Snap = {
   forgeDataAt: number
   forgeError: { at: number } | null
   unsupported: Map<string, number>
-  tx: { path: string; offset: number; s: Transcript; caughtUp: boolean } | null
+  tx: { path: string; offset: number; s: Transcript; caughtUp: boolean; apiAtSnapshot: number } | null
   hints: ThemeHints
   noctalia: Palette | null
   noColor: boolean
@@ -304,12 +304,16 @@ async function refreshTranscript($: Engine, s: Snap): Promise<void> {
   // A new session names its transcript before the first message writes it: nothing to read yet, not a failure.
   if (!path || !(await $.fs.exists(path))) return
   const st = await $.fs.stat(path)
-  if (!s.tx || s.tx.path !== path || st.size < s.tx.offset) s.tx = { path, offset: 0, s: emptyTranscript(), caughtUp: false }
+  if (!s.tx || s.tx.path !== path || st.size < s.tx.offset) s.tx = { path, offset: 0, s: emptyTranscript(), caughtUp: false, apiAtSnapshot: 0 }
   const tx = s.tx
   if (tx.offset < st.size) {
     const res = await $.process.run(['tail', '-c', `+${tx.offset + 1}`, path], { timeoutMs: TRANSCRIPT_TIMEOUT_MS })
     if (res.exitCode !== 0) throw new Error('tail failed')
+    const before = tx.s.snapshots
     const used = absorbChunk(tx.s, res.stdout)
+    // A snapshot read in the first catch-up predates every request this mod timed; one written while it runs
+    // already holds what was timed until then.
+    if (tx.s.snapshots !== before) tx.apiAtSnapshot = tx.caughtUp ? s.apiMs : 0
     // A single line longer than one read can never complete: skip what was read.
     tx.offset += used === 0 && res.isStdoutTruncated ? st.size - tx.offset : used
   }
@@ -402,7 +406,10 @@ function view(s: Snap, now: number): View {
   const u = s.usage
   const t = s.tx?.caughtUp ? s.tx.s : null
   const partial = s.tx?.s ?? null
-  const sessionLines = t && t.added + t.removed > 0 ? { added: t.added, removed: t.removed, session: true } : null
+  const totals = t && s.tx ? sessionTotals(t, s.apiMs, s.tx.apiAtSnapshot) : null
+  const sessionLines = totals && totals.added + totals.removed > 0 ? { added: totals.added, removed: totals.removed, session: true } : null
+  // The window lookup needs the model id and the settings; without either the ctx denominator may be wrong.
+  const ctxwin = s.cfg.ctxWindow === 'auto' && (s.sources.has('settings') || s.sources.has('env') || !s.model) ? ['ctxwin'] : []
   return {
     now,
     model: s.model ? modelName(s.model) : null,
@@ -424,10 +431,10 @@ function view(s: Snap, now: number): View {
     limits: u?.rateLimits ?? [],
     costUsd: u?.cost?.usd ?? null,
     durationMs: u ? now - u.startedAt : null,
-    apiMs: s.apiMs,
+    apiMs: totals?.apiMs ?? s.apiMs,
     cache: t ? cacheFrom(t, now) : null,
     lines: sessionLines ?? (s.diff ? { ...s.diff, session: false } : null),
-    failed: [...s.shown, ...s.sources],
+    failed: [...s.shown, ...s.sources, ...ctxwin],
   }
 }
 
