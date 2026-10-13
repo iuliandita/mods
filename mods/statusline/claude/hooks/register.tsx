@@ -3,7 +3,7 @@ import type { EngineInterface as Engine, Register, SessionUsage, Timer } from 'c
 import type { Config, Forge, GitInfo, Palette, Pr, Span, Style, ThemeHints, Transcript, View } from './segments'
 import {
   absorbChunk, buildRows, iconSet, PACE_TICK, PENDING_DEADLINE_MS, pendingFor, cacheFrom, effectiveWindow, sessionTotals, emptyTranscript, GH_QUERY, ICONS, kubeFromTexts, modelName, noctaliaPalette, PALETTES,
-  parseConfig, parseGhCounts, parseGhPr, parseGlabMr, parseKubectl, parseNumstat, parsePorcelain, parseRemote, parseWorktree,
+  parseConfig, storedOptions, parseGhCounts, parseGhPr, parseGlabMr, parseKubectl, parseNumstat, parsePorcelain, parseRemote, parseWorktree,
   pickTheme, providerFor, rule, systemDark, transcriptPath,
 } from './segments'
 
@@ -32,6 +32,7 @@ type Target = { provider: 'github' | 'gitlab'; host: string; path: string }
 
 type Snap = {
   cfg: Config
+  options: Record<string, unknown> // as register received them
   model: string | null
   effort: string | null
   cwd: string | null
@@ -422,6 +423,10 @@ async function refresh($: Engine, s: Snap): Promise<void> {
       s.settingsEffort = typeof set.effortLevel === 'string' ? set.effortLevel : null
       // The merged settings carry both window keys; only these two are kept.
       s.windowSettings = { autoCompactWindow: set.autoCompactWindow, modelSettings: set.modelSettings }
+      // The options as settings.json stores them, over the ones register was given: Claude Desktop has been seen
+      // drawing the band without the user's options (icons: nerd drawn as unicode).
+      const stored = storedOptions(set.pluginConfigs, $.plugin.name)
+      if (stored) s.cfg = parseConfig({ ...s.options, ...stored })
       if (!s.agent && typeof set.agent === 'string') s.agent = set.agent
     }).then(() =>
       // The style in force is the /config row: a style chosen in the session lives there, not in a settings file.
@@ -524,7 +529,7 @@ export const register: Register = (on, options) => {
   if (cfg.mode === 'off') return
 
   const s: Snap = {
-    cfg, model: null, effort: null, cwd: null, root: null, sessionId: null, transcriptPath: null, agent: null, sessionTitle: null,
+    cfg, options, model: null, effort: null, cwd: null, root: null, sessionId: null, transcriptPath: null, agent: null, sessionTitle: null,
     outputStyle: null, settingsEffort: null, windowSettings: {}, windowEnv: null, usage: null, git: null, worktree: null, diff: null, gitAt: 0, slowUntil: 0,
     kube: null, kubeSig: '', kubeError: null, remote: null, sshHosts: new Map(), target: null, pr: null, prAt: 0, prKey: '',
     forge: null, forgeAt: 0, forgeDataAt: 0, forgeError: null, unsupported: new Map(), tx: null, txChecked: false, txSearch: null,
@@ -611,12 +616,12 @@ export const register: Register = (on, options) => {
     const now = await nowMs($)
     // The band appears once, whole: it waits for the first pass of every source (at most 1.5 seconds), so row
     // one does not grow segment by segment.
-    if (cfg.placeholders && !s.firstPass) return next(e)
+    if (s.cfg.placeholders && !s.firstPass) return next(e)
     // The script lays a row out in the terminal's columns less 4; the band's own width is already net of the
     // engine's marks, so it is the whole budget here.
     const cols = (e.props.bodyColumns > 0 ? e.props.bodyColumns : 100) + 4
     const st = styleFor(s, e.surface)
-    const rows = buildRows(st, view(s, now), cols, cfg.rows)
+    const rows = buildRows(st, view(s, now), cols, s.cfg.rows)
     if (!rows.length) return next(e)
     // Other mods' bands stack above this one; the status line sits next to the prompt, under its rule on the
     // terminal. Desktop draws its own edge above the band, so no rule there.

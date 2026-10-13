@@ -5,7 +5,7 @@ import type { Arrival, Part, Style, View } from './segments'
 import {
   absorbChunk, bar, buildRows, c, cacheFrom, clean, effectiveWindow, emptyTranscript, sessionTotals, fmtTokens, humanize, ICONS, kubeFromTexts, levelColor, modelName,
   noctaliaPalette, PALETTES, parseConfig, parseGhCounts, parseGhPr, parseGlabMr, parseKubectl, parseNumstat, parsePorcelain,
-  iconSet, parseRemote, parseWorktree, partWidth, pendingFor, pickTheme, plain, providerFor, roundEven, systemDark,
+  iconSet, parseRemote, parseWorktree, partWidth, pendingFor, storedOptions, pickTheme, plain, providerFor, roundEven, systemDark,
 } from './segments'
 
 const NOW = Date.parse('2026-01-01T00:00:00Z')
@@ -276,7 +276,7 @@ test('symbols instead of words, in both icon sets, for worktree, branch, kube, P
   const nerd = text(ICONS.nerd)
   for (const part of ['  wt1 ', '  feat/x ', '\u{f10fe} lab', ' 3  4', ' 94% w 3m']) expect(nerd).toContain(part)
   const uni = text(ICONS.unicode)
-  for (const part of [' ⌥ wt1 ', ' ⎇ feat/x ', '📁 repo', '☸ lab', '⑂ 3 ⊙ 4', '◔ 94% w 3m']) expect(uni).toContain(part)
+  for (const part of [' ⌥ wt1 ', ' ⎇ feat/x ', '\u{1f5bf} repo', '☸\ufe0e lab', '⑂ 3 ⊙ 4', '◔ 94% w 3m']) expect(uni).toContain(part)
   for (const word of ['wt:', 'PRs', 'MRs', 'cache']) {
     expect(nerd).not.toContain(word)
     expect(uni).not.toContain(word)
@@ -376,7 +376,8 @@ test('session totals: requests that ran before the mod loaded, after the last sn
 // ---- the hooks, through the test kit ----
 
 // A transcript under another project folder than the session's root names: a session resumed elsewhere.
-type Ctl = { kube: 'ok' | 'fail'; settings?: 'fail'; fresh?: boolean; transcript?: string; remote?: string }
+// stored: settings.json pluginConfigs, as $.settings.read() returns them.
+type Ctl = { kube: 'ok' | 'fail'; settings?: 'fail'; fresh?: boolean; transcript?: string; remote?: string; stored?: Record<string, unknown> }
 const ELSEWHERE = '/u/.claude/projects/-elsewhere/sid.jsonl'
 const ok = (stdout: string, exitCode = 0, stderr = '') => ({ value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false } }) as never
 
@@ -394,7 +395,7 @@ function engine(on: On, ctl: Ctl = { kube: 'ok' }) {
     ? { startedAt: NOW, context: { window: 200_000 }, rateLimits: [] }
     : { startedAt: NOW - 2 * H, context: { tokens: 1000, window: 200_000, percent: 1 }, rateLimits: [{ kind: 'five_hour', percentUsed: 36, resetsAt: new Date(NOW + 3 * H).toISOString() }], cost: { usd: 1.5 } }
   on('session.usage', () => ({ value: usage }) as never)
-  on('settings.read', () => (ctl.settings === 'fail' ? { deny: 'unreadable' } : { value: {} }) as never)
+  on('settings.read', () => (ctl.settings === 'fail' ? { deny: 'unreadable' } : { value: ctl.stored ? { pluginConfigs: ctl.stored } : {} }) as never)
   on('config.list', () => ({ value: [{ key: 'outputStyle', label: 'Output style', kind: 'enum', value: 'Explanatory', provider: { plugin: 'engine', tier: 'core' } }] }) as never)
   on('env.get', (_$, e) => ({ value: (e as { name: string }).name === 'HOME' ? '/u' : undefined }) as never)
   const size = ctl.transcript === undefined ? 0 : new TextEncoder().encode(ctl.transcript).length
@@ -453,8 +454,8 @@ test('mode on draws two rows and no blank row, under a rule on the terminal only
     expect(rows[0]).toContain('◆ Opus 5.5')
     expect(rows[0]).toContain('✎ Explanatory')
     expect(rows[0]).toContain(' ⎇ develop ')
-    expect(rows[0]).toContain('☸ lab')
-    expect(rows[0]).toContain('📁 repo')
+    expect(rows[0]).toContain('☸\ufe0e lab')
+    expect(rows[0]).toContain('\u{1f5bf} repo')
     expect(rows[1]).toContain('ctx')
     for (const r of all) expect(r.trim()).not.toBe('')
   }
@@ -481,7 +482,7 @@ async function bothSurfaces($: Engine, bodyColumns: number) {
 
 const SAME: [string, string[]][] = [
   ['nerd', [' develop', ' repo', '\u{f10fe} lab', ' 3  12']],
-  ['unicode', ['⎇ develop', '📁 repo', '☸ lab', '⑂ 3 ⊙ 12']],
+  ['unicode', ['⎇ develop', '\u{1f5bf} repo', '☸\ufe0e lab', '⑂ 3 ⊙ 12']],
 ]
 for (const [icons, marks] of SAME) {
   test(`icons: ${icons} draws the same glyphs in the terminal and in Desktop, the pace tick included`, { options: { icons } }, async ($, on) => {
@@ -495,6 +496,43 @@ for (const [icons, marks] of SAME) {
     expect(terminal[1]).not.toContain('┃')
   })
 }
+
+test('the unicode set has no colour emoji: no Emoji_Presentation code point, and an emoji-capable one asks for text', () => {
+  const glyphs = Object.values(ICONS.unicode).join('')
+  expect(glyphs).not.toMatch(/\p{Emoji_Presentation}/u)
+  for (const g of Object.values(ICONS.unicode)) {
+    const chars = [...g.trim()]
+    if (chars.some((ch) => /\p{Extended_Pictographic}/u.test(ch))) expect(chars.at(-1)).toBe('︎')
+  }
+})
+
+test("stored options: this plugin's pluginConfigs entry, only when exactly one is its", () => {
+  const nerd = { options: { icons: 'nerd' } }
+  expect(storedOptions({ 'statusline@iuliandita-mods': nerd, 'other@x': { options: { icons: 'ascii' } } }, 'statusline')).toEqual({ icons: 'nerd' })
+  expect(storedOptions({ statusline: nerd }, 'statusline')).toEqual({ icons: 'nerd' })
+  expect(storedOptions({ 'statusline@a': nerd, 'statusline@b': nerd }, 'statusline')).toBeNull()
+  expect(storedOptions({ 'statuslines@a': nerd }, 'statusline')).toBeNull()
+  for (const bad of [null, undefined, 'x', { 'statusline@a': null }, { 'statusline@a': { options: [] } }]) expect(storedOptions(bad, 'statusline')).toBeNull()
+})
+
+const NERD_MARKS = [' develop', ' repo', '\u{f10fe} lab']
+
+// The option given to register (the engine's path), and the same option only in settings.json while register gets
+// none (what Claude Desktop was seen doing): both draw Nerd glyphs in Desktop.
+test('Desktop with icons: nerd given to register draws the Nerd glyphs', { options: { icons: 'nerd' } }, async ($, on) => {
+  const { clock } = engine(on)
+  await started($, clock)
+  const { desktop } = await bothSurfaces($, 140)
+  for (const mark of NERD_MARKS) expect(desktop[0]).toContain(mark)
+})
+
+test('Desktop with icons: nerd only in settings.json pluginConfigs draws the Nerd glyphs', async ($, on) => {
+  const { clock } = engine(on, { kube: 'ok', stored: { 'statusline@iuliandita-mods': { options: { icons: 'nerd', forge: 'on' } } } })
+  await started($, clock)
+  const { desktop, terminal } = await bothSurfaces($, 140)
+  for (const mark of NERD_MARKS) expect(desktop[0]).toContain(mark)
+  expect(terminal).toEqual(desktop)
+})
 
 test('Desktop shows the forge counts in a repository on GitHub, also under 120 columns', async ($, on) => {
   const { clock, runs } = engine(on, { kube: 'ok', remote: 'https://github.com/owner/repo.git' })
@@ -537,7 +575,7 @@ test('a new session draws placeholders for what its first response brings, all a
   await started($, clock)
   const { rows } = await mount($, 'terminal')
   expect(rows[1]).toContain(' ⎇ develop ')
-  expect(rows[1]).toContain('☸ lab')
+  expect(rows[1]).toContain('☸\ufe0e lab')
   expect(rows[2]).toBe('ctx ────────────── -- │ 5h ────────── -- │ 7d ────────── -- │ ◔ -- │ $-- │ --')
 })
 

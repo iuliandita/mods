@@ -117,12 +117,21 @@ terminal and the web view draw it with different fonts.
 
 | Glyph | `unicode` (default) | `nerd` | `ascii` |
 | --- | --- | --- | --- |
-| folder | `📁` | U+F07B | none |
+| folder | `🖿` (U+1F5BF, a flat folder; not the colour emoji) | U+F07B | none |
 | branch | `⎇` | U+E0A0 | none |
 | worktree | `⌥` | U+F1BB | `wt:` |
-| kube | `☸` | U+F10FE | `k8s` |
+| kube | `☸` (with U+FE0E, text style) | U+F10FE | `k8s` |
 | PRs, issues | `⑂` `⊙` | U+F407, U+F41B | `pr` `iss` |
 | cache | `◔` | U+F1C0 | `cache` |
+
+If Desktop shows the wrong glyphs (for example the unicode set while `icons` is `nerd`): the mod
+reads its options from two places, what Claude Code hands it at load and its entry under
+`pluginConfigs` in `settings.json` (`statusline@iuliandita-mods`), and the stored entry wins from the
+first refresh on. A Desktop session was seen drawing the unicode set with `icons: nerd` stored, while
+the same engine handed the option over in every other way it was run, so the mod no longer depends on
+the first. If it still happens, check that only one `statusline@...` entry exists under
+`pluginConfigs` (with two, neither is used), and restart the Desktop session: a session keeps the mod
+version it started with. Nerd glyphs in Desktop need a Nerd Font installed on the system.
 
 What differs by surface: the rule above the rows (terminal only; Desktop draws its own edge), and
 the PR/issue counts, which on Desktop are not held back to 120 columns (the band is usually
@@ -206,7 +215,7 @@ to `dark` (or keep `auto` with `STATUSLINE_THEME=dark` in the environment).
 - `✗ctxwin` marks a context window that could not be resolved (settings unreadable or no model id).
 - Symbols replace the script's words: `⎇`/`⌥` before branch and worktree (no `wt:`), `⑂ n ⊙ n` for
   the PR and issue counts (no `PRs`), `◔` for the cache, with `w` or `c` for warm or cold (no `cold`),
-  `📁` before the folder and `☸` before the kube context in the `unicode` set.
+  `🖿` before the folder and `☸` before the kube context in the `unicode` set.
 - The pace tick is `●` in the terminal too (the script drew `┃` there and `●` only in Desktop).
 - Failures are named on row 1 for every source, not only kube and forge on row 2.
 
