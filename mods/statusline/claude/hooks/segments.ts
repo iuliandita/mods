@@ -19,25 +19,24 @@ export const PALETTES: Record<'dark' | 'light' | 'neutral', Palette> = {
 
 // Symbols, not words: the worktree, branch, PR and issue counts and the cache each get a glyph in both sets.
 export type Icons = { branch: string; folder: string; tree: string; kube: string; pr: string; issue: string; cache: string }
-export type IconSet = 'nerd' | 'unicode' | 'web' | 'ascii'
+export type IconSet = 'nerd' | 'unicode' | 'ascii'
 export const ICONS: Record<IconSet, Icons> = {
   nerd: { branch: ' ', folder: ' ', tree: ' ', kube: '\u{f10fe} ', pr: ' ', issue: ' ', cache: ' ' },
-  unicode: { branch: '⎇ ', folder: '', tree: '⌥ ', kube: 'k8s ', pr: '⑂ ', issue: '⊙ ', cache: '◔ ' },
-  // Claude Desktop is a web view without a patched font: standard symbols only, no private-use code points.
-  web: { branch: '⎇ ', folder: '📁 ', tree: '⌥ ', kube: '☸ ', pr: '⑂ ', issue: '◉ ', cache: '◔ ' },
+  // Standard Unicode symbols only, no private-use code points: they render without a patched font, in a terminal
+  // and in Claude Desktop's web view alike.
+  unicode: { branch: '⎇ ', folder: '📁 ', tree: '⌥ ', kube: '☸ ', pr: '⑂ ', issue: '⊙ ', cache: '◔ ' },
   ascii: { branch: '', folder: '', tree: 'wt:', kube: 'k8s ', pr: 'pr ', issue: 'iss ', cache: 'cache ' },
 }
 
-// The `icons` option on a surface: auto is unicode on the terminal and web on Desktop, where nerd glyphs do not
-// render either; unicode and ascii are kept everywhere.
-export function iconSet(option: Config['icons'], surface: string): IconSet {
-  if (surface === 'desktop') return option === 'auto' || option === 'nerd' ? 'web' : option
-  return option === 'auto' ? 'unicode' : option
-}
+// The `icons` option, the same on every surface: auto is unicode, safe where no Nerd Font is installed; nerd is
+// Nerd Font glyphs in the terminal and in Desktop alike.
+export const iconSet = (option: Config['icons']): IconSet => (option === 'auto' ? 'unicode' : option)
 
-// How a row is painted: the palette, the icon set, the pace tick (Desktop lines are taller, where ┃ would look
-// like a cursor) and NO_COLOR, which keeps bold, italic and faint only. `desktop`: the row is laid out in a web
-// view, where the forge counts are not held back to 120 columns.
+// The pace tick in the limit bars, on both surfaces: a dot, which a taller Desktop line cannot turn into a cursor.
+export const PACE_TICK = '●'
+
+// How a row is painted: the palette, the icon set, the pace tick and NO_COLOR, which keeps bold, italic and faint
+// only. `desktop`: the row is laid out in a web view, where the forge counts are not held back to 120 columns.
 export type Style = { P: Palette; glyph: Icons; tick: string; noColor: boolean; desktop?: boolean }
 
 export type Config = {

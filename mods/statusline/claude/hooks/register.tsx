@@ -2,7 +2,7 @@ import type { EngineInterface as Engine, Register, SessionUsage, Timer } from 'c
 
 import type { Config, Forge, GitInfo, Palette, Pr, Span, Style, ThemeHints, Transcript, View } from './segments'
 import {
-  absorbChunk, buildRows, iconSet, PENDING_DEADLINE_MS, pendingFor, cacheFrom, effectiveWindow, sessionTotals, emptyTranscript, GH_QUERY, ICONS, kubeFromTexts, modelName, noctaliaPalette, PALETTES,
+  absorbChunk, buildRows, iconSet, PACE_TICK, PENDING_DEADLINE_MS, pendingFor, cacheFrom, effectiveWindow, sessionTotals, emptyTranscript, GH_QUERY, ICONS, kubeFromTexts, modelName, noctaliaPalette, PALETTES,
   parseConfig, parseGhCounts, parseGhPr, parseGlabMr, parseKubectl, parseNumstat, parsePorcelain, parseRemote, parseWorktree,
   pickTheme, providerFor, rule, systemDark, transcriptPath,
 } from './segments'
@@ -505,7 +505,7 @@ function styleFor(s: Snap, surface: string): Style {
   const available = (t: string) => t === 'dark' || t === 'light' || t === 'neutral' || (t === 'noctalia' && s.noctalia !== null)
   const theme = s.cfg.theme !== 'auto' && available(s.cfg.theme) ? s.cfg.theme : pickTheme(surface, s.hints, available)
   const P = theme === 'noctalia' ? (s.noctalia ?? PALETTES.neutral) : PALETTES[theme]
-  return { P, glyph: ICONS[iconSet(s.cfg.icons, surface)], tick: surface === 'terminal' ? '┃' : '●', noColor: s.noColor, desktop: surface === 'desktop' }
+  return { P, glyph: ICONS[iconSet(s.cfg.icons)], tick: PACE_TICK, noColor: s.noColor, desktop: surface === 'desktop' }
 }
 
 // Classic hook inputs carry what the engine's own calls do not: the transcript's path, the main thread's agent

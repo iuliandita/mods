@@ -23,7 +23,7 @@ Row 1, the repository and the session:
 | The branch's PR or MR | `#12 ✓`, `!87 ●` | `gh pr list` / `glab api` |
 | Open PRs (MRs) and issues, at 120 columns and up | `⑂ 7 ⊙ 23` (`≈` marks counts that could not be refreshed for 30 minutes) | `gh api graphql` / `glab api` |
 | Lines added and removed in the session | `+412 -87` | the engine's own totals as its last `cost-state` entry in the transcript saved them, plus edit and write results after it; `Δ+21 -6` (uncommitted lines, `git diff --numstat HEAD`) until the session has changed any |
-| Kube context and namespace | `k8s lab/apps` (a red badge for a `prod` context) | `kubectl config view --minify`, else the kubeconfig text |
+| Kube context and namespace | `☸ lab/apps` (a red badge for a `prod` context) | `kubectl config view --minify`, else the kubeconfig text |
 | Agent of an `--agent` session | `@reviewer` | the classic hook input's `agent_type` |
 | Session name (italic), output style, when room is left | `refactor auth`  `✎ Explanatory` | transcript title, else the session's title; the `outputStyle` row of `/config` (a style chosen in the session is there, not in a settings file), else settings |
 
@@ -32,7 +32,7 @@ Row 2, context and harness:
 | Segment | Example | Source |
 | --- | --- | --- |
 | Context | `ctx ━━━━━━━── 66% 340k/512k >200k` | `$.session.usage().context`, measured against the auto-compact window (below) |
-| 5h and 7d limits | `5h ━━┃── 28% (+2) ↻3h19m ▲22m` | `$.session.usage().rateLimits` |
+| 5h and 7d limits | `5h ━━●── 28% (+2) ↻3h19m ▲22m` | `$.session.usage().rateLimits` |
 | Spend limit of a gateway | `spend ━━── 40%` | the same |
 | Cache | `◔ 99% w 59m ⊘2`: `w` (green) while warm, with the time left; `◔ 99% c` (blue) once cold | the transcript's cache reads, writes and inputs, and the cache lifetime its last response wrote (5m or 1h) |
 | Cost | `$88.25` | `$.session.usage().cost` |
@@ -108,11 +108,25 @@ earlier behaviour, each segment appearing when its data does.
 
 ## Claude Desktop
 
-Desktop is a web view without Nerd Fonts, so `icons: auto` (the default) and `nerd` use standard
-symbols there: `📁` folder, `☸` kube, `⎇` branch, `⌥` worktree, `⑂` PRs, `◉` issues, `◔` cache.
-`unicode` and `ascii` are kept as chosen. The PR/issue counts are not held back to 120 columns on
-Desktop, where the band is usually reported narrower than it looks; they are dropped only when the
-row is full.
+The band draws the same symbols in the terminal and in Desktop: the `icons` set applies to both,
+and every other mark (the bars, the pace tick `●`, `↻`, `▲`, `■`, `◆`, `▰▱`, `✎`, `Δ`, `⊘`, `≈`)
+is the same character on both. For identical symbols everywhere, set `icons: nerd` when a Nerd Font
+is installed (Desktop's web view finds it through the system's font fallback), else keep the
+default (`unicode`). A character can still look slightly different on the two surfaces, because the
+terminal and the web view draw it with different fonts.
+
+| Glyph | `unicode` (default) | `nerd` | `ascii` |
+| --- | --- | --- | --- |
+| folder | `📁` | U+F07B | none |
+| branch | `⎇` | U+E0A0 | none |
+| worktree | `⌥` | U+F1BB | `wt:` |
+| kube | `☸` | U+F10FE | `k8s` |
+| PRs, issues | `⑂` `⊙` | U+F407, U+F41B | `pr` `iss` |
+| cache | `◔` | U+F1C0 | `cache` |
+
+What differs by surface: the rule above the rows (terminal only; Desktop draws its own edge), and
+the PR/issue counts, which on Desktop are not held back to 120 columns (the band is usually
+reported narrower than it looks there) and are dropped only when the row is full.
 
 Absent by design in a new session: lines changed (none yet), time (under a minute, shown as `--`),
 and the API part (none timed yet). Desktop runs Claude Code with the login shell's `PATH`, so
@@ -124,9 +138,8 @@ and the API part (none timed yet). Desktop runs Claude Code with the login shell
 - `rows`: `2` (default) or `1`, everything in one row.
 - `forge`: `on` (default) or `off`. See Egress.
 - `forgeHosts`: extra forge hosts, `host=github` or `host=gitlab`, comma-separated.
-- `icons`: `auto` (default: `unicode` in the terminal, Desktop symbols in Desktop), `unicode`,
-  `nerd` (Nerd Font glyphs in the terminal, the script's default; Desktop symbols in Desktop) or
-  `ascii` (words only).
+- `icons`: `auto` (default, `unicode`), `unicode`, `nerd` (Nerd Font glyphs, the script's
+  default) or `ascii` (words only); the same set on both surfaces. See "Claude Desktop".
 - `placeholders`: `on` (default) or `off`. See Loading.
 - `theme`: `auto` (default), `dark`, `light`, `neutral` or `noctalia`.
 - `refreshSeconds`: 5 to 3600 (default 30). Each finished turn refreshes too.
@@ -192,7 +205,9 @@ to `dark` (or keep `auto` with `STATUSLINE_THEME=dark` in the environment).
   mod's load, as after a mid-session reload of the mod, are not counted.
 - `✗ctxwin` marks a context window that could not be resolved (settings unreadable or no model id).
 - Symbols replace the script's words: `⎇`/`⌥` before branch and worktree (no `wt:`), `⑂ n ⊙ n` for
-  the PR and issue counts (no `PRs`), `◔` for the cache, with `w` or `c` for warm or cold (no `cold`).
+  the PR and issue counts (no `PRs`), `◔` for the cache, with `w` or `c` for warm or cold (no `cold`),
+  `📁` before the folder and `☸` before the kube context in the `unicode` set.
+- The pace tick is `●` in the terminal too (the script drew `┃` there and `●` only in Desktop).
 - Failures are named on row 1 for every source, not only kube and forge on row 2.
 
 ## Egress

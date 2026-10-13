@@ -10,7 +10,9 @@ import {
 
 const NOW = Date.parse('2026-01-01T00:00:00Z')
 const H = 3600_000
-const neutral = (tick = '┃'): Style => ({ P: PALETTES.neutral, glyph: ICONS.unicode, tick, noColor: false })
+// The script's unicode words for the folder and kube (none and k8s): the parity rows compare against its output.
+const SCRIPT_GLYPHS = { ...ICONS.unicode, folder: '', kube: 'k8s ' }
+const neutral = (tick = '┃'): Style => ({ P: PALETTES.neutral, glyph: SCRIPT_GLYPHS, tick, noColor: false })
 
 test('config: defaults (forge on), every option, and out-of-range refresh', () => {
   expect(parseConfig({})).toEqual({ mode: 'on', rows: 2, forge: true, forgeHosts: {}, icons: 'auto', theme: 'auto', refreshMs: 30_000, ctxWindow: 'auto', placeholders: true })
@@ -274,7 +276,7 @@ test('symbols instead of words, in both icon sets, for worktree, branch, kube, P
   const nerd = text(ICONS.nerd)
   for (const part of ['  wt1 ', '  feat/x ', '\u{f10fe} lab', ' 3  4', ' 94% w 3m']) expect(nerd).toContain(part)
   const uni = text(ICONS.unicode)
-  for (const part of [' ⌥ wt1 ', ' ⎇ feat/x ', 'k8s lab', '⑂ 3 ⊙ 4', '◔ 94% w 3m']) expect(uni).toContain(part)
+  for (const part of [' ⌥ wt1 ', ' ⎇ feat/x ', '📁 repo', '☸ lab', '⑂ 3 ⊙ 4', '◔ 94% w 3m']) expect(uni).toContain(part)
   for (const word of ['wt:', 'PRs', 'MRs', 'cache']) {
     expect(nerd).not.toContain(word)
     expect(uni).not.toContain(word)
@@ -390,7 +392,7 @@ function engine(on: On, ctl: Ctl = { kube: 'ok' }) {
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   const usage = ctl.fresh
     ? { startedAt: NOW, context: { window: 200_000 }, rateLimits: [] }
-    : { startedAt: NOW - 2 * H, context: { tokens: 1000, window: 200_000, percent: 1 }, rateLimits: [], cost: { usd: 1.5 } }
+    : { startedAt: NOW - 2 * H, context: { tokens: 1000, window: 200_000, percent: 1 }, rateLimits: [{ kind: 'five_hour', percentUsed: 36, resetsAt: new Date(NOW + 3 * H).toISOString() }], cost: { usd: 1.5 } }
   on('session.usage', () => ({ value: usage }) as never)
   on('settings.read', () => (ctl.settings === 'fail' ? { deny: 'unreadable' } : { value: {} }) as never)
   on('config.list', () => ({ value: [{ key: 'outputStyle', label: 'Output style', kind: 'enum', value: 'Explanatory', provider: { plugin: 'engine', tier: 'core' } }] }) as never)
@@ -451,30 +453,57 @@ test('mode on draws two rows and no blank row, under a rule on the terminal only
     expect(rows[0]).toContain('◆ Opus 5.5')
     expect(rows[0]).toContain('✎ Explanatory')
     expect(rows[0]).toContain(' ⎇ develop ')
-    expect(rows[0]).toContain(surface === 'terminal' ? 'k8s lab' : '☸ lab')
-    expect(rows[0]).toContain(surface === 'terminal' ? 'repo' : '📁 repo')
+    expect(rows[0]).toContain('☸ lab')
+    expect(rows[0]).toContain('📁 repo')
     expect(rows[1]).toContain('ctx')
     for (const r of all) expect(r.trim()).not.toBe('')
   }
 })
 
-test('icons: auto is unicode on the terminal and web on Desktop, nerd falls back to web there, the rest stay', () => {
-  expect(['auto', 'nerd', 'unicode', 'ascii'].map((o) => iconSet(o as never, 'terminal'))).toEqual(['unicode', 'nerd', 'unicode', 'ascii'])
-  expect(['auto', 'nerd', 'unicode', 'ascii'].map((o) => iconSet(o as never, 'desktop'))).toEqual(['web', 'web', 'unicode', 'ascii'])
-  // No private-use code points in the Desktop set.
-  expect(Object.values(ICONS.web).join('')).not.toMatch(/[\u{e000}-\u{f8ff}\u{f0000}-\u{10ffff}]/u)
+test('icons: one set on every surface; auto is unicode, nerd is nerd, unicode and ascii stay', () => {
+  expect(['auto', 'nerd', 'unicode', 'ascii'].map((o) => iconSet(o as never))).toEqual(['unicode', 'nerd', 'unicode', 'ascii'])
+  // The default set has no private-use code points, so it renders without a Nerd Font, Desktop included.
+  expect(Object.values(ICONS.unicode).join('')).not.toMatch(/[\u{e000}-\u{f8ff}\u{f0000}-\u{10ffff}]/u)
 })
 
-test('Desktop shows the forge counts in a repository on GitHub, also under 120 columns', { options: { icons: 'nerd' } }, async ($, on) => {
+// The rows under the rule, on each surface, at the same width.
+async function bothSurfaces($: Engine, bodyColumns: number) {
+  const out = { terminal: [] as string[], desktop: [] as string[] }
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const props = { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns, scroll: { offset: 0, bodyRows: 10 } }
+    const ui = await $.ui.mount({ plugin: 'statusline', surface, component: 'AbovePrompt', props: props as never, viewport: { columns: bodyColumns + 5, rows: 30 } })
+    const rows = (await ui.findAll({ type: 'Box' })).filter((b) => b.key?.startsWith('row-')).map((b) => b.text)
+    await ui.unmount()
+    out[surface] = surface === 'terminal' ? rows.slice(1) : rows
+  }
+  return out
+}
+
+const SAME: [string, string[]][] = [
+  ['nerd', [' develop', ' repo', '\u{f10fe} lab', ' 3  12']],
+  ['unicode', ['⎇ develop', '📁 repo', '☸ lab', '⑂ 3 ⊙ 12']],
+]
+for (const [icons, marks] of SAME) {
+  test(`icons: ${icons} draws the same glyphs in the terminal and in Desktop, the pace tick included`, { options: { icons } }, async ($, on) => {
+    const { clock } = engine(on, { kube: 'ok', remote: 'https://github.com/owner/repo.git' })
+    await started($, clock)
+    await clock.advance(1_000)
+    const { terminal, desktop } = await bothSurfaces($, 140)
+    expect(desktop).toEqual(terminal)
+    for (const mark of marks) expect(terminal[0]).toContain(mark)
+    expect(terminal[1]).toContain('●')
+    expect(terminal[1]).not.toContain('┃')
+  })
+}
+
+test('Desktop shows the forge counts in a repository on GitHub, also under 120 columns', async ($, on) => {
   const { clock, runs } = engine(on, { kube: 'ok', remote: 'https://github.com/owner/repo.git' })
   await started($, clock)
   await clock.advance(1_000)
-  const props = { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100, scroll: { offset: 0, bodyRows: 10 } }
-  const ui = await $.ui.mount({ plugin: 'statusline', surface: 'desktop', component: 'AbovePrompt', props: props as never, viewport: { columns: 105, rows: 30 } })
-  const rows = (await ui.findAll({ type: 'Box' })).filter((b) => b.key?.startsWith('row-')).map((b) => b.text)
-  await ui.unmount()
+  const { terminal, desktop } = await bothSurfaces($, 100)
   expect(runs.some((a) => a[0] === 'gh' && a.includes('graphql'))).toBe(true)
-  expect(rows[0]).toContain('⑂ 3 ◉ 12')
+  expect(desktop[0]).toContain('⑂ 3 ⊙ 12')
+  expect(terminal[0]).not.toContain('⑂')
 })
 
 test('plugin options reach the mod: nerd icons and one row', { options: { icons: 'nerd', rows: '1', forge: 'off' } }, async ($, on) => {
@@ -508,7 +537,7 @@ test('a new session draws placeholders for what its first response brings, all a
   await started($, clock)
   const { rows } = await mount($, 'terminal')
   expect(rows[1]).toContain(' ⎇ develop ')
-  expect(rows[1]).toContain('k8s lab')
+  expect(rows[1]).toContain('☸ lab')
   expect(rows[2]).toBe('ctx ────────────── -- │ 5h ────────── -- │ 7d ────────── -- │ ◔ -- │ $-- │ --')
 })
 
