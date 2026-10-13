@@ -19,24 +19,37 @@ export const PALETTES: Record<'dark' | 'light' | 'neutral', Palette> = {
 
 // Symbols, not words: the worktree, branch, PR and issue counts and the cache each get a glyph in both sets.
 export type Icons = { branch: string; folder: string; tree: string; kube: string; pr: string; issue: string; cache: string }
-export const ICONS: Record<'nerd' | 'unicode', Icons> = {
+export type IconSet = 'nerd' | 'unicode' | 'web' | 'ascii'
+export const ICONS: Record<IconSet, Icons> = {
   nerd: { branch: ' ', folder: ' ', tree: ' ', kube: '\u{f10fe} ', pr: ' ', issue: ' ', cache: ' ' },
   unicode: { branch: '⎇ ', folder: '', tree: '⌥ ', kube: 'k8s ', pr: '⑂ ', issue: '⊙ ', cache: '◔ ' },
+  // Claude Desktop is a web view without a patched font: standard symbols only, no private-use code points.
+  web: { branch: '⎇ ', folder: '📁 ', tree: '⌥ ', kube: '☸ ', pr: '⑂ ', issue: '◉ ', cache: '◔ ' },
+  ascii: { branch: '', folder: '', tree: 'wt:', kube: 'k8s ', pr: 'pr ', issue: 'iss ', cache: 'cache ' },
+}
+
+// The `icons` option on a surface: auto is unicode on the terminal and web on Desktop, where nerd glyphs do not
+// render either; unicode and ascii are kept everywhere.
+export function iconSet(option: Config['icons'], surface: string): IconSet {
+  if (surface === 'desktop') return option === 'auto' || option === 'nerd' ? 'web' : option
+  return option === 'auto' ? 'unicode' : option
 }
 
 // How a row is painted: the palette, the icon set, the pace tick (Desktop lines are taller, where ┃ would look
-// like a cursor) and NO_COLOR, which keeps bold, italic and faint only.
-export type Style = { P: Palette; glyph: Icons; tick: string; noColor: boolean }
+// like a cursor) and NO_COLOR, which keeps bold, italic and faint only. `desktop`: the row is laid out in a web
+// view, where the forge counts are not held back to 120 columns.
+export type Style = { P: Palette; glyph: Icons; tick: string; noColor: boolean; desktop?: boolean }
 
 export type Config = {
   mode: 'off' | 'on'
   rows: 1 | 2
   forge: boolean
   forgeHosts: Record<string, 'github' | 'gitlab'>
-  icons: 'nerd' | 'unicode'
+  icons: 'auto' | 'nerd' | 'unicode' | 'ascii'
   theme: 'auto' | ThemeName
   refreshMs: number
   ctxWindow: 'auto' | 'full'
+  placeholders: boolean
 }
 
 export function parseHosts(text: unknown): Record<string, 'github' | 'gitlab'> {
@@ -56,10 +69,11 @@ export function parseConfig(o: Record<string, unknown>): Config {
     rows: String(o.rows) === '1' ? 1 : 2,
     forge: o.forge !== 'off',
     forgeHosts: parseHosts(o.forgeHosts),
-    icons: o.icons === 'nerd' ? 'nerd' : 'unicode',
+    icons: o.icons === 'nerd' || o.icons === 'unicode' || o.icons === 'ascii' ? o.icons : 'auto',
     theme: theme === 'dark' || theme === 'light' || theme === 'neutral' || theme === 'noctalia' ? theme : 'auto',
     refreshMs: Number.isFinite(secs) && secs > 0 ? Math.min(3600, Math.max(5, Math.round(secs))) * 1000 : 30_000,
     ctxWindow: o.ctxWindow === 'full' ? 'full' : 'auto',
+    placeholders: o.placeholders !== 'off',
   }
 }
 
@@ -252,10 +266,13 @@ export type View = {
   limits: Limit[]
   costUsd: number | null
   durationMs: number | null
-  apiMs: number
+  // null: not known (a resumed session whose transcript holds no saved total yet); never drawn as 0.
+  apiMs: number | null
   cache: PromptCache | null
   lines: { added: number; removed: number; session: boolean } | null
   failed: string[]
+  // Segments whose data has not arrived yet; each draws a dim placeholder of its usual width (see pendingFor).
+  pending?: string[]
 }
 
 // ---- segments, as the script builds them ----
@@ -451,11 +468,65 @@ export function cacheSeg(st: Style, pc: PromptCache | null, nowS: number): Seg {
 
 export const costSeg = (st: Style, usd: number | null): Seg => (usd ? seg('cost', 5, [c(st, null, `$${usd.toFixed(2)}`)]) : none('cost'))
 
-export function timeSeg(st: Style, durationMs: number | null, apiMs: number): Seg {
+// The API part: the known total (under a minute as <1m, never 0m), `--` while pending, else left out.
+export function timeSeg(st: Style, durationMs: number | null, apiMs: number | null, apiPending = false): Seg {
   if (!durationMs || durationMs < 60_000) return none('time')
   const wall = humanize(durationMs / 1000)
-  const api = apiMs ? `/${humanize(apiMs / 1000)}` : ''
+  const api = apiMs ? `/${apiMs < 60_000 ? '<1m' : humanize(apiMs / 1000)}` : apiPending ? '/--' : ''
   return seg('time', 4, [c(st, st.P.DIM, wall + api), c(st, st.P.DIM, wall)])
+}
+
+// ---- loading ----
+
+// What the band knows about its sources while they load (see pendingFor).
+export type Arrival = {
+  enabled: boolean // the placeholders option
+  waiting: boolean // within the deadline after the mod loaded
+  responded: boolean // the engine has reported the session's first API response (context tokens, cost or limits)
+  transcript: 'none' | 'reading' | 'done' // none: no transcript file yet (a new session)
+  forgeExpected: boolean // a forge remote whose counts have not been answered yet
+}
+export const PENDING_DEADLINE_MS = 10_000
+
+// The segments that are still on their way, each drawn as a dim placeholder until its data comes. A segment
+// whose source has answered and has nothing to show (no repository, no limits on this plan) is not pending.
+// - ctx, 5h, 7d, cost: the engine has them only after the session's first API response; they wait for it with
+//   no deadline, and the limits that are still missing after it (an API-key plan has none) are dropped.
+// - time: under a minute of session time is drawn as `--`.
+// - api, cache: read from the transcript; pending while it is being read (until the deadline), and in a new
+//   session until the first response writes it. A resumed session shows the transcript's figures as soon as
+//   they are read: the hit ratio over its past requests and, from the last response's time, whether the cache
+//   is still warm.
+// - forge: until gh/glab answer or the deadline passes; a failure shows as ✗forge.
+export function pendingFor(a: Arrival, v: View): string[] {
+  if (!a.enabled) return []
+  const out: string[] = []
+  if (!a.responded) {
+    if (!v.context || v.context.tokens === undefined) out.push('ctx')
+    for (const [label, kind] of WINDOWS) if (!v.limits.some((l) => l.kind === kind)) out.push(label)
+    if (!v.costUsd) out.push('cost')
+  }
+  if (!v.durationMs || v.durationMs < 60_000) out.push('time')
+  const fromTranscript = (a.transcript === 'reading' && a.waiting) || (!a.responded && a.transcript === 'none')
+  if (fromTranscript && !v.apiMs) out.push('api')
+  if (fromTranscript && !v.cache) out.push('cache')
+  if (a.forgeExpected && a.waiting && !v.forge) out.push('forge')
+  return out
+}
+
+// A pending segment's stand-in: dim, the shape of the real one, at the same priority.
+export function placeholderSeg(st: Style, name: string): Seg {
+  const P = st.P
+  const dim = (t: string) => c(st, P.DIM, t)
+  const track = (w: number) => c(st, P.TRACK, '─'.repeat(w))
+  const window = WINDOWS.find(([label]) => label === name)
+  if (window) return seg(name, window[3], [10, 8, 6, 4].map((w) => join(dim(name), track(w), dim('--'))))
+  if (name === 'ctx') return ctxSeg(st, { window: 0 })
+  if (name === 'cost') return seg('cost', 5, [dim('$--')])
+  if (name === 'time') return seg('time', 4, [dim('--')])
+  if (name === 'cache') return seg('cache', 4, [join(dim(st.glyph.cache.trim()), dim('--'))])
+  if (name === 'forge') return seg('forge', 8, [join(dim(st.glyph.pr.trim()), dim('--'), dim(st.glyph.issue.trim()), dim('--'))])
+  return none(name)
 }
 
 // The session's own line counts when known; otherwise uncommitted lines in the working tree, marked Δ.
@@ -478,6 +549,12 @@ export function buildRows(st: Style, v: View, cols: number, rows: 1 | 2 = 2, lin
       return none(name)
     }
   }
+  // A source that failed shows its ✗name, never a placeholder.
+  const pend = new Set((v.pending ?? []).filter((n) => !failed.includes(n)))
+  const slot = (name: string, build: () => Seg): Seg => {
+    const s = safe(name, build)
+    return s.forms.length || !pend.has(name) ? s : placeholderSeg(st, name)
+  }
   const P = st.P
   const budget = cols - 4
   const nowS = v.now / 1000
@@ -495,7 +572,7 @@ export function buildRows(st: Style, v: View, cols: number, rows: 1 | 2 = 2, lin
   const agent = v.agent ? [seg('agent', 4, [c(st, P.YELLOW, `@${clip(clean(v.agent), 24)}`)])] : []
   // The repository's PR and issue counts, from 120 columns. In the owner's layout they sit right after the
   // branch and its PR, as garnish: on a short row they go before kube, the session name and the style.
-  const forge = cols < FORGE_MIN_COLS ? [] : [safe('forge', () => forgeSeg(st, v.forge))]
+  const forge = cols < FORGE_MIN_COLS && !st.desktop ? [] : [slot('forge', () => forgeSeg(st, v.forge))]
   if (linesRow === 1) {
     lines.prio = 8.5
     for (const f of forge) Object.assign(f, { optional: true, prio: 3.5 })
@@ -516,14 +593,14 @@ export function buildRows(st: Style, v: View, cols: number, rows: 1 | 2 = 2, lin
   const tail = linesRow === 1 ? [] : forge
 
   const budgets = [
-    safe('ctx', () => ctxSeg(st, v.context)),
-    ...WINDOWS.map(([label, kind, window, prio]) => safe(label, () => limitSeg(st, label, limit(kind), window, prio, nowS))),
+    slot('ctx', () => ctxSeg(st, v.context)),
+    ...WINDOWS.map(([label, kind, window, prio]) => slot(label, () => limitSeg(st, label, limit(kind), window, prio, nowS))),
     safe('spend', () => spendSeg(st, limit('spend_limit'), nowS)),
   ]
   const stats = [
-    safe('cache', () => cacheSeg(st, v.cache, nowS)),
-    safe('cost', () => costSeg(st, v.costUsd)),
-    safe('time', () => timeSeg(st, v.durationMs, v.apiMs)),
+    slot('cache', () => cacheSeg(st, v.cache, nowS)),
+    slot('cost', () => costSeg(st, v.costUsd)),
+    slot('time', () => timeSeg(st, v.durationMs, v.apiMs, pend.has('api'))),
     ...(linesRow === 2 ? [lines] : []),
   ]
   // Every source or segment that failed, as a dim ✗name at the end of row 1, so a screenshot says why a
@@ -679,15 +756,20 @@ export type Transcript = {
   // The engine's own running totals, as its latest `cost-state` entry saved them; `snapshots` counts them.
   snapshot: { apiMs: number; linesAdded: number; linesRemoved: number } | null
   snapshots: number
+  // API requests since the last snapshot (or the start): ones from before this mod loaded were never timed.
+  sinceSnapshot: number
 }
-export const emptyTranscript = (): Transcript => ({ title: null, effort: null, fast: false, ts: null, ttl: 300, recent: [], requests: 0, read: 0, create: 0, input: 0, misses: 0, added: 0, removed: 0, snapshot: null, snapshots: 0 })
+export const emptyTranscript = (): Transcript => ({ title: null, effort: null, fast: false, ts: null, ttl: 300, recent: [], requests: 0, read: 0, create: 0, input: 0, misses: 0, added: 0, removed: 0, snapshot: null, snapshots: 0, sinceSnapshot: 0 })
 
 // Session totals for the status line: the engine's last snapshot plus what came after it (lines from the
 // transcript, API time from the requests this mod timed since the snapshot was read); without a snapshot,
-// the transcript's lines and the mod's own API time.
-export function sessionTotals(t: Transcript, liveApiMs: number, apiAtSnapshot: number): { apiMs: number; added: number; removed: number } {
-  if (!t.snapshot) return { apiMs: liveApiMs, added: t.added, removed: t.removed }
-  return { apiMs: t.snapshot.apiMs + Math.max(0, liveApiMs - apiAtSnapshot), added: t.snapshot.linesAdded + t.added, removed: t.snapshot.linesRemoved + t.removed }
+// the transcript's lines and the mod's own API time. `untimed` counts requests after the last snapshot that
+// ran before this mod loaded (a resumed session with no saved total, or one that ended without saving): their
+// API time is unknown, so the total is null rather than a figure lower than the truth.
+export function sessionTotals(t: Transcript, liveApiMs: number, apiAtSnapshot: number, untimed = 0): { apiMs: number | null; added: number; removed: number } {
+  const known = untimed <= 0
+  if (!t.snapshot) return { apiMs: known ? liveApiMs : null, added: t.added, removed: t.removed }
+  return { apiMs: known ? t.snapshot.apiMs + Math.max(0, liveApiMs - apiAtSnapshot) : null, added: t.snapshot.linesAdded + t.added, removed: t.snapshot.linesRemoved + t.removed }
 }
 
 type Obj = Record<string, unknown>
@@ -716,6 +798,7 @@ export function absorb(s: Transcript, line: string): void {
     const create = num(usage.cache_creation_input_tokens)
     if (s.requests > 0 && read === 0 && create > 0) s.misses++
     s.requests++
+    s.sinceSnapshot++
     s.read += read
     s.create += create
     s.input += num(usage.input_tokens)
@@ -723,6 +806,7 @@ export function absorb(s: Transcript, line: string): void {
     // Cumulative, as the terminal's status line input has them (total_api_duration_ms, total_lines_*).
     s.snapshot = { apiMs: num(entry.totalAPIDuration), linesAdded: num(entry.totalLinesAdded), linesRemoved: num(entry.totalLinesRemoved) }
     s.snapshots++
+    s.sinceSnapshot = 0
     s.added = 0
     s.removed = 0
   } else if (kind === 'user' && entry.toolUseResult && typeof entry.toolUseResult === 'object') {

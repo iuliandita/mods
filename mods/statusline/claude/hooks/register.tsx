@@ -2,7 +2,7 @@ import type { EngineInterface as Engine, Register, SessionUsage, Timer } from 'c
 
 import type { Config, Forge, GitInfo, Palette, Pr, Span, Style, ThemeHints, Transcript, View } from './segments'
 import {
-  absorbChunk, buildRows, cacheFrom, effectiveWindow, sessionTotals, emptyTranscript, GH_QUERY, ICONS, kubeFromTexts, modelName, noctaliaPalette, PALETTES,
+  absorbChunk, buildRows, iconSet, PENDING_DEADLINE_MS, pendingFor, cacheFrom, effectiveWindow, sessionTotals, emptyTranscript, GH_QUERY, ICONS, kubeFromTexts, modelName, noctaliaPalette, PALETTES,
   parseConfig, parseGhCounts, parseGhPr, parseGlabMr, parseKubectl, parseNumstat, parsePorcelain, parseRemote, parseWorktree,
   pickTheme, providerFor, rule, systemDark, transcriptPath,
 } from './segments'
@@ -24,6 +24,9 @@ const FORGE_ERROR_MS = 600_000
 const UNSUPPORTED_MS = 3_600_000
 const THEME_TTL_MS = 300_000
 const TRANSCRIPT_TIMEOUT_MS = 3_000
+const TRANSCRIPT_BUDGET_MS = 5_000
+const TRANSCRIPT_SEARCH_MS = 60_000
+const FIRST_PASS_WAIT_MS = 1_500
 
 type Target = { provider: 'github' | 'gitlab'; host: string; path: string }
 
@@ -61,7 +64,13 @@ type Snap = {
   forgeDataAt: number
   forgeError: { at: number } | null
   unsupported: Map<string, number>
-  tx: { path: string; offset: number; s: Transcript; caughtUp: boolean; apiAtSnapshot: number } | null
+  // untimed: requests after the last snapshot that ran before this mod loaded, fixed when the first read ends.
+  tx: { path: string; offset: number; s: Transcript; caughtUp: boolean; apiAtSnapshot: number; untimed: number | null } | null
+  txChecked: boolean
+  txSearch: { id: string; at: number; path: string | null } | null
+  loadAt: number
+  firstPass: boolean
+  steps: number
   hints: ThemeHints
   noctalia: Palette | null
   noColor: boolean
@@ -291,33 +300,66 @@ async function refreshKube($: Engine, s: Snap): Promise<void> {
   }
 }
 
-// Folds what was appended to the session transcript since the last read: effort, fast mode, the session's
-// title, cache totals and lines changed. Read with `tail -c +N`, at most 4 MiB a time, so a long transcript
-// is caught up over several refreshes.
-async function refreshTranscript($: Engine, s: Snap): Promise<void> {
-  let path = s.transcriptPath
-  if (!path && s.root && s.sessionId) {
-    const dir = (await $.env.get('CLAUDE_CONFIG_DIR')) || `${(await $.env.get('HOME')) ?? ''}/.claude`
+// The session's transcript: the path the classic hooks name, else under the config dir in the folder named after
+// the project root, else (a session resumed from or moved to another folder keeps its transcript where it
+// started) the folder that holds a file named after the session id, looked for at most once a minute.
+async function findTranscript($: Engine, s: Snap): Promise<string | null> {
+  if (s.transcriptPath) return s.transcriptPath
+  if (!s.sessionId) return null
+  const dir = (await $.env.get('CLAUDE_CONFIG_DIR')) || `${(await $.env.get('HOME')) ?? ''}/.claude`
+  if (s.root) {
     const guess = transcriptPath(dir, s.root, s.sessionId)
-    if (await $.fs.exists(guess)) path = guess
+    if (await $.fs.exists(guess)) return guess
   }
-  // A new session names its transcript before the first message writes it: nothing to read yet, not a failure.
-  if (!path || !(await $.fs.exists(path))) return
-  const st = await $.fs.stat(path)
-  if (!s.tx || s.tx.path !== path || st.size < s.tx.offset) s.tx = { path, offset: 0, s: emptyTranscript(), caughtUp: false, apiAtSnapshot: 0 }
-  const tx = s.tx
-  if (tx.offset < st.size) {
-    const res = await $.process.run(['tail', '-c', `+${tx.offset + 1}`, path], { timeoutMs: TRANSCRIPT_TIMEOUT_MS })
-    if (res.exitCode !== 0) throw new Error('tail failed')
-    const before = tx.s.snapshots
-    const used = absorbChunk(tx.s, res.stdout)
-    // A snapshot read in the first catch-up predates every request this mod timed; one written while it runs
-    // already holds what was timed until then.
-    if (tx.s.snapshots !== before) tx.apiAtSnapshot = tx.caughtUp ? s.apiMs : 0
-    // A single line longer than one read can never complete: skip what was read.
-    tx.offset += used === 0 && res.isStdoutTruncated ? st.size - tx.offset : used
+  const now = await nowMs($)
+  const prev = s.txSearch
+  if (prev && prev.id === s.sessionId && (prev.path || now - prev.at < TRANSCRIPT_SEARCH_MS)) return prev.path
+  const search: NonNullable<Snap['txSearch']> = { id: s.sessionId, at: now, path: null }
+  s.txSearch = search
+  // No projects folder yet is no transcript yet.
+  const entries = await $.fs.list(`${dir}/projects`).catch(() => [])
+  for (const entry of entries) {
+    const p = `${dir}/projects/${entry.name}/${s.sessionId}.jsonl`
+    if (entry.kind === 'dir' && (await $.fs.exists(p))) {
+      search.path = p
+      break
+    }
   }
-  tx.caughtUp = tx.offset >= st.size
+  return search.path
+}
+
+// Folds what was appended to the session transcript since the last read: effort, fast mode, the session's
+// title, cache totals and lines changed. Read with `tail -c +N`, at most 4 MiB a time, read after read for up
+// to 5 seconds, so a long transcript of a resumed session is caught up on the first pass.
+async function refreshTranscript($: Engine, s: Snap): Promise<void> {
+  try {
+    const path = await findTranscript($, s)
+    // A new session names its transcript before the first message writes it: nothing to read yet, not a failure.
+    if (!path || !(await $.fs.exists(path))) return
+    const st = await $.fs.stat(path)
+    if (!s.tx || s.tx.path !== path || st.size < s.tx.offset) s.tx = { path, offset: 0, s: emptyTranscript(), caughtUp: false, apiAtSnapshot: 0, untimed: null }
+    const tx = s.tx
+    const start = await nowMs($)
+    while (tx.offset < st.size) {
+      const res = await $.process.run(['tail', '-c', `+${tx.offset + 1}`, path], { timeoutMs: TRANSCRIPT_TIMEOUT_MS })
+      if (res.exitCode !== 0) throw new Error('tail failed')
+      const before = tx.s.snapshots
+      const used = absorbChunk(tx.s, res.stdout)
+      // A snapshot read in the first catch-up predates every request this mod timed; one written while it runs
+      // already holds what was timed until then.
+      if (tx.s.snapshots !== before) tx.apiAtSnapshot = tx.untimed !== null ? s.apiMs : 0
+      // A single line longer than one read can never complete: skip what was read. A half-written last line
+      // waits for the next refresh.
+      if (used === 0 && !res.isStdoutTruncated) break
+      tx.offset += used === 0 ? st.size - tx.offset : used
+      if ((await nowMs($)) - start > TRANSCRIPT_BUDGET_MS) break
+    }
+    // Once the first read reaches the end, the figures stand; later appends are folded refresh by refresh.
+    if (tx.offset >= st.size && tx.untimed === null) tx.untimed = Math.max(0, tx.s.sinceSnapshot - s.steps)
+    tx.caughtUp = tx.untimed !== null
+  } finally {
+    s.txChecked = true
+  }
 }
 
 async function refreshTheme($: Engine, s: Snap): Promise<void> {
@@ -365,35 +407,49 @@ async function refreshTheme($: Engine, s: Snap): Promise<void> {
   }
 }
 
+// The engine's own answers and the local probes (git and its forge, kube, the transcript, the theme) start on
+// the same pass, each as soon as what it needs is known, so the first full band is ready about a second after
+// load.
 async function refresh($: Engine, s: Snap): Promise<void> {
-  await job(s, 'cwd', async () => void (s.cwd = await $.session.cwd()))
-  await job(s, 'model', async () => void (s.model = await $.session.model()))
-  await job(s, 'usage', async () => void (s.usage = await $.session.usage()))
-  await job(s, 'root', async () => void (s.root = await $.session.root()))
-  await job(s, 'id', async () => void (s.sessionId = await $.session.id()))
-  await job(s, 'settings', async () => {
-    const set = await $.settings.read()
-    s.outputStyle = typeof set.outputStyle === 'string' ? set.outputStyle : null
-    s.settingsEffort = typeof set.effortLevel === 'string' ? set.effortLevel : null
-    // The merged settings carry both window keys; only these two are kept.
-    s.windowSettings = { autoCompactWindow: set.autoCompactWindow, modelSettings: set.modelSettings }
-    if (!s.agent && typeof set.agent === 'string') s.agent = set.agent
-  })
-  await job(s, 'env', async () => void (s.windowEnv = (await $.env.get('CLAUDE_CODE_AUTO_COMPACT_WINDOW')) ?? null))
-  // The style in force is the /config row: a style chosen in the session lives there, not in a settings file.
-  await job(s, 'config', async () => {
-    const row = (await $.config.list()).find((r) => r.key === 'outputStyle')
-    if (row && typeof row.value === 'string') s.outputStyle = row.value
-  })
-  redraw($)
   const now = await nowMs($)
-  const slow: Promise<void>[] = [
+  if (!s.loadAt) s.loadAt = now
+  const session = Promise.all([
+    job(s, 'model', async () => void (s.model = await $.session.model())),
+    job(s, 'usage', async () => void (s.usage = await $.session.usage())),
+    job(s, 'settings', async () => {
+      const set = await $.settings.read()
+      s.outputStyle = typeof set.outputStyle === 'string' ? set.outputStyle : null
+      s.settingsEffort = typeof set.effortLevel === 'string' ? set.effortLevel : null
+      // The merged settings carry both window keys; only these two are kept.
+      s.windowSettings = { autoCompactWindow: set.autoCompactWindow, modelSettings: set.modelSettings }
+      if (!s.agent && typeof set.agent === 'string') s.agent = set.agent
+    }).then(() =>
+      // The style in force is the /config row: a style chosen in the session lives there, not in a settings file.
+      job(s, 'config', async () => {
+        const row = (await $.config.list()).find((r) => r.key === 'outputStyle')
+        if (row && typeof row.value === 'string') s.outputStyle = row.value
+      }),
+    ),
+    job(s, 'env', async () => void (s.windowEnv = (await $.env.get('CLAUDE_CODE_AUTO_COMPACT_WINDOW')) ?? null)),
+  ])
+  const local = Promise.all([
     job(s, 'theme', () => refreshTheme($, s)),
-    job(s, 'transcript', () => refreshTranscript($, s)),
     job(s, 'kube', () => refreshKube($, s)),
-  ]
-  if (now - s.gitAt > GIT_TTL_MS) slow.push(job(s, 'git', () => refreshGit($, s)).then(() => job(s, 'forge', () => refreshForge($, s))))
-  await Promise.all(slow)
+    Promise.all([
+      job(s, 'root', async () => void (s.root = await $.session.root())),
+      job(s, 'id', async () => void (s.sessionId = await $.session.id())),
+    ]).then(() => job(s, 'transcript', () => refreshTranscript($, s))),
+    job(s, 'cwd', async () => void (s.cwd = await $.session.cwd())).then(() =>
+      now - s.gitAt > GIT_TTL_MS ? job(s, 'git', () => refreshGit($, s)).then(() => job(s, 'forge', () => refreshForge($, s))) : undefined,
+    ),
+  ])
+  await session
+  if (s.firstPass) redraw($)
+  // The first band waits for this pass, at most 1.5 seconds; a slower probe fills in when it answers.
+  if (!s.firstPass) await Promise.race([local, $.clock.sleep(FIRST_PASS_WAIT_MS).catch(() => {})])
+  s.firstPass = true
+  redraw($)
+  await local
   redraw($)
 }
 
@@ -406,11 +462,14 @@ function view(s: Snap, now: number): View {
   const u = s.usage
   const t = s.tx?.caughtUp ? s.tx.s : null
   const partial = s.tx?.s ?? null
-  const totals = t && s.tx ? sessionTotals(t, s.apiMs, s.tx.apiAtSnapshot) : null
+  const totals = t && s.tx ? sessionTotals(t, s.apiMs, s.tx.apiAtSnapshot, s.tx.untimed ?? 0) : null
+  // Until the transcript has been read through, the API total is unknown: the mod's own timing alone would
+  // understate a resumed session.
+  const transcript = !s.txChecked || (s.tx && !s.tx.caughtUp) ? 'reading' : s.tx ? 'done' : 'none'
   const sessionLines = totals && totals.added + totals.removed > 0 ? { added: totals.added, removed: totals.removed, session: true } : null
   // The window lookup needs the model id and the settings; without either the ctx denominator may be wrong.
   const ctxwin = s.cfg.ctxWindow === 'auto' && (s.sources.has('settings') || s.sources.has('env') || !s.model) ? ['ctxwin'] : []
-  return {
+  const v: View = {
     now,
     model: s.model ? modelName(s.model) : null,
     effort: s.effort ?? partial?.effort ?? s.settingsEffort,
@@ -431,18 +490,22 @@ function view(s: Snap, now: number): View {
     limits: u?.rateLimits ?? [],
     costUsd: u?.cost?.usd ?? null,
     durationMs: u ? now - u.startedAt : null,
-    apiMs: totals?.apiMs ?? s.apiMs,
+    apiMs: totals ? totals.apiMs : transcript === 'reading' ? null : s.apiMs,
     cache: t ? cacheFrom(t, now) : null,
     lines: sessionLines ?? (s.diff ? { ...s.diff, session: false } : null),
     failed: [...s.shown, ...s.sources, ...ctxwin],
   }
+  const responded = v.context?.tokens !== undefined || !!v.costUsd
+  const forgeExpected = s.cfg.forge && !!s.target && !s.forge && !s.forgeError
+  v.pending = pendingFor({ enabled: s.cfg.placeholders, waiting: now - s.loadAt < PENDING_DEADLINE_MS, responded, transcript, forgeExpected }, v)
+  return v
 }
 
 function styleFor(s: Snap, surface: string): Style {
   const available = (t: string) => t === 'dark' || t === 'light' || t === 'neutral' || (t === 'noctalia' && s.noctalia !== null)
   const theme = s.cfg.theme !== 'auto' && available(s.cfg.theme) ? s.cfg.theme : pickTheme(surface, s.hints, available)
   const P = theme === 'noctalia' ? (s.noctalia ?? PALETTES.neutral) : PALETTES[theme]
-  return { P, glyph: ICONS[s.cfg.icons], tick: surface === 'terminal' ? '┃' : '●', noColor: s.noColor }
+  return { P, glyph: ICONS[iconSet(s.cfg.icons, surface)], tick: surface === 'terminal' ? '┃' : '●', noColor: s.noColor, desktop: surface === 'desktop' }
 }
 
 // Classic hook inputs carry what the engine's own calls do not: the transcript's path, the main thread's agent
@@ -464,7 +527,8 @@ export const register: Register = (on, options) => {
     cfg, model: null, effort: null, cwd: null, root: null, sessionId: null, transcriptPath: null, agent: null, sessionTitle: null,
     outputStyle: null, settingsEffort: null, windowSettings: {}, windowEnv: null, usage: null, git: null, worktree: null, diff: null, gitAt: 0, slowUntil: 0,
     kube: null, kubeSig: '', kubeError: null, remote: null, sshHosts: new Map(), target: null, pr: null, prAt: 0, prKey: '',
-    forge: null, forgeAt: 0, forgeDataAt: 0, forgeError: null, unsupported: new Map(), tx: null,
+    forge: null, forgeAt: 0, forgeDataAt: 0, forgeError: null, unsupported: new Map(), tx: null, txChecked: false, txSearch: null,
+    loadAt: 0, firstPass: false, steps: 0,
     hints: { env: null, terminalEnv: null, colorFgBg: null, desktopMode: null, systemDark: null }, noctalia: null, noColor: false,
     themeAt: 0, apiMs: 0, shown: new Set(), sources: new Set(), busy: new Set(), timer: null,
   }
@@ -481,10 +545,17 @@ export const register: Register = (on, options) => {
 
   on('classic.SessionStart', async ($, e, next) => {
     try {
-      // /clear and resume start another transcript.
-      s.tx = null
-      s.transcriptPath = null
-      s.sessionTitle = null
+      // /clear and /resume switch to another transcript, and the API time this mod timed belonged to the one
+      // before. The start of the session names the transcript already being read: keep what was read.
+      const path = typeof e.transcript_path === 'string' ? e.transcript_path : null
+      if (!e.agent_id && path !== (s.tx?.path ?? s.transcriptPath)) {
+        s.tx = null
+        s.txChecked = false
+        s.transcriptPath = null
+        s.sessionTitle = null
+        s.apiMs = 0
+        s.steps = 0
+      }
       noteClassic(s, e)
     } catch {
       // fail soft
@@ -520,7 +591,10 @@ export const register: Register = (on, options) => {
     }
     const result = yield* next(e)
     try {
-      if (t0) s.apiMs += Math.max(0, (await nowMs($)) - t0)
+      if (t0) {
+        s.apiMs += Math.max(0, (await nowMs($)) - t0)
+        s.steps++
+      }
     } catch {
       // fail soft
     }
@@ -530,16 +604,22 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     if (!s.usage && !s.model) {
-      kick($, s)
+      // A refresh already under way (from session.start) fills the snapshot; only a missed start kicks here.
+      if (!s.timer) kick($, s)
       return next(e)
     }
+    const now = await nowMs($)
+    // The band appears once, whole: it waits for the first pass of every source (at most 1.5 seconds), so row
+    // one does not grow segment by segment.
+    if (cfg.placeholders && !s.firstPass) return next(e)
     // The script lays a row out in the terminal's columns less 4; the band's own width is already net of the
     // engine's marks, so it is the whole budget here.
     const cols = (e.props.bodyColumns > 0 ? e.props.bodyColumns : 100) + 4
     const st = styleFor(s, e.surface)
-    const rows = buildRows(st, view(s, await nowMs($)), cols, cfg.rows)
+    const rows = buildRows(st, view(s, now), cols, cfg.rows)
     if (!rows.length) return next(e)
-    // Other mods' bands stack above this one; the status line sits next to the prompt, under its rule.
+    // Other mods' bands stack above this one; the status line sits next to the prompt, under its rule on the
+    // terminal. Desktop draws its own edge above the band, so no rule there.
     const below = await next(e)
     const { Box, Text } = $.ui.resolve(e)
     const text = (sp: Span, i: number) => (
@@ -548,7 +628,7 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column">
         {below ?? null}
-        {[rule(st, cols - 4), ...rows].map((row, r) => (
+        {[...(e.surface === 'terminal' ? [rule(st, cols - 4)] : []), ...rows].map((row, r) => (
           <Box key={`row-${r}`} flexDirection="row">{row.map(text)}</Box>
         ))}
       </Box>
