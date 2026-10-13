@@ -24,7 +24,9 @@ export const ICONS: Record<IconSet, Icons> = {
   nerd: { branch: ' ', folder: ' ', tree: ' ', kube: '\u{f10fe} ', pr: ' ', issue: ' ', cache: ' ' },
   // Standard Unicode symbols only, no private-use code points: they render without a patched font, in a terminal
   // and in Claude Desktop's web view alike.
-  unicode: { branch: '⎇ ', folder: '📁 ', tree: '⌥ ', kube: '☸ ', pr: '⑂ ', issue: '⊙ ', cache: '◔ ' },
+  // Monochrome text symbols, none a colour emoji: U+1F5BF BLACK FOLDER (flat, like the Nerd folder) has no emoji
+  // property; ☸ has one with text presentation by default, and U+FE0E asks for text explicitly.
+  unicode: { branch: '⎇ ', folder: '\u{1f5bf} ', tree: '⌥ ', kube: '☸︎ ', pr: '⑂ ', issue: '⊙ ', cache: '◔ ' },
   ascii: { branch: '', folder: '', tree: 'wt:', kube: 'k8s ', pr: 'pr ', issue: 'iss ', cache: 'cache ' },
 }
 
@@ -74,6 +76,15 @@ export function parseConfig(o: Record<string, unknown>): Config {
     ctxWindow: o.ctxWindow === 'full' ? 'full' : 'auto',
     placeholders: o.placeholders !== 'off',
   }
+}
+
+// This plugin's options as settings.json stores them (`pluginConfigs["<name>@<marketplace>"].options`), when
+// exactly one entry is this plugin's; with none or several there is nothing certain to fall back on.
+export function storedOptions(pluginConfigs: unknown, name: string): Record<string, unknown> | null {
+  if (!pluginConfigs || typeof pluginConfigs !== 'object') return null
+  const mine = Object.entries(pluginConfigs as Record<string, unknown>).filter(([k]) => k === name || k.startsWith(`${name}@`))
+  const opts = mine.length === 1 ? (mine[0]?.[1] as { options?: unknown } | null)?.options : null
+  return opts && typeof opts === 'object' && !Array.isArray(opts) ? (opts as Record<string, unknown>) : null
 }
 
 // ---- numbers and text as Python prints them ----
