@@ -1,6 +1,6 @@
 {
   "name": "statusline",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "A two-row status line in the band above the prompt, in the terminal and in Claude Desktop: model and effort, worktree, branch and counts, lines changed, kube context, PR and issue counts, session name and output style; then context, 5h and 7d rate-limit bars with pace, cache, cost and time. No statusLine script. In a git repo with a GitHub or GitLab remote it runs gh or glab for the PR and issue counts (forge option, on by default).",
   "author": { "name": "iuliandita" },
   "userConfig": {
@@ -34,7 +34,7 @@
     "icons": {
       "type": "string",
       "title": "Icons",
-      "description": "auto (default): unicode in the terminal, web in Claude Desktop. unicode uses plain symbols (⎇ branch, ⌥ worktree, ⑂ PRs, ⊙ issues, ◔ cache) and a k8s prefix; nerd uses Nerd Font glyphs for those, the folder and the kube context, in the terminal (Desktop has no Nerd Font and uses web instead); ascii uses words only. web (Desktop) adds 📁 for the folder, ☸ for kube and ◉ for issues.",
+      "description": "The same set in the terminal and in Claude Desktop. auto (default) is unicode. unicode uses standard symbols that need no special font (📁 folder, ⎇ branch, ⌥ worktree, ☸ kube, ⑂ PRs, ⊙ issues, ◔ cache); nerd uses Nerd Font glyphs for those, on both surfaces, so pick it only when a Nerd Font is installed (Desktop finds one through the system's font fallback); ascii uses words only.",
       "options": ["auto", "unicode", "nerd", "ascii"],
       "default": "auto"
     },
