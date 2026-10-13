@@ -22,7 +22,8 @@ registers that clone as the marketplace instead (or `--source <owner/repo>`).
 - `secret-box`: keeps secret values out of the chat; a secret placeholder in a Bash command is filled in at execution time from the OS keyring.
 - `prompt-gate`: before the main model spends a turn on a vague prompt, a small model says so and asks one short question. With a TypeSafe API key in the environment the prompt goes to a third party (Jev); `jevPaths` restricts where.
 - `skill-pick`: names the 1 to 5 installed skills that fit each prompt. With a TypeSafe API key the prompt and skill descriptions go to a third party (Jev); `jevPaths` restricts where.
-- `delegation-board`: a live pane of the session's subagents and teammates: type, model, effort, state, elapsed time and tokens.
+- `delegation-board`: a live pane of the session's subagents and teammates: type, model, effort, state, elapsed time and tokens; in Claude Desktop, a compact band above the prompt.
+- `statusline`: a two-row status line above the prompt in the terminal and Claude Desktop: model and effort, git state, context against your auto-compact window, 5h and 7d limits with pace, cache, cost and time. In a git repo with a GitHub or GitLab remote it runs `gh` or `glab` for PR and issue counts; `forge=off` turns that off.
 
 `mods.json` has the full catalog: egress, modes, requirements, and the install command per mod.
 
