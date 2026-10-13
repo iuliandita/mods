@@ -3,7 +3,7 @@ import { expect, mock, test, type Engine } from 'claude-code/testing'
 
 import type { Part, Style, View } from './segments'
 import {
-  absorbChunk, bar, buildRows, cacheFrom, clean, effectiveWindow, emptyTranscript, fmtTokens, humanize, ICONS, kubeFromTexts, levelColor, modelName,
+  absorbChunk, bar, buildRows, cacheFrom, clean, effectiveWindow, emptyTranscript, sessionTotals, fmtTokens, humanize, ICONS, kubeFromTexts, levelColor, modelName,
   noctaliaPalette, PALETTES, parseConfig, parseGhCounts, parseGhPr, parseGlabMr, parseKubectl, parseNumstat, parsePorcelain,
   parseRemote, parseWorktree, partWidth, pickTheme, plain, providerFor, roundEven, systemDark,
 } from './segments'
@@ -55,6 +55,25 @@ test('kube: kubectl output and the kubeconfig text fallback', () => {
   expect(kubeFromTexts([cfg])).toEqual({ ctx: 'prod-eu', ns: 'web' })
   expect(kubeFromTexts([cfg.replace('"prod-eu"', 'lab')])).toEqual({ ctx: 'lab', ns: '' })
   expect(kubeFromTexts(['kind: Config'])).toEqual({ ctx: '', ns: '' })
+})
+
+test("session totals: the engine's last cost snapshot plus what came after it", () => {
+  const patch = (lines: string[]) => JSON.stringify({ type: 'user', toolUseResult: { structuredPatch: [{ lines }] } })
+  const snap = (api: number, added: number, removed: number) => JSON.stringify({ type: 'cost-state', totalAPIDuration: api, totalLinesAdded: added, totalLinesRemoved: removed, totalDuration: 9e9 })
+  const t = emptyTranscript()
+  absorbChunk(t, `${patch(['+a', '+b'])}\n`)
+  // No snapshot yet: the transcript's lines and the mod's own API time.
+  expect(sessionTotals(t, 120_000, 0)).toEqual({ apiMs: 120_000, added: 2, removed: 0 })
+  absorbChunk(t, `${snap(17_400_000, 6173, 1014)}\n${patch(['+c', '-d', ' e'])}\n`)
+  expect(t.snapshots).toBe(1)
+  // A snapshot from before the mod loaded (apiAtSnapshot 0): all the mod timed comes on top of it.
+  expect(sessionTotals(t, 180_000, 0)).toEqual({ apiMs: 17_580_000, added: 6174, removed: 1015 })
+  // One written while the mod ran already holds what was timed until then.
+  expect(sessionTotals(t, 180_000, 150_000)).toEqual({ apiMs: 17_430_000, added: 6174, removed: 1015 })
+  // A later snapshot replaces the earlier one and restarts the lines counted after it.
+  absorbChunk(t, `${snap(20_000_000, 8313, 1694)}\n`)
+  expect(sessionTotals(t, 180_000, 180_000)).toEqual({ apiMs: 20_000_000, added: 8313, removed: 1694 })
+  expect(humanize(17_580_000 / 1000)).toBe('4h53m')
 })
 
 test('transcript: folded incrementally into effort, title, fast mode, cache and lines', () => {
@@ -228,17 +247,24 @@ test('parity with a reduced window: the script rows with the ctx segment against
   }
 })
 
-test("the owner's layout: lines beside git in row 1, dropped after the forge counts and before git", () => {
-  const v: View = { ...fullRepo, forge: { provider: 'github', prs: 0, issues: 12, capped: false, stale: false }, pr: { number: 12, kind: 'pr', state: 'approved' } }
+test("the owner's layout: folder, worktree, branch, PR, counts, lines, kube, then garnish; counts drop first", () => {
+  const v: View = { ...fullRepo, kube: { ctx: 'lab', ns: '' }, forge: { provider: 'github', prs: 0, issues: 12, capped: false, stale: false }, pr: { number: 12, kind: 'pr', state: 'approved' } }
   const [one = '', two = ''] = buildRows(neutral(), v, 200).map(plain)
-  expect(one).toBe('◆ Opus 5.5  ▰▰▰▱▱ │ ⚡ │ repo │  ⎇ feat/x  +1 ~2 ?3 │ +412 -87 │ #12 ✓ │ @reviewer │ refactor auth │ ✎ Explanatory │ ⑂ 0 ⊙ 12')
+  expect(one).toBe('◆ Opus 5.5  ▰▰▰▱▱ │ ⚡ │ repo │  ⎇ feat/x  +1 ~2 ?3 │ #12 ✓ │ ⑂ 0 ⊙ 12 │ +412 -87 │ k8s lab │ @reviewer │ refactor auth │ ✎ Explanatory')
   expect(two).toBe('ctx ━━━━━━━━━───── 63% 126k/200k │ 5h ━━━┃────── 36% (-4) ↻3h00m │ 7d ━─┃─────── 12% (-17) ↻5d0h │ ◔ 94% w 3m ⊘2 │ $3.42 │ 1h23m/27m')
   const gone = (needle: string) => {
     for (let cols = 200; cols > 20; cols--) if (!plain(buildRows(neutral(), v, cols)[0] ?? []).includes(needle)) return cols
     return 0
   }
-  expect(gone('⑂')).toBeGreaterThan(gone('+412'))
+  // On a shortening row: the counts go first, then the session name and style, then kube, lines, git.
+  expect(gone('⑂')).toBeGreaterThan(gone('✎ Explanatory'))
+  expect(gone('⑂')).toBeGreaterThan(gone('refactor auth'))
+  expect(gone('refactor auth')).toBeGreaterThan(gone('k8s lab'))
+  expect(gone('k8s lab')).toBeGreaterThan(gone('+412'))
   expect(gone('+412')).toBeGreaterThan(gone('feat/x'))
+  // The folder stays beside a worktree badge of the same name.
+  const wt = plain(buildRows(neutral(), { ...v, worktree: 'repo' }, 240)[0] ?? [])
+  expect(wt).toContain('│ repo │  ⌥ repo   ⎇ feat/x ')
   for (const cols of [30, 50, 80, 120]) for (const r of buildRows(neutral(), v, cols)) expect(partWidth(r)).toBeLessThanOrEqual(cols - 4)
 })
 
@@ -289,7 +315,7 @@ test('a segment that throws is left out; every failure is a dim ✗name at the e
 
 // ---- the hooks, through the test kit ----
 
-type Ctl = { kube: 'ok' | 'fail' }
+type Ctl = { kube: 'ok' | 'fail'; settings?: 'fail' }
 const ok = (stdout: string, exitCode = 0, stderr = '') => ({ value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false } }) as never
 
 // The engine beneath the mod: session figures, a git repo on develop, a kubeconfig with context lab, a session
@@ -303,7 +329,7 @@ function engine(on: On, ctl: Ctl = { kube: 'ok' }) {
   on('session.id', () => ({ value: 'sid' }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('session.usage', () => ({ value: { startedAt: NOW, context: { tokens: 1000, window: 200_000, percent: 1 }, rateLimits: [] } }) as never)
-  on('settings.read', () => ({ value: {} }))
+  on('settings.read', () => (ctl.settings === 'fail' ? { deny: 'unreadable' } : { value: {} }) as never)
   on('config.list', () => ({ value: [{ key: 'outputStyle', label: 'Output style', kind: 'enum', value: 'Explanatory', provider: { plugin: 'engine', tier: 'core' } }] }) as never)
   on('env.get', (_$, e) => ({ value: (e as { name: string }).name === 'HOME' ? '/u' : undefined }) as never)
   on('fs.stat', (_$, e) => ((e as { path: string }).path === '/u/.kube/config' ? { value: { kind: 'file', size: 10, mtimeMs: 1, isLink: false } } : { deny: 'no such file' }) as never)
@@ -369,6 +395,13 @@ test('a failing source shows as a dim ✗name at the end of row 1', async ($, on
   const { rows } = await mount($, 'terminal')
   expect(rows[1]).toMatch(/│ ✗kube$/)
   expect(rows[1]).not.toContain('k8s')
+})
+
+test('an unreadable settings source marks the context window as unresolved: ✗ctxwin', async ($, on) => {
+  const { clock } = engine(on, { kube: 'ok', settings: 'fail' })
+  await started($, clock)
+  const { rows } = await mount($, 'terminal')
+  expect(rows[1]).toMatch(/✗settings ✗ctxwin$/)
 })
 
 test('mode off draws nothing and runs nothing', { options: { mode: 'off' } }, async ($, on) => {
