@@ -1,6 +1,6 @@
 {
   "name": "statusline",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "A two-row status line in the band above the prompt, in the terminal and in Claude Desktop: model and effort, worktree, branch and counts, lines changed, kube context, PR and issue counts, session name and output style; then context, 5h and 7d rate-limit bars with pace, cache, cost and time. No statusLine script. In a git repo with a GitHub or GitLab remote it runs gh or glab for the PR and issue counts (forge option, on by default).",
   "author": { "name": "iuliandita" },
   "userConfig": {
@@ -34,9 +34,9 @@
     "icons": {
       "type": "string",
       "title": "Icons",
-      "description": "unicode (default) uses plain symbols (⎇ branch, ⌥ worktree, ⑂ PRs, ⊙ issues, ◔ cache) and a k8s prefix; nerd uses Nerd Font glyphs for those, the folder and the kube context.",
-      "options": ["unicode", "nerd"],
-      "default": "unicode"
+      "description": "auto (default): unicode in the terminal, web in Claude Desktop. unicode uses plain symbols (⎇ branch, ⌥ worktree, ⑂ PRs, ⊙ issues, ◔ cache) and a k8s prefix; nerd uses Nerd Font glyphs for those, the folder and the kube context, in the terminal (Desktop has no Nerd Font and uses web instead); ascii uses words only. web (Desktop) adds 📁 for the folder, ☸ for kube and ◉ for issues.",
+      "options": ["auto", "unicode", "nerd", "ascii"],
+      "default": "auto"
     },
     "theme": {
       "type": "string",
@@ -57,6 +57,13 @@
       "description": "auto (default): the ctx share and denominator are measured against the auto-compact window when one is set (CLAUDE_CODE_AUTO_COMPACT_WINDOW, modelSettings.<model>.autoCompactWindow, or autoCompactWindow), capped at the model's window. full: always the model's full window.",
       "options": ["auto", "full"],
       "default": "auto"
+    },
+    "placeholders": {
+      "type": "string",
+      "title": "Loading placeholders",
+      "description": "on (default): the band appears whole once its sources have answered (at most 1.5 seconds after start), and a figure still on its way (context, limits, cost, time, cache, API time, forge counts) shows as a dim placeholder of its usual shape, so nothing pops in or shifts. off: segments appear as their data arrives.",
+      "options": ["off", "on"],
+      "default": "on"
     }
   }
 }

@@ -1,11 +1,11 @@
 import type { On } from 'claude-code'
 import { expect, mock, test, type Engine } from 'claude-code/testing'
 
-import type { Part, Style, View } from './segments'
+import type { Arrival, Part, Style, View } from './segments'
 import {
-  absorbChunk, bar, buildRows, cacheFrom, clean, effectiveWindow, emptyTranscript, sessionTotals, fmtTokens, humanize, ICONS, kubeFromTexts, levelColor, modelName,
+  absorbChunk, bar, buildRows, c, cacheFrom, clean, effectiveWindow, emptyTranscript, sessionTotals, fmtTokens, humanize, ICONS, kubeFromTexts, levelColor, modelName,
   noctaliaPalette, PALETTES, parseConfig, parseGhCounts, parseGhPr, parseGlabMr, parseKubectl, parseNumstat, parsePorcelain,
-  parseRemote, parseWorktree, partWidth, pickTheme, plain, providerFor, roundEven, systemDark,
+  iconSet, parseRemote, parseWorktree, partWidth, pendingFor, pickTheme, plain, providerFor, roundEven, systemDark,
 } from './segments'
 
 const NOW = Date.parse('2026-01-01T00:00:00Z')
@@ -13,8 +13,8 @@ const H = 3600_000
 const neutral = (tick = '┃'): Style => ({ P: PALETTES.neutral, glyph: ICONS.unicode, tick, noColor: false })
 
 test('config: defaults (forge on), every option, and out-of-range refresh', () => {
-  expect(parseConfig({})).toEqual({ mode: 'on', rows: 2, forge: true, forgeHosts: {}, icons: 'unicode', theme: 'auto', refreshMs: 30_000, ctxWindow: 'auto' })
-  expect(parseConfig({ mode: 'off', rows: '1', forge: 'off', forgeHosts: 'git.example.com=gitlab, x=bogus', icons: 'nerd', theme: 'dark', refreshSeconds: 1, ctxWindow: 'full' })).toEqual({ mode: 'off', rows: 1, forge: false, forgeHosts: { 'git.example.com': 'gitlab' }, icons: 'nerd', theme: 'dark', refreshMs: 5_000, ctxWindow: 'full' })
+  expect(parseConfig({})).toEqual({ mode: 'on', rows: 2, forge: true, forgeHosts: {}, icons: 'auto', theme: 'auto', refreshMs: 30_000, ctxWindow: 'auto', placeholders: true })
+  expect(parseConfig({ mode: 'off', rows: '1', forge: 'off', forgeHosts: 'git.example.com=gitlab, x=bogus', icons: 'nerd', theme: 'dark', refreshSeconds: 1, ctxWindow: 'full', placeholders: 'off' })).toEqual({ mode: 'off', rows: 1, forge: false, forgeHosts: { 'git.example.com': 'gitlab' }, icons: 'nerd', theme: 'dark', refreshMs: 5_000, ctxWindow: 'full', placeholders: false })
   for (const [secs, ms] of [['x', 30_000], [99_999, 3_600_000], [45, 45_000]] as const) expect(parseConfig({ refreshSeconds: secs }).refreshMs).toBe(ms)
 })
 
@@ -313,9 +313,69 @@ test('a segment that throws is left out; every failure is a dim ✗name at the e
   expect(mono.some((sp) => sp.fg || sp.bg)).toBe(false)
 })
 
+test('loading: what is pending, per segment, until its data comes or the deadline passes', () => {
+  const at: Arrival = { enabled: true, waiting: true, responded: false, transcript: 'none', forgeExpected: false }
+  const before: View = { ...leanPlain, context: { window: 200_000 }, limits: [], costUsd: null, durationMs: 5_000, apiMs: 0, cache: null }
+  // A new session before its first response: everything the response brings, the transcript's figures, time.
+  expect(pendingFor(at, before)).toEqual(['ctx', '5h', '7d', 'cost', 'time', 'api', 'cache'])
+  // The option off: nothing is pending (the 0.2.3 behaviour).
+  expect(pendingFor({ ...at, enabled: false }, before)).toEqual([])
+  // After the first response, what is still missing is not applicable: no limits on this plan, no cache seen.
+  const after: View = { ...before, context: { tokens: 1000, window: 200_000, percent: 1 }, costUsd: 0.1, durationMs: 90_000 }
+  expect(pendingFor({ ...at, responded: true }, after)).toEqual([])
+  // A resumed session: the transcript is being read, then the deadline passes and the wait ends.
+  const resumed: View = { ...fullPlain, apiMs: null, cache: null }
+  expect(pendingFor({ ...at, responded: true, transcript: 'reading' }, resumed)).toEqual(['api', 'cache'])
+  expect(pendingFor({ ...at, responded: true, transcript: 'reading', waiting: false }, resumed)).toEqual([])
+  expect(pendingFor({ ...at, responded: true, transcript: 'done' }, resumed)).toEqual([])
+  // Forge counts: only for a remote gh/glab will be asked about, until the deadline.
+  expect(pendingFor({ ...at, responded: true, forgeExpected: true }, fullRepo)).toEqual(['forge'])
+  expect(pendingFor({ ...at, responded: true, forgeExpected: true, waiting: false }, fullRepo)).toEqual([])
+})
+
+test('loading: a pending segment draws a dim placeholder, an absent one nothing, a failed one its ✗name', () => {
+  const st = neutral()
+  const empty: View = { ...leanPlain, context: { window: 200_000 }, limits: [], costUsd: null, durationMs: 5_000, apiMs: 0, cache: null }
+  const loading = buildRows(st, { ...empty, pending: ['ctx', '5h', '7d', 'cost', 'time', 'cache'] }, 200)
+  expect(plain(loading[1] ?? [])).toBe('ctx ────────────── -- │ 5h ────────── -- │ 7d ────────── -- │ ◔ -- │ $-- │ --')
+  const muted = new Set([c(st, st.P.DIM, 'x'), c(st, st.P.TRACK, 'x')].map((p) => JSON.stringify({ ...p[0], t: '' })))
+  expect((loading[1] ?? []).filter((sp) => sp.t.trim() && !muted.has(JSON.stringify({ ...sp, t: '' })))).toEqual([])
+  // Nothing pending: the same view draws only what it has.
+  expect(plain(buildRows(st, empty, 200)[1] ?? [])).toBe('ctx ────────────── --')
+  // Loaded: the real segments, never a placeholder beside them.
+  expect(plain(buildRows(st, { ...fullPlain, pending: [] }, 200)[1] ?? [])).not.toContain('--')
+  // A source that failed keeps its ✗name and gets no placeholder.
+  const failed = buildRows(st, { ...empty, pending: ['5h', '7d'], failed: ['5h'] }, 200)
+  expect(plain(failed[0] ?? [])).toContain('✗5h')
+  expect(plain(failed[1] ?? [])).not.toContain('5h ')
+  expect(plain(failed[1] ?? [])).toContain('7d ────────── --')
+  // Forge counts while gh answers, in the owner's layout from 120 columns.
+  expect(plain(buildRows(st, { ...fullRepo, pending: ['forge'] }, 200)[0] ?? [])).toContain('⑂ -- ⊙ --')
+  // The API part: pending as /--, unknown (null) left out, under a minute as <1m; never /0m.
+  const time = (apiMs: number | null, pending: string[] = []) => plain(buildRows(st, { ...fullPlain, apiMs, pending }, 240)[1] ?? [])
+  expect(time(null, ['api'])).toContain('1h23m/--')
+  expect(time(null)).toMatch(/│ 1h23m$/)
+  expect(time(20_000)).toContain('1h23m/<1m')
+  for (const ms of [null, 0, 20_000]) expect(time(ms)).not.toContain('/0m')
+})
+
+test('session totals: requests that ran before the mod loaded, after the last snapshot, make the API time unknown', () => {
+  const ask = (id: string) => JSON.stringify({ type: 'assistant', timestamp: '2026-01-01T00:00:00Z', message: { id, usage: { input_tokens: 1, cache_read_input_tokens: 10 } } })
+  const snap = JSON.stringify({ type: 'cost-state', totalAPIDuration: 3_600_000, totalLinesAdded: 1, totalLinesRemoved: 0 })
+  const t = emptyTranscript()
+  absorbChunk(t, `${ask('a')}\n${ask('b')}\n`)
+  expect(t.sinceSnapshot).toBe(2)
+  expect(sessionTotals(t, 0, 0, 2).apiMs).toBeNull()
+  absorbChunk(t, `${snap}\n`)
+  expect(t.sinceSnapshot).toBe(0)
+  expect(sessionTotals(t, 30_000, 0, 0).apiMs).toBe(3_630_000)
+})
+
 // ---- the hooks, through the test kit ----
 
-type Ctl = { kube: 'ok' | 'fail'; settings?: 'fail' }
+// A transcript under another project folder than the session's root names: a session resumed elsewhere.
+type Ctl = { kube: 'ok' | 'fail'; settings?: 'fail'; fresh?: boolean; transcript?: string; remote?: string }
+const ELSEWHERE = '/u/.claude/projects/-elsewhere/sid.jsonl'
 const ok = (stdout: string, exitCode = 0, stderr = '') => ({ value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false } }) as never
 
 // The engine beneath the mod: session figures, a git repo on develop, a kubeconfig with context lab, a session
@@ -328,12 +388,24 @@ function engine(on: On, ctl: Ctl = { kube: 'ok' }) {
   on('session.root', () => ({ value: '/work/repo' }))
   on('session.id', () => ({ value: 'sid' }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
-  on('session.usage', () => ({ value: { startedAt: NOW, context: { tokens: 1000, window: 200_000, percent: 1 }, rateLimits: [] } }) as never)
+  const usage = ctl.fresh
+    ? { startedAt: NOW, context: { window: 200_000 }, rateLimits: [] }
+    : { startedAt: NOW - 2 * H, context: { tokens: 1000, window: 200_000, percent: 1 }, rateLimits: [], cost: { usd: 1.5 } }
+  on('session.usage', () => ({ value: usage }) as never)
   on('settings.read', () => (ctl.settings === 'fail' ? { deny: 'unreadable' } : { value: {} }) as never)
   on('config.list', () => ({ value: [{ key: 'outputStyle', label: 'Output style', kind: 'enum', value: 'Explanatory', provider: { plugin: 'engine', tier: 'core' } }] }) as never)
   on('env.get', (_$, e) => ({ value: (e as { name: string }).name === 'HOME' ? '/u' : undefined }) as never)
-  on('fs.stat', (_$, e) => ((e as { path: string }).path === '/u/.kube/config' ? { value: { kind: 'file', size: 10, mtimeMs: 1, isLink: false } } : { deny: 'no such file' }) as never)
-  on('fs.exists', () => ({ value: false }))
+  const size = ctl.transcript === undefined ? 0 : new TextEncoder().encode(ctl.transcript).length
+  on('fs.stat', (_$, e) => {
+    const path = (e as { path: string }).path
+    if (path === '/u/.kube/config') return { value: { kind: 'file', size: 10, mtimeMs: 1, isLink: false } } as never
+    if (path === ELSEWHERE && size) return { value: { kind: 'file', size, mtimeMs: 1, isLink: false } } as never
+    return { deny: 'no such file' } as never
+  })
+  on('fs.exists', (_$, e) => ({ value: !!size && (e as { path: string }).path === ELSEWHERE }))
+  on('fs.list', (_$, e) =>
+    ((e as { path?: string }).path === '/u/.claude/projects' && size ? { value: [{ name: '-work-other', kind: 'dir', size: 0, mtimeMs: 0, isLink: false }, { name: '-elsewhere', kind: 'dir', size: 0, mtimeMs: 0, isLink: false }] } : { deny: 'no such directory' }) as never,
+  )
   on('fs.read', () => ({ deny: 'no such file' }) as never)
   on('ui.render', ($, e) => $.ui.resolve(e).Text({ children: ['engine'] }) as never)
   on('process.run', (_$, e) => {
@@ -341,6 +413,10 @@ function engine(on: On, ctl: Ctl = { kube: 'ok' }) {
     runs.push(argv)
     if (argv[0] === 'kubectl') return ctl.kube === 'ok' ? ok('{"contexts":[{"name":"lab","context":{}}]}') : ok('', 1, 'boom')
     if (argv[0] === 'git' && argv.includes('status')) return ok('# branch.oid 1234567\n# branch.head develop\n')
+    if (argv[0] === 'tail' && argv.at(-1) === ELSEWHERE) return ok(ctl.transcript ?? '')
+    if (argv[0] === 'git' && argv.includes('remote.origin.url') && ctl.remote) return ok(`${ctl.remote}\n`)
+    if (argv[0] === 'gh' && argv.includes('graphql')) return ok('{"data":{"repository":{"pullRequests":{"totalCount":3},"issues":{"totalCount":12}}}}')
+    if (argv[0] === 'gh') return ok('[]')
     return ok('', 1)
   })
   return { clock, runs, ctl }
@@ -361,21 +437,44 @@ async function started($: Engine, clock: ReturnType<typeof mock.clock>) {
   await clock.advance(10)
 }
 
-test('mode on draws a rule, then two rows and no blank row, on both surfaces; other bands stack above', async ($, on) => {
+test('mode on draws two rows and no blank row, under a rule on the terminal only; other bands stack above', async ($, on) => {
   const { clock } = engine(on)
   await started($, clock)
   for (const surface of ['terminal', 'desktop'] as const) {
-    const { text, rows } = await mount($, surface)
+    const { text, rows: all } = await mount($, surface)
     expect(text.startsWith('engine')).toBe(true)
-    expect(rows).toHaveLength(3)
-    expect(rows[0]).toBe('─'.repeat(120))
-    expect(rows[1]).toContain('◆ Opus 5.5')
-    expect(rows[1]).toContain('✎ Explanatory')
-    expect(rows[1]).toContain(' ⎇ develop ')
-    expect(rows[1]).toContain('k8s lab')
-    expect(rows[2]).toContain('ctx')
-    for (const r of rows) expect(r.trim()).not.toBe('')
+    // Desktop draws its own edge above the band: no rule from the mod there.
+    expect(all).toHaveLength(surface === 'terminal' ? 3 : 2)
+    if (surface === 'terminal') expect(all[0]).toBe('─'.repeat(120))
+    else expect(all.some((r) => r.startsWith('──'))).toBe(false)
+    const rows = surface === 'terminal' ? all.slice(1) : all
+    expect(rows[0]).toContain('◆ Opus 5.5')
+    expect(rows[0]).toContain('✎ Explanatory')
+    expect(rows[0]).toContain(' ⎇ develop ')
+    expect(rows[0]).toContain(surface === 'terminal' ? 'k8s lab' : '☸ lab')
+    expect(rows[0]).toContain(surface === 'terminal' ? 'repo' : '📁 repo')
+    expect(rows[1]).toContain('ctx')
+    for (const r of all) expect(r.trim()).not.toBe('')
   }
+})
+
+test('icons: auto is unicode on the terminal and web on Desktop, nerd falls back to web there, the rest stay', () => {
+  expect(['auto', 'nerd', 'unicode', 'ascii'].map((o) => iconSet(o as never, 'terminal'))).toEqual(['unicode', 'nerd', 'unicode', 'ascii'])
+  expect(['auto', 'nerd', 'unicode', 'ascii'].map((o) => iconSet(o as never, 'desktop'))).toEqual(['web', 'web', 'unicode', 'ascii'])
+  // No private-use code points in the Desktop set.
+  expect(Object.values(ICONS.web).join('')).not.toMatch(/[\u{e000}-\u{f8ff}\u{f0000}-\u{10ffff}]/u)
+})
+
+test('Desktop shows the forge counts in a repository on GitHub, also under 120 columns', { options: { icons: 'nerd' } }, async ($, on) => {
+  const { clock, runs } = engine(on, { kube: 'ok', remote: 'https://github.com/owner/repo.git' })
+  await started($, clock)
+  await clock.advance(1_000)
+  const props = { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100, scroll: { offset: 0, bodyRows: 10 } }
+  const ui = await $.ui.mount({ plugin: 'statusline', surface: 'desktop', component: 'AbovePrompt', props: props as never, viewport: { columns: 105, rows: 30 } })
+  const rows = (await ui.findAll({ type: 'Box' })).filter((b) => b.key?.startsWith('row-')).map((b) => b.text)
+  await ui.unmount()
+  expect(runs.some((a) => a[0] === 'gh' && a.includes('graphql'))).toBe(true)
+  expect(rows[0]).toContain('⑂ 3 ◉ 12')
 })
 
 test('plugin options reach the mod: nerd icons and one row', { options: { icons: 'nerd', rows: '1', forge: 'off' } }, async ($, on) => {
@@ -402,6 +501,35 @@ test('an unreadable settings source marks the context window as unresolved: ✗c
   await started($, clock)
   const { rows } = await mount($, 'terminal')
   expect(rows[1]).toMatch(/✗settings ✗ctxwin$/)
+})
+
+test('a new session draws placeholders for what its first response brings, all at once', async ($, on) => {
+  const { clock } = engine(on, { kube: 'ok', fresh: true })
+  await started($, clock)
+  const { rows } = await mount($, 'terminal')
+  expect(rows[1]).toContain(' ⎇ develop ')
+  expect(rows[1]).toContain('k8s lab')
+  expect(rows[2]).toBe('ctx ────────────── -- │ 5h ────────── -- │ 7d ────────── -- │ ◔ -- │ $-- │ --')
+})
+
+const ask = JSON.stringify({ type: 'assistant', timestamp: new Date(NOW - 60_000).toISOString(), message: { id: 'm1', usage: { input_tokens: 10, cache_read_input_tokens: 990, cache_creation: { ephemeral_1h_input_tokens: 0 } } } })
+const saved = JSON.stringify({ type: 'cost-state', totalAPIDuration: 3_600_000, totalLinesAdded: 5, totalLinesRemoved: 1 })
+
+test('a resumed session reads its transcript under another project folder: API time and cache on the first band', async ($, on) => {
+  const { clock } = engine(on, { kube: 'ok', transcript: `${ask}\n${saved}\n` })
+  await started($, clock)
+  const { rows } = await mount($, 'terminal')
+  expect(rows[2]).toContain('2h00m/1h00m')
+  expect(rows[2]).toContain('◔ 99%')
+  expect(rows[1]).toContain('+5 -1')
+})
+
+test('a resumed session without a saved total hides the API time instead of drawing /0m', async ($, on) => {
+  const { clock } = engine(on, { kube: 'ok', transcript: `${ask}\n` })
+  await started($, clock)
+  const { rows } = await mount($, 'terminal')
+  expect(rows[2]).toMatch(/│ 2h00m$/)
+  expect(rows[2]).not.toContain('2h00m/')
 })
 
 test('mode off draws nothing and runs nothing', { options: { mode: 'off' } }, async ($, on) => {
