@@ -1,0 +1,60 @@
+{
+  "name": "guard-rules",
+  "version": "0.1.0",
+  "description": "Blocks AI attribution in commits and PRs, direct commits to protected branches, commits under the wrong git identity, and mutating kubectl, helm and terraform calls on protected or unclassified environments.",
+  "author": { "name": "iuliandita" },
+  "userConfig": {
+    "protectedBranches": {
+      "type": "string",
+      "title": "Protected branches",
+      "description": "Comma-separated branch names (a * wildcard is allowed) that commits, merges and pushes must not touch directly.",
+      "default": "develop,main"
+    },
+    "identityRules": {
+      "type": "string",
+      "title": "Identity rules",
+      "description": "JSON array of {\"prefix\": \"~/path/\", \"email\": \"you@example.com\"}. A repository under a prefix must commit as that email; a repository under no prefix is blocked. Empty turns the rule off.",
+      "default": ""
+    },
+    "protectedContexts": {
+      "type": "string",
+      "title": "Protected environments",
+      "description": "Comma-separated kubectl/helm context and terraform workspace names (case-insensitive, a * wildcard is allowed) where changing commands are blocked.",
+      "default": "*prod*,*production*,*live*,*qa*,*staging*,*stage*,*uat*,*preprod*,*pre-prod*"
+    },
+    "relaxedContexts": {
+      "type": "string",
+      "title": "Relaxed environments",
+      "description": "Comma-separated names (case-insensitive, a * wildcard is allowed) where changing commands are allowed. A name in neither list is blocked until you classify it with /guard-context.",
+      "default": "*dev*,*development*,*test*,*local*,*sandbox*,minikube,kind-*,k3d-*,docker-desktop,rancher-desktop"
+    },
+    "modeAttribution": {
+      "type": "string",
+      "title": "Attribution rule mode",
+      "description": "off, dry (report only) or on.",
+      "options": ["off", "dry", "on"],
+      "default": "on"
+    },
+    "modeProtectedBranch": {
+      "type": "string",
+      "title": "Protected-branch rule mode",
+      "description": "off, dry (report only) or on.",
+      "options": ["off", "dry", "on"],
+      "default": "on"
+    },
+    "modeIdentity": {
+      "type": "string",
+      "title": "Identity rule mode",
+      "description": "off, dry (report only) or on. Does nothing until identity rules are set.",
+      "options": ["off", "dry", "on"],
+      "default": "on"
+    },
+    "modeContext": {
+      "type": "string",
+      "title": "Context rule mode",
+      "description": "off, dry (report only) or on. Covers changing kubectl, helm, terraform and tofu calls.",
+      "options": ["off", "dry", "on"],
+      "default": "on"
+    }
+  }
+}

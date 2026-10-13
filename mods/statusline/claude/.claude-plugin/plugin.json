@@ -1,0 +1,62 @@
+{
+  "name": "statusline",
+  "version": "0.2.2",
+  "description": "A two-row status line in the band above the prompt, in the terminal and in Claude Desktop: model and effort, worktree, branch and counts, lines changed, kube context, PR and issue counts, session name and output style; then context, 5h and 7d rate-limit bars with pace, cache, cost and time. No statusLine script. In a git repo with a GitHub or GitLab remote it runs gh or glab for the PR and issue counts (forge option, on by default).",
+  "author": { "name": "iuliandita" },
+  "userConfig": {
+    "mode": {
+      "type": "string",
+      "title": "Mode",
+      "description": "off (draw nothing, run nothing) or on.",
+      "options": ["off", "on"],
+      "default": "on"
+    },
+    "rows": {
+      "type": "string",
+      "title": "Rows",
+      "description": "2 puts the repository and session identity on the first row and context, limits, cache, cost and time on the second; 1 fits everything into one row, dropping the least important first.",
+      "options": ["1", "2"],
+      "default": "2"
+    },
+    "forge": {
+      "type": "string",
+      "title": "Forge lookups",
+      "description": "on (default): in a git repository whose origin is on github.com, gitlab.com or a host listed in forgeHosts, runs gh (GitHub) or glab (GitLab), already logged in, for the branch's open PR or MR and the repository's open PR and issue counts. At most every 5 minutes (the PR every 2 minutes or on a branch change), never while drawing. off runs nothing that leaves the machine.",
+      "options": ["off", "on"],
+      "default": "on"
+    },
+    "forgeHosts": {
+      "type": "string",
+      "title": "Forge hosts",
+      "description": "Extra forge hosts the lookups may contact, as host=github or host=gitlab, comma-separated (for example git.example.com=gitlab). A repository's own remote is never trusted on its own.",
+      "default": ""
+    },
+    "icons": {
+      "type": "string",
+      "title": "Icons",
+      "description": "unicode (default) uses plain symbols (⎇ branch, ⌥ worktree, ⑂ PRs, ⊙ issues, ◔ cache) and a k8s prefix; nerd uses Nerd Font glyphs for those, the folder and the kube context.",
+      "options": ["unicode", "nerd"],
+      "default": "unicode"
+    },
+    "theme": {
+      "type": "string",
+      "title": "Palette",
+      "description": "auto (default) picks as the statusline script does: STATUSLINE_THEME, STATUSLINE_TERMINAL_THEME (terminal only), COLORFGBG, then in Desktop the app's theme, else neutral. dark, light and neutral force one; noctalia uses the Ghostty Noctalia theme's colours when that file exists.",
+      "options": ["auto", "dark", "light", "neutral", "noctalia"],
+      "default": "auto"
+    },
+    "refreshSeconds": {
+      "type": "number",
+      "title": "Refresh interval",
+      "description": "Seconds between refreshes, 5 to 3600. Each finished turn refreshes too. Git status is cached 5 seconds.",
+      "default": 30
+    },
+    "ctxWindow": {
+      "type": "string",
+      "title": "Context window",
+      "description": "auto (default): the ctx share and denominator are measured against the auto-compact window when one is set (CLAUDE_CODE_AUTO_COMPACT_WINDOW, modelSettings.<model>.autoCompactWindow, or autoCompactWindow), capped at the model's window. full: always the model's full window.",
+      "options": ["auto", "full"],
+      "default": "auto"
+    }
+  }
+}

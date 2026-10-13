@@ -1,0 +1,29 @@
+{
+  "name": "delegation-board",
+  "version": "0.1.0",
+  "description": "A live pane of the session's subagents and teammates: type, model, effort, state, elapsed time, tokens, an optional cost estimate and the task description. It only observes; nothing leaves the machine.",
+  "author": { "name": "iuliandita" },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "mode": {
+      "type": "string",
+      "title": "Mode",
+      "description": "off (only the /board command, which says it is off) or on (observe the session's agents and keep the board).",
+      "options": ["off", "on"],
+      "default": "on"
+    },
+    "open": {
+      "type": "string",
+      "title": "Open the pane",
+      "description": "spawn opens the pane at the first subagent of a session; never leaves it to the /board command.",
+      "options": ["spawn", "never"],
+      "default": "spawn"
+    },
+    "prices": {
+      "type": "string",
+      "title": "Prices",
+      "description": "Optional JSON object of dollars per million tokens, [input, output], keyed by a model id substring, for example {\"sonnet\": [3, 15]}. Cache reads and writes are priced as input. Unset, no cost is shown.",
+      "default": ""
+    }
+  }
+}

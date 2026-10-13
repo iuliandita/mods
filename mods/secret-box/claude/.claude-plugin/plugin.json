@@ -1,0 +1,15 @@
+{
+  "name": "secret-box",
+  "version": "0.1.0",
+  "description": "Keeps secret values out of the chat: write {{secret:NAME}} in a Bash command and the value is filled in at execution time from the OS keyring, and any known value that still reaches the conversation is replaced with its placeholder.",
+  "author": { "name": "iuliandita" },
+  "userConfig": {
+    "mode": {
+      "type": "string",
+      "title": "Mode",
+      "description": "off, dry (report only, nothing is rewritten or scrubbed) or on.",
+      "options": ["off", "dry", "on"],
+      "default": "on"
+    }
+  }
+}

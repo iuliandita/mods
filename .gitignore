@@ -1,0 +1,15 @@
+/local/
+AGENTS.local.md
+CLAUDE.local.md
+docs/local/
+docs/superpowers/
+.handoff/
+.claude/
+private-patterns.txt
+__pycache__/
+.pytest_cache/
+.venv/
+node_modules/
+
+# written by the engine when a mod is loaded from a hot-reload folder
+mods/*/claude/tsconfig.json

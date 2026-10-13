@@ -1,0 +1,46 @@
+{
+  "name": "skill-pick",
+  "version": "0.1.0",
+  "description": "Names the 1 to 5 installed skills that fit each prompt, as many as the ask needs, with a small model and, when TYPESAFE_API_KEY is set, a Jev score per skill; the log shows how often the main model then loads one. Default mode dry only measures. With a key set, the prompt and skill descriptions go to api.typesafe.ai (Jev) from every directory unless jevPaths limits it.",
+  "author": { "name": "iuliandita" },
+  "userConfig": {
+    "mode": {
+      "type": "string",
+      "title": "Mode",
+      "description": "off, dry (pick and log only) or on (the prompt gets one context line naming the picked skills).",
+      "options": ["off", "dry", "on"],
+      "default": "dry"
+    },
+    "model": {
+      "type": "string",
+      "title": "Picker model",
+      "description": "The small model that picks skills for each prompt.",
+      "default": "haiku"
+    },
+    "minChars": {
+      "type": "number",
+      "title": "Minimum length",
+      "description": "Prompts shorter than this many characters are not judged.",
+      "default": 25
+    },
+    "maxSkills": {
+      "type": "number",
+      "title": "Maximum skills",
+      "description": "Ceiling on skills named per prompt, 1 to 5. The model picks how many the prompt needs.",
+      "default": 5
+    },
+    "picker": {
+      "type": "string",
+      "title": "Picker",
+      "description": "auto (Jev first when TYPESAFE_API_KEY is set, then the small model), haiku (small model only) or jev (Jev scores the skills and decides; the small model is still used in dry mode and when Jev is unavailable). With a key set, auto and jev send the prompt and the skill descriptions to api.typesafe.ai.",
+      "options": ["auto", "haiku", "jev"],
+      "default": "auto"
+    },
+    "jevPaths": {
+      "type": "string",
+      "title": "Jev directories",
+      "description": "Comma-separated directory prefixes (~ allowed). Jev is used only when the working directory is under one. Empty means anywhere; a non-blank value with no usable entry means nowhere.",
+      "default": ""
+    }
+  }
+}

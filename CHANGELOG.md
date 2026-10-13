@@ -1,0 +1,55 @@
+# Changelog
+
+## Unreleased
+
+- Mod schema: `mods/<name>/mod.json` with a plugin under `mods/<name>/claude/`.
+- Generated `.claude-plugin/marketplace.json` and `mods.json` catalog (`scripts/mods generate`).
+- Installer CLI `scripts/mods` with `list`, `install`, `uninstall`, `doctor`, `validate`, and
+  `generate`; `--json` output on every command.
+- `validate` gates: generated files up to date, private-pattern scan, and
+  `claude plugin validate --strict`.
+- CI workflow: unit tests and `validate --no-claude`, plus integration tests and full `validate`
+  against the real claude CLI.
+- `local/` (gitignored) for private mods, installed with `--local`.
+- Mod `guard-rules`: blocks AI attribution, direct commits to protected branches, wrong git
+  identity, and mutating kubectl, helm and terraform calls on protected or unclassified
+  environments.
+- Mod `secret-box`: keeps secrets out of the chat; a secret placeholder in a Bash command is
+  filled in from the OS keyring at execution time and known values are scrubbed from output.
+- Mod `prompt-gate`: a small model flags a vague prompt and asks one short question; default
+  mode `dry` only measures.
+- Mod `skill-pick`: names the 1 to 5 installed skills that fit each prompt; default mode `dry`.
+- Mod `delegation-board`: a live pane of the session's subagents and teammates.
+- Jev cascade in `prompt-gate` and `skill-pick`: with a TypeSafe key set, Jev signals are
+  combined with Haiku; the prompt goes to a third party, restrictable with `jevPaths`.
+- Shared TypeScript helpers live in `shared/` and `scripts/mods generate` copies them into each
+  mod; `generate` removes only unlisted copies that carry the generated header and reports
+  any other file as an error. The Jev client and log helper are one template injected between
+  markers in each mod's `register.ts`; `generate --check` flags a block that drifted.
+- Installer: `uninstall` also finds private mods and resolves a name present as both public
+  and local to the public one; a `--source` that looks like a flag is rejected; a git URL or
+  relative `--source` no longer re-adds the marketplace on every install; `list` reports a
+  failed installed-plugin read as an error and accepts `--scope`; CLI errors are structured
+  (`ok` and `errors`) under `--json`. Install docs say `scripts/mods install` registers the
+  clone (or `--source`), not the GitHub marketplace.
+- Private scan: reads files with NUL bytes (UTF-16, UTF-32 with or without a byte-order mark)
+  and flags email addresses other than the public identifier and placeholders.
+- CI: actions pinned to commit SHAs, claude-code pinned in one env var and checked against
+  every `verified_on` by a test, `pytest` pinned, dependabot also watches pip.
+- Hardening: `secret-box` scrubs the persisted Bash output, every session row kind and
+  structured results (keys of user data too, never the engine's own fields). `guard-rules`
+  treats anything outside its modeled shell grammar as unparsed when the text names a
+  protected tool, tracks branch, directory, env, context and workspace as sets of possible
+  states, and probes git identity with an exact environment allowlist.
+- Behavior change in `guard-rules`: relaxed context and workspace patterns now match on a
+  word boundary (`-`, `_`, `.`, `/`, `:`, `@`), so a name like `devops-eu` or `testing` is no
+  longer relaxed by `*dev*` or `*test*` and falls back to unclassified.
+- Security round 5: `guard-rules` reads `$"..."` locale strings, cuts `$'...'` at NUL, follows
+  `sudo -s/-i` and `env -S` command strings, treats a dynamic checkout, switch or rebase operand and
+  `git symbolic-ref HEAD` as an unknown branch, denies a later commit or implicit push after a git
+  config write or `GIT_CONFIG_*` include, and reads the kubeconfig `current-context` and a Terraform
+  workspace strictly (anything not plain is unclassified). `secret-box` also scrubs the ASCII
+  `\uXXXX` JSON form of a non-ASCII secret.
+- `prompt-gate` and `skill-pick` dry mode releases the prompt first and measures from a clock
+  timer afterwards; `delegation-board` resets on `/clear` and prints a text table when its pane
+  is not placed (Claude Desktop).

@@ -1,0 +1,18 @@
+{
+  "name": "prompt-gate",
+  "summary": "Before the main model spends a turn on a vague prompt, a small model, checked by Jev when TYPESAFE_API_KEY is set, says so and asks one short question. Default mode dry only measures. With a key set, the prompt goes to api.typesafe.ai (Jev) from every directory unless jevPaths limits it.",
+  "kind": "rewrite",
+  "egress": ["anthropic", "third-party:typesafe"],
+  "modes": ["off", "dry", "flag", "on"],
+  "default_mode": "dry",
+  "requires": [],
+  "surfaces": {
+    "terminal": "untested",
+    "desktop": "untested",
+    "vscode": "untested",
+    "headless": "untested"
+  },
+  "verified_on": null,
+  "shared": ["advisory.ts", "hash.ts", "num.ts", "paths.ts", "reply.ts", "stats.ts"],
+  "inject": ["jev-client.inject.ts"]
+}

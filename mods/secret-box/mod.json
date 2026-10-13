@@ -1,0 +1,16 @@
+{
+  "name": "secret-box",
+  "summary": "Keeps secret values out of the chat: write {{secret:NAME}} in a Bash command and the value is filled in at execution time from the OS keyring, and any known value that still reaches the conversation is replaced with its placeholder.",
+  "kind": "guard",
+  "egress": ["none"],
+  "modes": ["off", "dry", "on"],
+  "default_mode": "on",
+  "requires": ["secret-tool", "python3", "bash"],
+  "surfaces": {
+    "terminal": "verified",
+    "desktop": "untested",
+    "vscode": "untested",
+    "headless": "untested"
+  },
+  "verified_on": "2.1.296"
+}

@@ -1,0 +1,6 @@
+# Copy to private-patterns.txt (gitignored) and add one regex per line.
+# `scripts/mods validate` fails when a tracked or new file matches one.
+# Built-in patterns already cover absolute home paths, private IPv4 ranges, and email addresses (except the public identifier and placeholders).
+#
+# internal\.example\.com
+# customer-name

@@ -1,0 +1,16 @@
+{
+  "name": "delegation-board",
+  "summary": "A live pane of the session's subagents and teammates: type, model, effort, state, elapsed time, tokens, an optional cost estimate and the task description. It only observes; nothing leaves the machine.",
+  "kind": "pane",
+  "egress": ["none"],
+  "modes": ["off", "on"],
+  "default_mode": "on",
+  "requires": [],
+  "surfaces": {
+    "terminal": "untested",
+    "desktop": "untested",
+    "vscode": "untested",
+    "headless": "untested"
+  },
+  "verified_on": null
+}

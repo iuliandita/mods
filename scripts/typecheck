@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Type-checks each mod's hooks module with the API types the Claude Code engine lays beside a mod
+# it has loaded (mods/<name>/claude/.claude-plugin/types). Those files exist only after a session
+# or hot-reload has loaded some mod from this clone; the types are the same for every mod.
+#
+#   scripts/typecheck [mod ...]        all mods when none given
+#
+# Needs a TypeScript 5.4+ compiler: tsc on PATH, node_modules/.bin/tsc, or bunx / npx as a fallback.
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$root"
+
+types=""
+for d in mods/*/claude/.claude-plugin/types local/mods/*/claude/.claude-plugin/types; do
+  [ -d "$d/claude-code" ] && { types="$root/$d"; break; }
+done
+[ -n "$types" ] || { echo "typecheck: no engine-laid types found; load a mod from this clone in Claude Code first" >&2; exit 2; }
+
+if command -v tsc >/dev/null 2>&1; then tsc=(tsc)
+elif [ -x node_modules/.bin/tsc ]; then tsc=(node_modules/.bin/tsc)
+elif command -v bunx >/dev/null 2>&1; then tsc=(bunx -p typescript tsc)
+elif command -v npx >/dev/null 2>&1; then tsc=(npx --yes -p typescript tsc)
+else echo "typecheck: no TypeScript compiler (tsc, bunx or npx)" >&2; exit 2; fi
+
+if [ "$#" -gt 0 ]; then mods=("$@"); else mods=(); for d in mods/*/; do mods+=("$(basename "$d")"); done; fi
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+fail=0
+for m in "${mods[@]}"; do
+  dir="$root/mods/$m/claude"
+  [ -d "$dir/hooks" ] || { echo "typecheck: $m: no hooks dir" >&2; fail=1; continue; }
+  include="\"$dir/hooks\""
+  [ -d "$dir/types" ] && include="$include, \"$dir/types\""
+  cat > "$tmp/tsconfig.json" <<JSON
+{ "compilerOptions": { "target": "es2023", "lib": ["es2023"], "module": "esnext", "moduleResolution": "bundler",
+  "strict": true, "noUncheckedIndexedAccess": true, "noEmit": true, "skipLibCheck": true,
+  "jsx": "react", "jsxFactory": "h", "jsxFragmentFactory": "Fragment",
+  "typeRoots": ["$types"], "types": ["claude-code", "claude-code-tools", "claude-code-mcp"] },
+  "include": [$include] }
+JSON
+  if "${tsc[@]}" -p "$tmp/tsconfig.json"; then echo "typecheck: $m ok"; else echo "typecheck: $m FAILED" >&2; fail=1; fi
+done
+exit "$fail"

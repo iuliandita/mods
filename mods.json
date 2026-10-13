@@ -1,0 +1,155 @@
+{
+  "schema": 1,
+  "marketplace": "iuliandita-mods",
+  "source": "iuliandita/mods",
+  "mods": [
+    {
+      "name": "delegation-board",
+      "summary": "A live pane of the session's subagents and teammates: type, model, effort, state, elapsed time, tokens, an optional cost estimate and the task description. It only observes; nothing leaves the machine.",
+      "kind": "pane",
+      "egress": [
+        "none"
+      ],
+      "modes": [
+        "off",
+        "on"
+      ],
+      "default_mode": "on",
+      "requires": [],
+      "surfaces": {
+        "terminal": "untested",
+        "desktop": "untested",
+        "vscode": "untested",
+        "headless": "untested"
+      },
+      "verified_on": null,
+      "install": "claude plugin marketplace add iuliandita/mods && claude plugin install delegation-board@iuliandita-mods"
+    },
+    {
+      "name": "guard-rules",
+      "summary": "Blocks AI attribution in commits and PRs, direct commits to protected branches, commits under the wrong git identity, and mutating kubectl, helm and terraform calls on protected or unclassified environments.",
+      "kind": "guard",
+      "egress": [
+        "none"
+      ],
+      "modes": [
+        "off",
+        "dry",
+        "on"
+      ],
+      "default_mode": "on",
+      "requires": [
+        "git"
+      ],
+      "surfaces": {
+        "terminal": "verified",
+        "desktop": "untested",
+        "vscode": "untested",
+        "headless": "untested"
+      },
+      "verified_on": "2.1.296",
+      "install": "claude plugin marketplace add iuliandita/mods && claude plugin install guard-rules@iuliandita-mods"
+    },
+    {
+      "name": "prompt-gate",
+      "summary": "Before the main model spends a turn on a vague prompt, a small model, checked by Jev when TYPESAFE_API_KEY is set, says so and asks one short question. Default mode dry only measures. With a key set, the prompt goes to api.typesafe.ai (Jev) from every directory unless jevPaths limits it.",
+      "kind": "rewrite",
+      "egress": [
+        "anthropic",
+        "third-party:typesafe"
+      ],
+      "modes": [
+        "off",
+        "dry",
+        "flag",
+        "on"
+      ],
+      "default_mode": "dry",
+      "requires": [],
+      "surfaces": {
+        "terminal": "untested",
+        "desktop": "untested",
+        "vscode": "untested",
+        "headless": "untested"
+      },
+      "verified_on": null,
+      "install": "claude plugin marketplace add iuliandita/mods && claude plugin install prompt-gate@iuliandita-mods"
+    },
+    {
+      "name": "secret-box",
+      "summary": "Keeps secret values out of the chat: write {{secret:NAME}} in a Bash command and the value is filled in at execution time from the OS keyring, and any known value that still reaches the conversation is replaced with its placeholder.",
+      "kind": "guard",
+      "egress": [
+        "none"
+      ],
+      "modes": [
+        "off",
+        "dry",
+        "on"
+      ],
+      "default_mode": "on",
+      "requires": [
+        "secret-tool",
+        "python3",
+        "bash"
+      ],
+      "surfaces": {
+        "terminal": "verified",
+        "desktop": "untested",
+        "vscode": "untested",
+        "headless": "untested"
+      },
+      "verified_on": "2.1.296",
+      "install": "claude plugin marketplace add iuliandita/mods && claude plugin install secret-box@iuliandita-mods"
+    },
+    {
+      "name": "skill-pick",
+      "summary": "Names the 1 to 5 installed skills that fit each prompt, as many as the ask needs, with a small model and, when TYPESAFE_API_KEY is set, a Jev score per skill; the log shows how often the main model then loads one. Default mode dry only measures. With a key set, the prompt and skill descriptions go to api.typesafe.ai (Jev) from every directory unless jevPaths limits it.",
+      "kind": "rewrite",
+      "egress": [
+        "anthropic",
+        "third-party:typesafe"
+      ],
+      "modes": [
+        "off",
+        "dry",
+        "on"
+      ],
+      "default_mode": "dry",
+      "requires": [],
+      "surfaces": {
+        "terminal": "untested",
+        "desktop": "untested",
+        "vscode": "untested",
+        "headless": "untested"
+      },
+      "verified_on": null,
+      "install": "claude plugin marketplace add iuliandita/mods && claude plugin install skill-pick@iuliandita-mods"
+    },
+    {
+      "name": "statusline",
+      "summary": "A two-row status line in the band above the prompt, in the terminal and in Claude Desktop: model and effort, worktree, branch and counts, lines changed, kube context, PR and issue counts, session name and output style; then context, 5h and 7d rate-limit bars with pace, cache, cost and time. No statusLine script. In a git repo with a GitHub or GitLab remote it runs gh or glab for the PR and issue counts (forge option, on by default).",
+      "kind": "statusline",
+      "egress": [
+        "third-party:github",
+        "third-party:gitlab"
+      ],
+      "modes": [
+        "off",
+        "on"
+      ],
+      "default_mode": "on",
+      "requires": [
+        "git"
+      ],
+      "surfaces": {
+        "terminal": "untested",
+        "desktop": "untested",
+        "vscode": "untested",
+        "headless": "untested"
+      },
+      "verified_on": null,
+      "install": "claude plugin marketplace add iuliandita/mods && claude plugin install statusline@iuliandita-mods"
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "name": "prompt-gate",
+  "version": "0.1.0",
+  "description": "Before the main model spends a turn on a vague prompt, a small model, checked by Jev when TYPESAFE_API_KEY is set, says so and asks one short question. Default mode dry only measures. With a key set, the prompt goes to api.typesafe.ai (Jev) from every directory unless jevPaths limits it.",
+  "author": { "name": "iuliandita" },
+  "userConfig": {
+    "mode": {
+      "type": "string",
+      "title": "Mode",
+      "description": "off, dry (classify and log only, nothing is blocked), flag (a vague prompt enters with a note for the main model to ask you) or on (a vague prompt is bounced with one question).",
+      "options": ["off", "dry", "flag", "on"],
+      "default": "dry"
+    },
+    "model": {
+      "type": "string",
+      "title": "Classifier model",
+      "description": "The small model that judges each prompt.",
+      "default": "haiku"
+    },
+    "minChars": {
+      "type": "number",
+      "title": "Minimum length",
+      "description": "Prompts shorter than this many characters are not judged.",
+      "default": 15
+    },
+    "classifier": {
+      "type": "string",
+      "title": "Classifier",
+      "description": "auto uses Jev, then Haiku when unsure, if TYPESAFE_API_KEY is set (the prompt and, if enabled, the project vocabulary go to api.typesafe.ai); haiku never contacts Jev; jev lets Jev decide and Haiku only write the question.",
+      "options": ["auto", "haiku", "jev"],
+      "default": "auto"
+    },
+    "jevPaths": {
+      "type": "string",
+      "title": "Jev directories",
+      "description": "Comma-separated directory prefixes (~ allowed). Jev is used only when the session runs in or under one; empty means anywhere; a non-blank value with no usable entry means nowhere.",
+      "default": ""
+    },
+    "projectTerms": {
+      "type": "string",
+      "title": "Project terms",
+      "description": "yes gives the classifier the start of the project's AGENTS.md or CLAUDE.md as vocabulary; no does not.",
+      "options": ["yes", "no"],
+      "default": "yes"
+    }
+  }
+}
