@@ -31,8 +31,19 @@ fix the command and retry.
 
 Commands wrapped by the secret-box mod (`secret-box exec -- '...'`) are unwrapped and checked like `bash -c`.
 
-Hooks only, no UI, so it works the same in the terminal, the desktop app, VS Code and headless runs.
+Hooks only, no UI. Portability to other Claude surfaces is expected, but only terminal behavior
+is verified; Desktop, VS Code and headless behavior remain untested.
 Egress: none (no network, no model calls).
+
+## Compatibility status
+
+- Claude Code: verified on 2.1.296 in the terminal.
+- Desktop, VS Code and headless: untested.
+- Mode: `on` by default; available modes are `off`, `dry` and `on`.
+- Egress: none. Requirements: `git`.
+
+These facts match `mod.json`. See [installation and recovery](../../INSTALL.md) and
+[contributor checks](../../CONTRIBUTING.md) for scope and validation limits.
 
 ## Install
 

@@ -35,3 +35,12 @@ Put your own mods in `local/mods/<name>/` (gitignored) and install them with
 ## License
 
 MIT
+
+## Project and support
+
+Made by [iuliandita](https://iuliandita.com). [Other projects](https://iuliandita.com/projects/).
+
+See [installation and recovery](INSTALL.md), [contributing](CONTRIBUTING.md),
+[documentation](docs/README.md), and [private security reporting](SECURITY.md).
+
+[agents](https://github.com/iuliandita/agents) provides global prompts and role definitions; [skills](https://github.com/iuliandita/skills) provides individually installed task guidance. Installing one collection does not install the others.
