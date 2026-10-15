@@ -4,8 +4,10 @@ The mods were written for Claude Code. Some of their logic does not depend on it
 run on Codex or OpenCode when the host gives a hook enough power to do the job. This page says,
 for every mod and host, what works, what does not, and why.
 
-Labels: **works** (run on the real host), **not ported** (the host can do it, nobody has ported
-it, with what would be lost if anything), **not possible** (the host cannot do it).
+Labels: **works** (the behavior described below was run on the real host), **untested**
+(implemented, without recorded runtime verification), **not ported** (no adapter),
+**not possible** (the checked host API cannot provide it). Verification of one behavior does
+not verify every rule, mode or surface. Claude surface declarations remain in each `mod.json`.
 
 Versions checked: Claude Code 2.1.296, Codex CLI 0.162.1, OpenCode 2.0.29.
 
@@ -13,10 +15,10 @@ Versions checked: Claude Code 2.1.296, Codex CLI 0.162.1, OpenCode 2.0.29.
 | --- | --- | --- | --- |
 | `guard-rules` | **works** (terminal verified) | **works** | **works** |
 | `secret-box` | **works** (terminal verified) | **works**, partly: placeholders and the command's own output, see below | **works** |
-| `prompt-gate` | works, untested | **works**, judged by a nested Codex session (luna, low effort) | **works**, judged by a low-effort DeepSeek Flash; `on` runs as `flag` |
-| `skill-pick` | works, untested | **works**, judged by a nested Codex session (luna, low effort); no use records | **works**; no use records |
-| `delegation-board` | works, untested | **not possible**: hooks cannot draw anything | **not ported**; its UI plugin entry is not evaluated yet |
-| `statusline` | works, untested | **not possible**: the status line only takes built-in items | **not ported**; its UI plugin entry is not evaluated yet |
+| `prompt-gate` | **untested** | **works**, judged by a nested Codex session (luna, low effort) | **works**, judged by DeepSeek Flash; `on` runs as `flag` |
+| `skill-pick` | **untested** | **works**, judged by a nested Codex session (luna, low effort); no use records | **works**; no use records |
+| `delegation-board` | **untested** | **not possible**: hooks cannot draw anything | **works**: a panel of child sessions, opened with `/board` |
+| `statusline` | **untested** | **not possible**: the status line only takes built-in items | **works**, reduced: one line, no rate-limit bars |
 
 ## guard-rules
 
@@ -68,7 +70,7 @@ Why the differences:
 | --- | --- | --- | --- |
 | Fill a placeholder in a command | rewrites the Bash command | `PreToolUse` replaces the command with `secret-box exec --scrub -- '...'` | `execute.before` changes the shell input the same way |
 | Scrub the command's own output | rewrites the tool result | the helper filters its own stdout and stderr | `execute.after` rewrites the result, and the helper filters too |
-| Scrub a tool result that is not a placeholder command | rewrites the tool result | **not possible**: `PostToolUse` cannot redact output | `execute.after` rewrites every shell result |
+| Scrub a tool result that is not a placeholder command | rewrites the tool result | **not possible**: `PostToolUse` cannot redact output | `execute.after` rewrites every tool's result and error |
 | Scrub every conversation row and the prompt | `session.append` and `session.send` | **not possible**: no hook changes the conversation or the prompt | session `context` and `prompt` hooks |
 | `/secret-box` status command | yes | no documented way | not ported; use `secret-box names` |
 | If the mod fails | denies a placeholder command | denies when the hook runs and fails inside its own code; a hook that cannot start lets the command through with the placeholder unfilled | denies a placeholder command |
@@ -103,7 +105,7 @@ the only one so far.
 | | Claude Code | Codex | OpenCode |
 | --- | --- | --- | --- |
 | Hook | `prompt.submit` | `UserPromptSubmit` command hook | `session.prompt` hook |
-| Small model | the engine's model call | a nested `codex exec` session on `gpt-6-luna` at low effort (read-only, hooks off, throwaway directory), about 18k tokens of your plan per prompt; a failure means "error" and the prompt goes through. The mod's `model` option counts only when it names a `gpt-*` model | the host's `generate.text` with a low-effort DeepSeek Flash model picked from the host's model list (up to three candidates are tried, then the host's default model); the `model` option counts only as `provider/model` |
+| Small model | the engine's model call | a nested `codex exec` session on `gpt-6-luna` at low effort (read-only, hooks off, throwaway directory), about 18k tokens of your plan per measured call; a failure means "error" and the prompt goes through. The mod's `model` option counts only when it names a `gpt-*` model | the host's `generate.text` with a DeepSeek Flash model picked from the host's model list, at low/minimal effort when available; up to three candidates are tried per call. With no eligible candidates it uses the host's default model. An explicit `model` must be `provider/model` |
 | Stop a vague prompt (`on`) | drops it with the question | `decision: block` with the question; sending it again unchanged runs it | **runs as `flag`**: a throw stops the prompt but shows only a generic error, and the terminal UI sends it again |
 | Add a note (`flag`, skill-pick `on`) | adds context | `additionalContext` | appends the note to the prompt text |
 | Dry mode | measures from a timer after the prompt went on | the hook returns at once and starts a detached process that measures | measures from a timer in the host process |
@@ -127,8 +129,14 @@ Why the differences:
 - **A Codex hook has no model.** The hook starts a nested `codex exec` session on luna, which uses
   your Codex plan (about 18k tokens per prompt) and sends the prompt to OpenAI only. With
   `TYPESAFE_API_KEY` set it also goes to Jev, as in the Claude plugin. `jevPaths` limits every model
-  call on the hosts, not only Jev: outside those folders no prompt is judged. The default `haiku`
-  value of `classifier` / `picker` is ignored on Codex and OpenCode.
+  call on Codex and OpenCode, not only Jev: outside those folders no prompt is judged. The
+  `model` default `haiku` selects the host-specific default above. `classifier` / `picker`
+  still control Jev selection; setting either to `haiku` disables Jev, not the host model call.
+- **Model calls have host-specific costs.** OpenCode uses the selected provider's billing and
+  cannot cap output tokens or cancel a timed-out request. Its 20-second deadline only stops
+  waiting; the request may continue. Codex and OpenCode do not return usage through these
+  adapters, so zero model-token figures in the mod's log do not mean a free call. Dry mode
+  still makes model calls; `off` stops them.
 - **Dry mode on Codex needs a second process.** A hook must answer before the model sees the
   prompt, and the hook process ends with its answer, so a detached `measure` process does the work.
   It stops itself after 60 seconds.
@@ -147,9 +155,34 @@ Why the differences:
 
 ## delegation-board and statusline
 
-These draw UI. Codex hooks cannot add a pane or a band, and its `tui.status_line` setting accepts
-only built-in item names, so there is nothing to port to. OpenCode ships a terminal UI plugin
-entry (`@opencode/plugin/tui`) that nobody has evaluated for this yet.
+| | Claude Code | Codex | OpenCode |
+| --- | --- | --- | --- |
+| Draw anything | `ui.render` in the band above the prompt, a pane | **not possible**: hooks draw nothing, and `tui.status_line` takes only built-in item names | a terminal UI plugin (`ui.slot`, `ui.panel`) |
+| statusline | two rows: model and effort, worktree and branch counts, lines changed, kube context, PR and issue counts, context, 5h and 7d limits, cache, cost, time | **not possible** | one line above the prompt: model, folder, branch, context tokens, cost, elapsed time, a running mark |
+| delegation-board | a live pane of subagents and teammates, effort and prices | **not possible** | a panel of the session's child sessions: state, agent, time, tokens, cost, title |
+| Open the board | `/board` | | `/board`, or **Delegation board** in the command palette (`ctrl+p`) |
+| Setup | plugin install | | `plugins` in `~/.config/opencode/cli.json` (the global file; there is no project-level terminal config) |
+
+The OpenCode terminal plugins do not read the Claude options or the user-level JSON option
+files used by the hook adapters. Remove their entries from `cli.json` and restart OpenCode
+to disable them. They make no model or forge calls of their own.
+
+What was run on the real host (OpenCode 2.0.29): the statusline line drew above the prompt in and
+out of a git repository, showed the branch, and redrew while a turn ran; after a real subagent run
+the board listed it with its state, time, tokens and cost.
+
+Why the differences:
+
+- **OpenCode exposes no rate-limit figures, no PR or issue counts and no kube context** to a
+  terminal plugin, and this port runs no `git`, `gh` or `kubectl` of its own, so those parts of the
+  statusline are not there. The branch comes from the host's own VCS data.
+- **No Solid build step.** The plugins draw with plain `@opentui/core` text nodes and a one-second
+  timer instead of Solid components, so the packages need no JSX compiler; `@opentui/core` and the
+  plugin API are supplied by the host at run time.
+- **Subagents are child sessions.** The board has no effort or price table; it shows what the host
+  records per session.
+- **The keymap layer is global.** A layer in the default mode was accepted but its command never
+  reached the palette.
 
 ## How a mod gets a host
 

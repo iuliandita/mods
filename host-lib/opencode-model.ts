@@ -40,34 +40,38 @@ export const pickFlash = (models: readonly ModelInfo[], preferProvider?: string)
 // refuses (no funds, say) is skipped and the next candidate tried; the one that answers is kept. With none listed the
 // session's default model answers (the host cannot cap its output, so that is the fallback only).
 export function openCodeComplete(ctx: ModelContext, option: () => string): Complete {
-  let candidates: Promise<ModelRef[]> | undefined
-  const bad = new Set<string>()
-  let good: ModelRef | undefined
-  const list = (): Promise<ModelRef[]> =>
-    (candidates ??= (async () => {
-      try {
-        const explicit = parseRef(option())
-        if (explicit) return [explicit]
-        const [models, def] = await Promise.all([ctx.model.list(), ctx.model.default().catch(() => ({ data: undefined }))])
-        return flashCandidates(models.data, def.data?.providerID)
-      } catch {
-        return []
-      }
-    })())
+  type Selection = { candidates: Promise<ModelRef[]>; bad: Set<string>; good?: ModelRef }
+  let selected: { option: string; state: Selection } | undefined
+  const list = async (value: string): Promise<ModelRef[]> => {
+    try {
+      const explicit = parseRef(value)
+      if (explicit) return [explicit]
+      const [models, def] = await Promise.all([ctx.model.list(), ctx.model.default().catch(() => ({ data: undefined }))])
+      return flashCandidates(models.data, def.data?.providerID)
+    } catch {
+      return []
+    }
+  }
   const attempt: Complete = async (req) => {
+    const value = option()
+    if (!selected || selected.option !== value) {
+      selected = { option: value, state: { candidates: list(value), bad: new Set() } }
+    }
+    // Each call keeps its own selection: an old in-flight answer cannot replace a newer model.
+    const state = selected.state
     const prompt = `${req.system}\n\n${promptText(req.prompt)}`
-    const tries = good ? [good] : (await list()).filter((m) => !bad.has(key(m))).slice(0, TRIES)
+    const tries = state.good ? [state.good] : (await state.candidates).filter((m) => !state.bad.has(key(m))).slice(0, TRIES)
     let last: unknown
     for (const model of tries.length ? tries : [undefined]) {
       try {
         const r = await ctx.generate.text({ prompt, ...(model ? { model } : {}) })
-        if (model) good = model
+        if (model) state.good = model
         return { isAnswered: r.text !== '', text: r.text }
       } catch (e) {
         last = e
         if (model) {
-          bad.add(key(model))
-          if (good && key(good) === key(model)) good = undefined
+          state.bad.add(key(model))
+          if (state.good && key(state.good) === key(model)) state.good = undefined
         }
       }
     }

@@ -89,6 +89,8 @@ a terminal install at user scope loads in Desktop sessions too.
   The `codex/` and `opencode/` manifests carry the same version as the Claude plugin. What each
   host can and cannot do is in `docs/COMPATIBILITY.md`; update it when a mod gains or loses a host.
   A host adapter reads its options only from the user's config dir, never a repository file.
+  A terminal UI plugin for OpenCode is `host/tui.ts`, built into `opencode/tui.js` with `@opentui/core` left external
+  (see `scripts/host-shims`).
   `host_files` in mod.json copies a plugin file (a helper script) into each host package.
   `prompt-gate` and `skill-pick` run the exported `gate`/`choose` of their `register.ts` on a Node
   stand-in for the engine (`host-lib/engine.ts`), so that file may import only types from

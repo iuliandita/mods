@@ -1,6 +1,6 @@
 # mods
 
-Claude Code mods you can install one at a time. `guard-rules`, `secret-box`, `prompt-gate` and `skill-pick` also run on Codex and OpenCode;
+Claude Code mods you can install one at a time. `guard-rules`, `secret-box`, `prompt-gate` and `skill-pick` also run on Codex and OpenCode, and `statusline` and `delegation-board` on OpenCode;
 [what works on which host, and why](docs/COMPATIBILITY.md).
 
 Mods are plugins built on the hooks-module API. They run with your permissions and are not
@@ -17,7 +17,10 @@ Run it in a terminal. It works for Claude Code and loads in Claude Desktop sessi
 These calls install from the GitHub marketplace. From a clone, `scripts/mods install <mod>`
 registers that clone as the marketplace instead (or `--source <owner/repo>`).
 
-For Codex and OpenCode, see the mod's README and [INSTALL.md](INSTALL.md).
+For Codex and OpenCode, see the mod's README and [INSTALL.md](INSTALL.md). OpenCode hook
+plugins use `opencode.json`; its terminal UI plugins use the global `cli.json` instead.
+Prompt advisers make model calls even in their default `dry` mode; check the host's costs
+and privacy limits before installing them.
 
 ## Catalog
 

@@ -24,7 +24,7 @@ def add_hosts(mod: Path, *hosts: str, version: str = "0.1.0") -> None:
         else:
             (mod / "host" / "opencode.ts").write_text("")
             (mod / "opencode").mkdir()
-            (mod / "opencode" / "package.json").write_text(json.dumps({"name": mod.name, "version": version}))
+            (mod / "opencode" / "package.json").write_text(json.dumps({"name": mod.name, "version": version, "exports": {"./server": "./server.js"}}))
 
 
 def test_a_mod_with_complete_host_packages_loads(tmp_path: Path) -> None:
@@ -111,4 +111,20 @@ def test_host_files_cannot_overwrite_a_host_package_file(tmp_path: Path) -> None
     (mod / "claude" / "hooks").mkdir(exist_ok=True)
     (mod / "claude" / "hooks" / "hooks.json").write_text("{}")
     with pytest.raises(CatalogError, match="would overwrite"):
+        load_mods(tmp_path)
+
+
+def test_an_opencode_package_may_ship_only_a_terminal_ui_entry(tmp_path: Path) -> None:
+    mod = write_mod(tmp_path, "alpha", hosts=["opencode"])
+    add_hosts(mod, "opencode")
+    (mod / "host" / "opencode.ts").rename(mod / "host" / "tui.ts")
+    with pytest.raises(CatalogError, match="exports"):
+        load_mods(tmp_path)
+    (mod / "opencode" / "package.json").write_text(json.dumps({"name": "alpha", "version": "0.1.0", "exports": {"./tui": "./tui.js"}}))
+    (loaded,) = load_mods(tmp_path)
+    assert generate_module.bundle_kinds(loaded) == ["opencode-tui"]
+    assert generate_module.bundle_path(loaded, "opencode-tui") == mod / "opencode" / "tui.js"
+    assert "cli.json" in generate_module.host_install(loaded)["opencode"]["install"]
+    (mod / "host" / "tui.ts").unlink()
+    with pytest.raises(CatalogError, match="lacks host/opencode.ts or host/tui.ts"):
         load_mods(tmp_path)

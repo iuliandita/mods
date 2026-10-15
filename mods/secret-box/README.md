@@ -87,7 +87,7 @@ Install steps are in [INSTALL.md](../../INSTALL.md); what differs from Claude Co
   else is scrubbed: a value that reaches the chat by another route (a file the model reads, a prompt
   you typed) stays. The hook answers `allow`; the sandbox still applies to the rewritten command.
   Trust the hook once with `/hooks`.
-- OpenCode 2.x: the same rewrite in `execute.before`, plus scrubbing of every tool result, of the
+- OpenCode 2.x: the same rewrite in `execute.before`, plus scrubbing of every tool result and error, of the
   messages the model sees again, and of the prompt as typed.
 - The mode is read from `~/.config/iuliandita-mods/secret-box.json` (`{"mode": "on"}`; `off`, `dry`
   or `on`). An unreadable file counts as `on`. Nothing is read from a repository.

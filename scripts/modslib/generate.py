@@ -58,9 +58,14 @@ def host_install(mod: Mod) -> dict:
             "install": f"codex plugin marketplace add {GITHUB_SOURCE} && codex plugin add {mod.name}@{MARKETPLACE_NAME}"
         }
     if "opencode" in mod.hosts:
-        out["opencode"] = {
-            "install": f'clone this repository and add {{"package": "<clone>/mods/{mod.name}/opencode"}} to "plugins" in opencode.json'
-        }
+        has_tui = (mod.path / HOST_BUNDLES["opencode-tui"][0]).is_file()
+        has_server = (mod.path / HOST_BUNDLES["opencode"][0]).is_file()
+        where = []
+        if has_server:
+            where.append('"plugins" in opencode.json')
+        if has_tui:
+            where.append('"plugins" in ~/.config/opencode/cli.json')
+        out["opencode"] = {"install": f'clone this repository and add {{"package": "<clone>/mods/{mod.name}/opencode"}} to ' + " and ".join(where)}
     return out
 
 
@@ -118,7 +123,21 @@ def injected(root: Path, mod: Mod) -> str:
 
 
 # The host packages ship one self-contained file each, so a plugin copied out of the repository still runs.
-HOST_BUNDLES = {"codex": ("host/bin.ts", "codex/bin/{name}.mjs"), "opencode": ("host/opencode.ts", "opencode/server.js")}
+# `opencode-tui` is the terminal UI part of an OpenCode package; the host supplies its own copies of these modules.
+HOST_BUNDLES = {
+    "codex": ("host/bin.ts", "codex/bin/{name}.mjs"),
+    "opencode": ("host/opencode.ts", "opencode/server.js"),
+    "opencode-tui": ("host/tui.ts", "opencode/tui.js"),
+}
+TUI_EXTERNALS = ("@opentui/core", "@opencode/plugin/tui")
+
+
+def bundle_kinds(mod: Mod) -> list[str]:
+    """The bundles a mod builds: its codex entry, and an OpenCode server and/or terminal UI entry that exists."""
+    kinds = ["codex"] if "codex" in mod.hosts else []
+    if "opencode" in mod.hosts:
+        kinds += [k for k in ("opencode", "opencode-tui") if (mod.path / HOST_BUNDLES[k][0]).is_file()]
+    return kinds
 
 
 def pinned_bun(root: Path) -> str:
@@ -138,8 +157,9 @@ def bun_problem(root: Path) -> str | None:
 
 def bundle(root: Path, mod: Mod, host: str) -> str:
     entry, _ = HOST_BUNDLES[host]
+    external = [f"--external={e}" for e in TUI_EXTERNALS] if host == "opencode-tui" else []
     proc = subprocess.run(
-        ["bun", "build", str(mod.path.relative_to(root) / entry), "--target=node", "--format=esm"],
+        ["bun", "build", str(mod.path.relative_to(root) / entry), "--target=node", "--format=esm", *external],
         cwd=root,
         capture_output=True,
         text=True,
@@ -170,7 +190,7 @@ def targets(root: Path, *, include_local: bool, bundles: bool = False) -> dict[P
     for m in mods:
         out |= {dest: src.read_text() for dest, src in host_copies(m).items()}
     if bundles:
-        out |= {bundle_path(m, h): bundle(root, m, h) for m in mods for h in m.hosts}
+        out |= {bundle_path(m, k): bundle(root, m, k) for m in mods for k in bundle_kinds(m)}
     out |= {
         root / ".claude-plugin" / "marketplace.json": render(build_marketplace(public)),
         root / "mods.json": render(build_catalog(public)),

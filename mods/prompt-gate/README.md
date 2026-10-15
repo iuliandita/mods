@@ -41,7 +41,7 @@ shorter than `minChars`, prompts longer than 4000 characters, and prompts that d
 
 ## Classifier
 
-With `TYPESAFE_API_KEY` set, the prompt goes to a third party (api.typesafe.ai) in every mode unless
+With `TYPESAFE_API_KEY` set, the prompt goes to a third party (api.typesafe.ai) in every enabled mode unless
 `jevPaths` or `classifier` set to `haiku` limits it. This is the default on purpose.
 
 `classifier` (default `auto`):
@@ -73,10 +73,18 @@ Install steps are in [INSTALL.md](../../INSTALL.md); what differs and why is in
 - Codex: each prompt is judged by a nested `codex exec` session (luna, low effort, read-only, about
   18k tokens of your plan). `jevPaths` also limits this call. `on` blocks with the question and a
   second identical prompt runs. Dry mode measures from a detached process, which also starts a
-  nested session per prompt.
-- OpenCode: a low-effort DeepSeek Flash model from the host's model list answers (falling back to
-  the host's default); `jevPaths` limits it. `on` runs as `flag`, because a hook can only stop a
+  nested session when a model call is needed. `model` accepts a `gpt-*` name; the default
+  `haiku` selects `gpt-6-luna` here.
+- OpenCode: a DeepSeek Flash model from the host's model list answers, using low/minimal effort
+  when available (or the host's default when no eligible candidate remains); `model` accepts
+  `provider/model`. `jevPaths` limits it. `on` runs as `flag`, because a hook can only stop a
   prompt by throwing and OpenCode shows no reason for that.
+- `classifier=haiku` disables Jev on these hosts but still calls the host model. `jevPaths`
+  restricts both Jev and the host model, unlike Claude where it restricts only Jev. `off`
+  stops both. Errors fail open.
+- These adapters do not report host-model usage, so their log's zero model-token counts do not
+  mean no cost. OpenCode uses the selected provider's billing; its 20-second timeout stops
+  waiting but cannot cancel the request or cap its output.
 - Stats: `node <plugin>/bin/prompt-gate.mjs summary`, `last` or `clear`.
 - With `TYPESAFE_API_KEY` set, the prompt goes to Jev as described under Privacy; on Codex the
   first dry-mode prompt shows that notice once.
@@ -119,16 +127,19 @@ prompt costs one small-model call; the log counts tokens so the cost is measured
 
 ## Egress and secrets
 
-Egress is `anthropic` and `third-party:typesafe`. The prompt (and the project vocabulary, if enabled) goes to
+On Claude Code, egress is `anthropic` and `third-party:typesafe`. The prompt (and the project vocabulary, if enabled) goes to
 Anthropic through the session's own client. With `TYPESAFE_API_KEY` set, the prompt and, if
-`projectTerms` is on, the project vocabulary also go to api.typesafe.ai in `auto` and `jev`, in every
+`projectTerms` is on, the project vocabulary also go to api.typesafe.ai in `auto` and `jev`, in every enabled
 mode including `dry`. The key is read
 once per session, sent only as the Authorization header, and never logged or stored.
 
 To avoid the third party: unset the key, set `classifier` to `haiku`, or set `jevPaths` so Jev runs only in
 projects you choose. Setting `jevPaths` is recommended.
 
-In `on` and `flag` mode the classifier sees the prompt as typed, before any other mod rewrites it; in `dry` mode it sees the text after the hooks beneath this one. `secret-box` has no prompt-submit hook (it scrubs the stored transcript, tool calls and the request to the main model), so a secret pasted into the chat is replaced for the main model but still reaches Haiku and, with `TYPESAFE_API_KEY` set, api.typesafe.ai, in every mode including `dry`. Keep secrets out of prompts (use the placeholders), or set `mode` to `off`. In `on` and `flag` mode the classifier calls (including the one to api.typesafe.ai) go out before blocking hooks beneath this one run, so a prompt such a hook would drop has already been sent.
+On Codex the model call goes to OpenAI through the nested session; on OpenCode it goes to the
+selected host provider. Jev egress follows the same key and classifier settings on both.
+
+On Claude Code, in `on` and `flag` mode the classifier sees the prompt as typed, before any other mod rewrites it; in `dry` mode it sees the text after the hooks beneath this one. Claude's `secret-box` has no prompt-submit hook (it scrubs the stored transcript, tool calls and the request to the main model), so a secret pasted into the chat is replaced for the main model but still reaches Haiku and, with `TYPESAFE_API_KEY` set, api.typesafe.ai, in every enabled mode including `dry`. Keep secrets out of prompts (use the placeholders), or set `mode` to `off`. In `on` and `flag` mode the classifier calls (including the one to api.typesafe.ai) go out before blocking hooks beneath this one run, so a prompt such a hook would drop has already been sent. OpenCode has a separate secret-box prompt hook; do not rely on hook ordering to protect pasted secrets from advisers. Codex does not scrub user prompts.
 
 ## Install
 

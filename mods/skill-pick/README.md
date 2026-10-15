@@ -44,7 +44,7 @@ composer or the remote bridge.
 ## Picker and the Jev cascade
 
 With `TYPESAFE_API_KEY` set, the prompt and the skill catalog descriptions go to a third party
-(api.typesafe.ai) in every mode (`dry` and `on`), unless `jevPaths` or `picker` = `haiku` limits it. This is the
+(api.typesafe.ai) in both enabled modes (`dry` and `on`), unless `jevPaths` or `picker` = `haiku` limits it. This is the
 default on purpose; set one of those if it is not what you want.
 
 `picker` is `auto` (default), `haiku` or `jev`. In `auto`, when `TYPESAFE_API_KEY` is set, the path gate
@@ -94,8 +94,16 @@ Install steps are in [INSTALL.md](../../INSTALL.md); what differs and why is in
   to your home), `~/.agents/skills`, `$CODEX_HOME/skills`, `/etc/codex/skills` and the skills of
   installed plugins. Each prompt is judged by a nested `codex exec`
   session (luna, low effort, about 18k tokens of your plan); `jevPaths` limits it.
-- OpenCode: the catalog is the host's skill list and a low-effort DeepSeek Flash model from the
-  host's model list answers.
+- OpenCode: the catalog is the host's skill list and a DeepSeek Flash model from the host's
+  model list answers, using low/minimal effort when available. With no eligible candidate it
+  uses the host's default model. `model` accepts `provider/model` on OpenCode or a `gpt-*`
+  name on Codex; the default `haiku` selects the host-specific model instead.
+- `picker=haiku` disables Jev but still calls the host model. On both hosts `jevPaths`
+  restricts all model calls, unlike Claude where it restricts only Jev. Dry mode still makes
+  calls; `off` stops them. Errors fail open.
+- Host-model usage is not returned to the log, so zero model-token counts do not mean a free
+  call. OpenCode uses the selected provider's billing; its 20-second deadline stops waiting
+  but cannot cancel the request or cap output tokens.
 - No use records or agreement figures on either host: neither exposes a skill-load event to a
   plugin the way Claude's `Skill` tool call does.
 - Stats: `node <plugin>/bin/skill-pick.mjs summary`, `last` or `clear`.
@@ -135,18 +143,23 @@ cache reads and writes).
 
 ## Egress and secrets
 
-`anthropic` and `third-party:typesafe`. The prompt and the skill listing go to the same provider through
+On Claude Code, egress is `anthropic` and `third-party:typesafe`. The prompt and the skill listing go to the same provider through
 the session's own client. With `TYPESAFE_API_KEY` set, in `auto` and `jev` the prompt and the skill
-names and descriptions also go to api.typesafe.ai, a third party, when the path gate passes, in every
+names and descriptions also go to api.typesafe.ai, a third party, when the path gate passes, in every enabled
 mode including `dry`. Avoid
 that with `picker` = `haiku`, or limit it with `jevPaths`. The key is read from the environment, sent
 only as the request's bearer header, and never logged or stored. Without a key nothing goes there.
 
-In `on` mode the picker sees the prompt as typed, before any other mod rewrites it; in `dry` mode it sees the text after the mods beneath this one have run. `secret-box` has no
+On Codex the model call goes to OpenAI through the nested session; on OpenCode it goes to the
+selected host provider. Jev egress follows the same key and picker settings on both.
+
+On Claude Code, in `on` mode the picker sees the prompt as typed, before any other mod rewrites it; in `dry` mode it sees the text after the mods beneath this one have run. Claude's `secret-box` has no
 prompt-submit hook (it scrubs the stored transcript, tool calls and the request to the main model), so
 a secret pasted into the chat is replaced for the main model but still reaches the small model and,
-with `TYPESAFE_API_KEY` set, api.typesafe.ai, in every mode including `dry`. Keep secrets out of
-prompts (use the placeholders), or set `mode` to `off`.
+with `TYPESAFE_API_KEY` set, api.typesafe.ai, in every enabled mode including `dry`. Keep secrets out of
+prompts (use the placeholders), or set `mode` to `off`. OpenCode has a separate secret-box
+prompt hook; do not rely on hook ordering to protect pasted secrets from advisers. Codex does
+not scrub user prompts.
 
 ## Install
 

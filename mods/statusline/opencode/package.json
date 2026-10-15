@@ -1,0 +1,13 @@
+{
+  "name": "statusline",
+  "version": "0.2.7",
+  "description": "OpenCode terminal UI plugin: one status line above the prompt with the model, folder, branch, context tokens, cost and elapsed time.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "author": "iuliandita",
+  "repository": "https://github.com/iuliandita/mods",
+  "exports": {
+    "./tui": "./tui.js"
+  }
+}

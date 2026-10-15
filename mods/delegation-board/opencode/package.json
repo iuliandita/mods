@@ -1,0 +1,13 @@
+{
+  "name": "delegation-board",
+  "version": "0.1.0",
+  "description": "OpenCode terminal UI plugin: a panel of the session's child sessions (subagents) with state, time, tokens, cost and title, opened with /board.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "author": "iuliandita",
+  "repository": "https://github.com/iuliandita/mods",
+  "exports": {
+    "./tui": "./tui.js"
+  }
+}
