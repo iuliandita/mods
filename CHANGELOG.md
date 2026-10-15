@@ -50,6 +50,8 @@
   config write or `GIT_CONFIG_*` include, and reads the kubeconfig `current-context` and a Terraform
   workspace strictly (anything not plain is unclassified). `secret-box` also scrubs the ASCII
   `\uXXXX` JSON form of a non-ASCII secret.
+- `guard-rules` option `unprotectedRepos`: path prefixes of repositories exempt from the
+  protected-branch rule only; attribution and identity still apply there.
 - `prompt-gate` and `skill-pick` dry mode releases the prompt first and measures from a clock
   timer afterwards; `delegation-board` resets on `/clear` and prints a text table when its pane
   is not placed (Claude Desktop).

@@ -1,6 +1,6 @@
 {
   "name": "guard-rules",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Blocks AI attribution in commits and PRs, direct commits to protected branches, commits under the wrong git identity, and mutating kubectl, helm and terraform calls on protected or unclassified environments.",
   "author": { "name": "iuliandita" },
   "userConfig": {
@@ -9,6 +9,12 @@
       "title": "Protected branches",
       "description": "Comma-separated branch names (a * wildcard is allowed) that commits, merges and pushes must not touch directly.",
       "default": "develop,main"
+    },
+    "unprotectedRepos": {
+      "type": "string",
+      "title": "Unprotected repositories",
+      "description": "Comma-separated path prefixes (a leading ~ is allowed). A repository at or under a prefix is exempt from the protected-branch rule only; attribution and identity still apply there.",
+      "default": ""
     },
     "identityRules": {
       "type": "string",

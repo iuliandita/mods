@@ -1,7 +1,7 @@
 import { createTracker, REAL, UNKNOWN, type Possible } from './flow'
 import { pushMessages } from './push'
 import type { Config, Env, Violation } from './rules'
-import type { GitCall } from './shell'
+import { resolvePath, type GitCall } from './shell'
 import type { ConfigTaint } from './state'
 
 export const COMMIT_SUBS = new Set(['commit', 'merge', 'cherry-pick', 'revert', 'am', 'rebase'])
@@ -245,5 +245,18 @@ export async function protectedBranchViolations(call: GitCall, cfg: Config, env:
   } else if (call.sub === 'push') {
     for (const message of await pushMessages(call, env, follow, (n) => isProtected(n, cfg), hint, unknown, taint)) add(message)
   }
+  // Looked up only once the rule would deny, so a clean call costs no extra git run.
+  if (out.length && cfg.unprotectedRepos.length && (await exempt(call.dir, cfg, env))) return []
   return out
+}
+
+// True only when git names the toplevel and it is, or is under, a listed prefix; a failed or empty lookup never exempts.
+async function exempt(dir: string, cfg: Config, env: Env): Promise<boolean> {
+  const top = await env.git(dir, ['rev-parse', '--show-toplevel'])
+  if (!top.ok || !top.out) return false
+  const toplevel = resolvePath('/', top.out, env.home)
+  return cfg.unprotectedRepos.some((prefix) => {
+    const root = resolvePath('/', prefix, env.home)
+    return toplevel === root || toplevel.startsWith(root + '/')
+  })
 }
