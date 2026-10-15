@@ -58,9 +58,14 @@ def host_install(mod: Mod) -> dict:
             "install": f"codex plugin marketplace add {GITHUB_SOURCE} && codex plugin add {mod.name}@{MARKETPLACE_NAME}"
         }
     if "opencode" in mod.hosts:
-        tui_only = (mod.path / HOST_BUNDLES["opencode-tui"][0]).is_file() and not (mod.path / HOST_BUNDLES["opencode"][0]).is_file()
-        target = '"plugins" in ~/.config/opencode/cli.json' if tui_only else '"plugins" in opencode.json'
-        out["opencode"] = {"install": f'clone this repository and add {{"package": "<clone>/mods/{mod.name}/opencode"}} to {target}'}
+        has_tui = (mod.path / HOST_BUNDLES["opencode-tui"][0]).is_file()
+        has_server = (mod.path / HOST_BUNDLES["opencode"][0]).is_file()
+        where = []
+        if has_server:
+            where.append('"plugins" in opencode.json')
+        if has_tui:
+            where.append('"plugins" in ~/.config/opencode/cli.json')
+        out["opencode"] = {"install": f'clone this repository and add {{"package": "<clone>/mods/{mod.name}/opencode"}} to ' + " and ".join(where)}
     return out
 
 

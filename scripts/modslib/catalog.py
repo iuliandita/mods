@@ -202,7 +202,7 @@ def _problems(path: Path, data: object, shared: Path) -> list[str]:
             errs.append(f"{where}: host_files not found under claude/: {', '.join(missing)}")
         if copies and not data.get("hosts"):
             errs.append(f"{where}: host_files needs hosts")
-        owned = {"hooks/hooks.json", "package.json", "server.js", f"bin/{where}.mjs"}
+        owned = {"hooks/hooks.json", "package.json", "server.js", "tui.js", f"bin/{where}.mjs"}
         clash = sorted(set(copies) & owned)
         if clash:
             errs.append(f"{where}: host_files would overwrite a host package file: {', '.join(clash)}")
@@ -236,6 +236,12 @@ def _host_problems(path: Path, hosts: list[str]) -> list[str]:
         if host == "opencode" and not any((path / f).is_file() for f in ("host/opencode.ts", "host/tui.ts")):
             errs.append(f"{path.name}: host opencode lacks host/opencode.ts or host/tui.ts")
             continue
+        if host == "opencode":
+            exports = _field(path / "opencode" / "package.json", "exports")
+            have = set(exports) if isinstance(exports, dict) else set()
+            want = {k for k, f in (("./server", "host/opencode.ts"), ("./tui", "host/tui.ts")) if (path / f).is_file()}
+            if have != want:
+                errs.append(f"{path.name}: opencode/package.json exports {sorted(have)} must be {sorted(want)} to match host/")
         manifest = path / HOST_VERSION_FILE[host]
         if _field(manifest, "name") != path.name:
             errs.append(f"{path.name}: {HOST_VERSION_FILE[host]} name must be '{path.name}'")

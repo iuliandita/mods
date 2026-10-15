@@ -1,7 +1,7 @@
 {
   "name": "delegation-board",
   "version": "0.1.0",
-  "description": "A live pane of the session's subagents and teammates: type, model, effort, state, elapsed time, tokens, an optional cost estimate and the task description. It only observes; nothing leaves the machine.",
+  "description": "OpenCode terminal UI plugin: a panel of the session's child sessions (subagents) with state, time, tokens, cost and title, opened with /board.",
   "private": true,
   "type": "module",
   "license": "MIT",

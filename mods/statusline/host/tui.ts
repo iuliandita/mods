@@ -1,4 +1,4 @@
-import { defaultMakeText, duration, money, ticker, toMs, tokens, type Data, type MakeText } from '../../../host-lib/tui'
+import { bind, clean, defaultMakeText, duration, money, ticker, toMs, tokens, type Data, type MakeText } from '../../../host-lib/tui'
 
 type Ctx = {
   renderer: unknown
@@ -18,15 +18,15 @@ export function line(ctx: Ctx, sessionID: string, now: number): string {
   const s = ctx.data.session.get(sessionID)
   const parts: string[] = []
   const model = s?.model?.id ?? ctx.ui.model.current()?.modelID
-  if (model) parts.push(`◆ ${model}`)
+  if (model) parts.push(`◆ ${clean(model, 60)}`)
   const dir = ctx.location?.directory
-  if (dir) parts.push(base(dir))
+  if (dir) parts.push(clean(base(dir), 40))
   const branch = ctx.data.location.vcs.info()?.branch?.current
-  if (branch) parts.push(`⎇ ${branch}`)
+  if (branch) parts.push(`⎇ ${clean(branch, 60)}`)
   if (s) {
-    const ctxTokens = s.tokens.input + s.tokens.cache.read
+    const ctxTokens = (s.tokens?.input ?? 0) + (s.tokens?.cache?.read ?? 0)
     if (ctxTokens > 0) parts.push(`ctx ${tokens(ctxTokens)}`)
-    parts.push(money(s.cost))
+    parts.push(money(s.cost ?? 0))
     const created = toMs(s.time.created)
     if (created !== undefined) parts.push(duration(now - created))
   }
@@ -44,7 +44,7 @@ export async function setup(ctx: Ctx, makeText?: MakeText): Promise<() => void> 
       const draw = (): string => line(ctx, input.sessionID, Date.now())
       const node = make(draw())
       void ctx.data.session.sync(input.sessionID).catch(() => {})
-      tick.add(() => void (node.content = draw()))
+      bind(tick, node, draw)
       return node
     },
   })

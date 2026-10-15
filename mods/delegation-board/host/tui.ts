@@ -1,4 +1,4 @@
-import { defaultMakeText, duration, money, ticker, toMs, tokens, type Data, type MakeText, type SessionInfo } from '../../../host-lib/tui'
+import { bind, clean, defaultMakeText, duration, money, ticker, toMs, tokens, type Data, type MakeText, type SessionInfo } from '../../../host-lib/tui'
 
 const PANEL = 'iuliandita.delegation-board'
 const MAX_ROWS = 40
@@ -16,10 +16,6 @@ type Ctx = {
 
 export type Row = { id: string; state: 'running' | 'idle' | 'done' | 'failed' | 'stopped'; agent: string; title: string; cost: number; tokens: number; ms: number }
 
-// Control characters and line breaks in a title must not move the cursor or break the table.
-const isControl = (c: number): boolean => c < 0x20 || (c >= 0x7f && c <= 0x9f) || (c >= 0x200b && c <= 0x200f) || c === 0x2028 || c === 0x2029 || (c >= 0x202a && c <= 0x202e) || (c >= 0x2066 && c <= 0x2069)
-const clean = (s: string): string => [...s].map((ch) => (isControl(ch.codePointAt(0) ?? 0) ? ' ' : ch)).join('').replace(/ +/g, ' ').trim().slice(0, TITLE_MAX)
-
 function state(s: SessionInfo, running: boolean): Row['state'] {
   if (running) return 'running'
   if (s.outcome === 'succeeded') return 'done'
@@ -28,36 +24,48 @@ function state(s: SessionInfo, running: boolean): Row['state'] {
   return 'idle'
 }
 
-// The sessions below the one on screen: what OpenCode calls a child session is a subagent's run.
+// Whether `id` sits below `root` in the session tree: what OpenCode calls a child session is a subagent's run.
+function below(data: Data, id: string, root: string): boolean {
+  let cur = data.session.get(id)?.parentID
+  for (let depth = 0; cur !== undefined && depth < 20; depth++) {
+    if (cur === root) return true
+    cur = data.session.get(cur)?.parentID
+  }
+  return false
+}
+
 export function rows(data: Data, sessionID: string, now: number): Row[] {
   const out: Row[] = []
   for (const id of data.session.family(sessionID)) {
-    if (id === sessionID) continue
+    if (id === sessionID || !below(data, id, sessionID)) continue
     const s = data.session.get(id)
     if (!s) continue
     const running = data.session.status(id) === 'running'
-    const created = toMs(s.time.created)
-    const end = running ? now : (toMs(s.time.idle) ?? toMs(s.time.updated) ?? now)
+    const created = toMs(s.time?.created)
+    const stopped = toMs(s.time?.idle) ?? toMs(s.time?.updated)
+    const end = running ? now : stopped
     out.push({
       id,
       state: state(s, running),
-      agent: clean(s.agent ?? 'agent'),
-      title: clean(s.title ?? ''),
-      cost: s.cost,
-      tokens: s.tokens.input + s.tokens.output + s.tokens.cache.read,
-      ms: created === undefined ? 0 : end - created,
+      agent: clean(s.agent ?? 'agent', 12),
+      title: clean(s.title ?? '', TITLE_MAX),
+      cost: s.cost ?? 0,
+      tokens: (s.tokens?.input ?? 0) + (s.tokens?.output ?? 0) + (s.tokens?.cache?.read ?? 0),
+      ms: created === undefined || end === undefined ? 0 : end - created,
     })
   }
-  return out.slice(-MAX_ROWS)
+  return out
 }
 
 const MARK: Record<Row['state'], string> = { running: '●', idle: '○', done: '✓', failed: '✗', stopped: '■' }
 
-export function table(list: readonly Row[]): string {
-  if (list.length === 0) return 'delegation-board: no subagents in this session yet.'
-  const running = list.filter((r) => r.state === 'running').length
-  const head = `delegation-board: ${list.length} subagent${list.length === 1 ? '' : 's'}, ${running} running, ${money(list.reduce((a, r) => a + r.cost, 0))}`
-  const body = list.map((r) => `${MARK[r.state]} ${r.state.padEnd(7)} ${r.agent.padEnd(12).slice(0, 12)} ${duration(r.ms).padStart(6)} ${tokens(r.tokens).padStart(6)} ${money(r.cost).padStart(7)}  ${r.title}`)
+export function table(all: readonly Row[]): string {
+  if (all.length === 0) return 'delegation-board: no subagents in this session yet.'
+  const list = all.slice(-MAX_ROWS)
+  const running = all.filter((r) => r.state === 'running').length
+  const hidden = all.length - list.length
+  const head = `delegation-board: ${all.length} subagent${all.length === 1 ? '' : 's'}, ${running} running, ${money(all.reduce((a, r) => a + r.cost, 0))}${hidden ? ` (${hidden} older not shown)` : ''}`
+  const body = list.map((r) => `${MARK[r.state]} ${r.state.padEnd(7)} ${r.agent.padEnd(12)} ${duration(r.ms).padStart(6)} ${tokens(r.tokens).padStart(6)} ${money(r.cost).padStart(7)}  ${r.title}`)
   return [head, ...body].join('\n')
 }
 
@@ -84,7 +92,7 @@ export async function setup(ctx: Ctx, makeText?: MakeText): Promise<() => void> 
       const draw = (): string => table(rows(ctx.data, input.sessionID, Date.now()))
       const node = make(draw())
       void ctx.data.session.sync(input.sessionID).catch(() => {})
-      tick.add(() => void (node.content = draw()))
+      bind(tick, node, draw)
       return node
     },
   })

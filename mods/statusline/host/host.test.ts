@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 
 import type { Data, SessionInfo } from '../../../host-lib/tui'
-import { duration, toMs, tokens } from '../../../host-lib/tui'
+import { bind, duration, ticker, toMs, tokens } from '../../../host-lib/tui'
 import { line, setup } from './tui'
 
 const session = (over: Partial<SessionInfo> = {}): SessionInfo => ({
@@ -62,6 +62,13 @@ test('setup claims the slot above the prompt, redraws on a timer, and releases o
   expect(c.released).toEqual([1])
 })
 
+test('host-supplied names are cleaned before they are drawn', () => {
+  const c = ctx({ branch: 'feat/' + String.fromCharCode(0x202e) + 'txt' + String.fromCharCode(0x1b) + ']0;x' })
+  const out = line(c.value, 's1', 1_000_000)
+  expect(out).not.toContain(String.fromCharCode(0x202e))
+  expect(out).not.toContain(String.fromCharCode(0x1b))
+})
+
 test('time and number helpers', () => {
   expect(toMs(5)).toBe(5)
   expect(toMs('2026-01-01T00:00:00Z')).toBe(Date.parse('2026-01-01T00:00:00Z'))
@@ -71,4 +78,24 @@ test('time and number helpers', () => {
   expect(duration(75 * 60_000)).toBe('1h15m')
   expect(tokens(999)).toBe('999')
   expect(tokens(1_500_000)).toBe('1.5M')
+})
+
+test('a redraw stops once the host destroys its node, and a failing draw is dropped', async () => {
+  const tick = ticker(10)
+  const node = { content: '', isDestroyed: false }
+  let draws = 0
+  bind(tick, node, () => `n${++draws}`)
+  const bad = { content: 'keep' }
+  bind(tick, bad, () => {
+    throw new Error('boom')
+  })
+  await Bun.sleep(60)
+  expect(node.content).not.toBe('')
+  expect(bad.content).toBe('keep')
+  node.isDestroyed = true
+  await Bun.sleep(40)
+  const seen = draws
+  await Bun.sleep(60)
+  expect(draws).toBe(seen)
+  tick.stop()
 })

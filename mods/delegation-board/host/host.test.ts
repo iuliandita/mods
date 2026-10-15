@@ -35,6 +35,30 @@ test('rows are the child sessions with a state from their outcome and status', (
   expect(r[0]?.ms).toBe(120_000)
 })
 
+test('inside a child session only its own descendants are listed, never the root or siblings', () => {
+  const d = data([info('a'), info('b'), info('a1', { parentID: 'a' }), info('x', { parentID: 'nobody' })])
+  expect(rows(d, 'a', 0).map((r) => r.id)).toEqual(['a1'])
+  expect(rows(d, 'root', 0).map((r) => r.id)).toEqual(['a', 'b', 'a1'])
+})
+
+test('a finished session without an end time shows 0, and the header counts every subagent past the row limit', () => {
+  const d = data([info('a', { time: { created: 0 }, outcome: 'succeeded' })])
+  expect(rows(d, 'root', 999_999)[0]?.ms).toBe(0)
+  const many = data(Array.from({ length: 45 }, (_, i) => info(`c${i}`, { outcome: 'succeeded' })))
+  const t = table(rows(many, 'root', 0))
+  expect(t.split('\n')[0]).toContain('45 subagents')
+  expect(t.split('\n')[0]).toContain('5 older not shown')
+  expect(t.split('\n')).toHaveLength(41)
+})
+
+test('names with escape, bidi or tag characters are cleaned; the cut is on code points', () => {
+  const evil = 'a\u001b]0;pwn\u0007b\u202etxt\u061cc\u{e0041}d'
+  const [r] = rows(data([info('a', { title: evil, agent: 'x'.repeat(5) + '😀'.repeat(20) })]), 'root', 0)
+  expect(r?.title).toBe('a ]0;pwn b txt c d')
+  expect([...(r?.agent ?? '')]).toHaveLength(12)
+  expect(r?.agent.includes('\ud83d') && !r?.agent.endsWith('😀')).toBe(false)
+})
+
 test('the table has a header with counts and one line per subagent; titles cannot break it', () => {
   const t = table(rows(data([info('a', { outcome: 'succeeded', title: 'line1\nline2‮evil' })]), 'root', 0))
   const lines = t.split('\n')

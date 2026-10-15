@@ -28,27 +28,45 @@ function duration(ms) {
 }
 var tokens = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
 var money = (n) => `$${n.toFixed(2)}`;
+var isControl = (c) => c < 32 || c >= 127 && c <= 159 || c === 1564 || c >= 8203 && c <= 8207 || c === 8232 || c === 8233 || c >= 8234 && c <= 8238 || c >= 8288 && c <= 8292 || c >= 8294 && c <= 8297 || c === 65279 || c >= 917504 && c <= 917631;
+var clean = (s, max) => [...[...s].map((ch) => isControl(ch.codePointAt(0) ?? 0) ? " " : ch).join("").replace(/ +/g, " ").trim()].slice(0, max).join("");
+var MAX_JOBS = 32;
 function ticker(everyMs) {
   const jobs = new Set;
   const timer = setInterval(() => {
-    for (const job of jobs) {
+    for (const job of [...jobs]) {
       try {
-        job();
-      } catch {
+        if (job() === false)
+          jobs.delete(job);
+      } catch (e) {
+        console.error(`terminal plugin: a redraw failed and was stopped (${e instanceof Error ? e.message : String(e)})`);
         jobs.delete(job);
       }
     }
   }, everyMs);
   timer.unref?.();
-  return { add: (job) => (jobs.add(job), () => void jobs.delete(job)), stop: () => clearInterval(timer) };
+  return {
+    add: (job) => {
+      jobs.add(job);
+      if (jobs.size > MAX_JOBS)
+        jobs.delete(jobs.values().next().value);
+      return () => void jobs.delete(job);
+    },
+    stop: () => clearInterval(timer)
+  };
+}
+function bind(tick, node, draw) {
+  tick.add(() => {
+    if (node.isDestroyed === true)
+      return false;
+    node.content = draw();
+  });
 }
 
 // mods/delegation-board/host/tui.ts
 var PANEL = "iuliandita.delegation-board";
 var MAX_ROWS = 40;
 var TITLE_MAX = 60;
-var isControl = (c) => c < 32 || c >= 127 && c <= 159 || c >= 8203 && c <= 8207 || c === 8232 || c === 8233 || c >= 8234 && c <= 8238 || c >= 8294 && c <= 8297;
-var clean = (s) => [...s].map((ch) => isControl(ch.codePointAt(0) ?? 0) ? " " : ch).join("").replace(/ +/g, " ").trim().slice(0, TITLE_MAX);
 function state(s, running) {
   if (running)
     return "running";
@@ -60,36 +78,48 @@ function state(s, running) {
     return "stopped";
   return "idle";
 }
+function below(data, id, root) {
+  let cur = data.session.get(id)?.parentID;
+  for (let depth = 0;cur !== undefined && depth < 20; depth++) {
+    if (cur === root)
+      return true;
+    cur = data.session.get(cur)?.parentID;
+  }
+  return false;
+}
 function rows(data, sessionID, now) {
   const out = [];
   for (const id of data.session.family(sessionID)) {
-    if (id === sessionID)
+    if (id === sessionID || !below(data, id, sessionID))
       continue;
     const s = data.session.get(id);
     if (!s)
       continue;
     const running = data.session.status(id) === "running";
-    const created = toMs(s.time.created);
-    const end = running ? now : toMs(s.time.idle) ?? toMs(s.time.updated) ?? now;
+    const created = toMs(s.time?.created);
+    const stopped = toMs(s.time?.idle) ?? toMs(s.time?.updated);
+    const end = running ? now : stopped;
     out.push({
       id,
       state: state(s, running),
-      agent: clean(s.agent ?? "agent"),
-      title: clean(s.title ?? ""),
-      cost: s.cost,
-      tokens: s.tokens.input + s.tokens.output + s.tokens.cache.read,
-      ms: created === undefined ? 0 : end - created
+      agent: clean(s.agent ?? "agent", 12),
+      title: clean(s.title ?? "", TITLE_MAX),
+      cost: s.cost ?? 0,
+      tokens: (s.tokens?.input ?? 0) + (s.tokens?.output ?? 0) + (s.tokens?.cache?.read ?? 0),
+      ms: created === undefined || end === undefined ? 0 : end - created
     });
   }
-  return out.slice(-MAX_ROWS);
+  return out;
 }
 var MARK = { running: "●", idle: "○", done: "✓", failed: "✗", stopped: "■" };
-function table(list) {
-  if (list.length === 0)
+function table(all) {
+  if (all.length === 0)
     return "delegation-board: no subagents in this session yet.";
-  const running = list.filter((r) => r.state === "running").length;
-  const head = `delegation-board: ${list.length} subagent${list.length === 1 ? "" : "s"}, ${running} running, ${money(list.reduce((a, r) => a + r.cost, 0))}`;
-  const body = list.map((r) => `${MARK[r.state]} ${r.state.padEnd(7)} ${r.agent.padEnd(12).slice(0, 12)} ${duration(r.ms).padStart(6)} ${tokens(r.tokens).padStart(6)} ${money(r.cost).padStart(7)}  ${r.title}`);
+  const list = all.slice(-MAX_ROWS);
+  const running = all.filter((r) => r.state === "running").length;
+  const hidden = all.length - list.length;
+  const head = `delegation-board: ${all.length} subagent${all.length === 1 ? "" : "s"}, ${running} running, ${money(all.reduce((a, r) => a + r.cost, 0))}${hidden ? ` (${hidden} older not shown)` : ""}`;
+  const body = list.map((r) => `${MARK[r.state]} ${r.state.padEnd(7)} ${r.agent.padEnd(12)} ${duration(r.ms).padStart(6)} ${tokens(r.tokens).padStart(6)} ${money(r.cost).padStart(7)}  ${r.title}`);
   return [head, ...body].join(`
 `);
 }
@@ -116,7 +146,7 @@ async function setup(ctx, makeText) {
       const draw = () => table(rows(ctx.data, input.sessionID, Date.now()));
       const node = make(draw());
       ctx.data.session.sync(input.sessionID).catch(() => {});
-      tick.add(() => void (node.content = draw()));
+      bind(tick, node, draw);
       return node;
     }
   });
