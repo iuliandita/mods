@@ -52,10 +52,10 @@ def install_mods(
         if unknown:
             known = ", ".join(sorted(mods)) or "none"
             return _fail(f"unknown mod(s): {', '.join(unknown)} (known: {known})")
-        if source is None and generate(root, check=True):
+        if source is None and generate(root, check=True, bundles=False):
             return _fail("generated files are stale; run scripts/mods generate")
         if include_local:
-            generate(root, include_local=True)
+            generate(root, include_local=True, bundles=False)
         for name in names:
             mod = mods[name]
             market = _marketplace(mod)

@@ -1,0 +1,20 @@
+{
+  "name": "iuliandita-mods",
+  "interface": {
+    "displayName": "iuliandita mods"
+  },
+  "plugins": [
+    {
+      "name": "guard-rules",
+      "source": {
+        "source": "local",
+        "path": "./mods/guard-rules/codex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

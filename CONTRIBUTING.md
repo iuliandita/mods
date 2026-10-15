@@ -8,13 +8,15 @@ Report suspected vulnerabilities through [SECURITY.md](SECURITY.md), not a publi
 
 `mods/<name>/mod.json` is the catalog source. Edit `shared/` helpers and inject templates,
 then run `scripts/mods generate`. Never hand-edit `mods.json`, the marketplace catalog,
-copied `hooks/shared/` helpers, or injected blocks. Private mods belong under ignored `local/`.
+copied `hooks/shared/` helpers, injected blocks, the Codex marketplace (`.agents/plugins/`), or
+the built `codex/` and `opencode/` bundles (edit `mods/<name>/host/` instead). Private mods belong
+under ignored `local/`.
 Mods run unsandboxed with user permissions. Review egress and source changes explicitly.
 
 ## Checks and documentation
 
-Run `python3 -m pytest -q -m "not integration"`, `scripts/mods validate --no-claude`,
-and `scripts/mods generate --check`. With the pinned Claude CLI, also run
+Run `python3 -m pytest -q -m "not integration"`, `bun test mods/*/host`,
+`scripts/mods validate --no-claude`, and `scripts/mods generate --check`. With the pinned Claude CLI, also run
 `scripts/mods validate` and `python3 -m pytest -q -m integration` using a temporary config root.
 After TypeScript changes, run `scripts/typecheck <mod>` and
 `claude plugin test mods/<mod>/claude`. Typechecking requires API types from an authenticated

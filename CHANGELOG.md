@@ -52,6 +52,10 @@
   `\uXXXX` JSON form of a non-ASCII secret.
 - `guard-rules` option `unprotectedRepos`: path prefixes of repositories exempt from the
   protected-branch rule only; attribution and identity still apply there.
+- `guard-rules` also runs on Codex (plugin with a `PreToolUse` hook) and OpenCode 2.x (plugin),
+  from the same rules code. New `hosts` field in `mod.json`, bundles built by `scripts/mods
+  generate` with the Bun version in `.bun-version`, a generated `.agents/plugins/marketplace.json`,
+  and `docs/COMPATIBILITY.md` with what works on each host for every mod, and why.
 - `prompt-gate` and `skill-pick` dry mode releases the prompt first and measures from a clock
   timer afterwards; `delegation-board` resets on `/clear` and prints a text table when its pane
   is not placed (Claude Desktop).

@@ -80,6 +80,15 @@ a terminal install at user scope loads in Desktop sessions too.
   `// @inject <name> begin (...)` / `// @inject <name> end` in `claude/hooks/register.ts`;
   `scripts/mods generate` rewrites the text between them, and `generate --check` and `validate`
   flag a block that differs. Edit the template, never the block. Mod-specific parts stay outside it.
+- A mod that also runs on Codex or OpenCode lists them in `"hosts"` in its mod.json. The
+  engine-neutral logic stays in `claude/hooks/` (it must not import `claude-code`); only
+  `claude/hooks/register.ts` is Claude-specific. `mods/<name>/host/` holds the Node adapters
+  (`bin.ts` for Codex, `opencode.ts` for OpenCode, tested with `bun test`), and `scripts/mods
+  generate` bundles them with the Bun in `.bun-version` into `codex/bin/<name>.mjs` and
+  `opencode/server.js` (committed, never hand-edited) and writes `.agents/plugins/marketplace.json`.
+  The `codex/` and `opencode/` manifests carry the same version as the Claude plugin. What each
+  host can and cannot do is in `docs/COMPATIBILITY.md`; update it when a mod gains or loses a host.
+  A host adapter reads its options only from the user's config dir, never a repository file.
 - `local/` is gitignored: private mods (`local/mods/<name>/`) installed with `--local`.
 - `scripts/modslib/` is the CLI package; `tests/` is its pytest suite; `.github/` holds CI.
 - `private-patterns.txt` (gitignored, one regex per line; see `private-patterns.example.txt`)
@@ -98,8 +107,8 @@ a terminal install at user scope loads in Desktop sessions too.
   `scripts/mods validate` private-pattern scan enforces part of this.
 - Security mods fail closed: a guard mod must report at least one gating hook, and every
   gating hook needs `.catch`.
-- Run before pushing: `python3 -m pytest -q -m "not integration"`, `scripts/mods validate`, and
-  `scripts/mods generate --check`. Integration tests need the claude CLI and use a throwaway
+- Run before pushing: `python3 -m pytest -q -m "not integration"`, `bun test mods/*/host`,
+  `scripts/mods validate`, and `scripts/mods generate --check`. Integration tests need the claude CLI and use a throwaway
   config dir; run them with `python3 -m pytest -q -m integration`.
 - After changing a mod's TypeScript, run `scripts/typecheck [mod]` and `claude plugin test
   mods/<name>/claude`. The type check needs the API types the engine lays beside a mod it has
