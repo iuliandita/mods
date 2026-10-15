@@ -69,6 +69,8 @@
       "kind": "rewrite",
       "egress": [
         "anthropic",
+        "third-party:openai",
+        "third-party:host-provider",
         "third-party:typesafe"
       ],
       "modes": [
@@ -137,6 +139,8 @@
       "kind": "rewrite",
       "egress": [
         "anthropic",
+        "third-party:openai",
+        "third-party:host-provider",
         "third-party:typesafe"
       ],
       "modes": [

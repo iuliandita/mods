@@ -117,6 +117,9 @@ user-level configuration when updating or rolling back a path-based install.
 a nested Codex session uses plan tokens, and OpenCode uses its selected model provider. With a
 TypeSafe key, Jev may also receive them. On these two hosts, `jevPaths` restricts all of those
 calls; `mode: "off"` stops them. See the mod READMEs before enabling either.
+The catalog lists destinations across all supported hosts: `anthropic` for Claude,
+`third-party:openai` for Codex, and `third-party:host-provider` for OpenCode's selected provider.
+`third-party:typesafe` applies when Jev is enabled with a key.
 
 After a Codex install the hook command is
 `node <plugin>/bin/guard-rules.mjs`; the same file in a clone (`mods/guard-rules/codex/bin/`) is
