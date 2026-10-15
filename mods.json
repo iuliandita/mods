@@ -23,7 +23,12 @@
         "headless": "untested"
       },
       "verified_on": null,
-      "install": "claude plugin marketplace add iuliandita/mods && claude plugin install delegation-board@iuliandita-mods"
+      "install": "claude plugin marketplace add iuliandita/mods && claude plugin install delegation-board@iuliandita-mods",
+      "hosts": {
+        "opencode": {
+          "install": "clone this repository and add {\"package\": \"<clone>/mods/delegation-board/opencode\"} to \"plugins\" in ~/.config/opencode/cli.json"
+        }
+      }
     },
     {
       "name": "guard-rules",
@@ -181,7 +186,12 @@
         "headless": "untested"
       },
       "verified_on": null,
-      "install": "claude plugin marketplace add iuliandita/mods && claude plugin install statusline@iuliandita-mods"
+      "install": "claude plugin marketplace add iuliandita/mods && claude plugin install statusline@iuliandita-mods",
+      "hosts": {
+        "opencode": {
+          "install": "clone this repository and add {\"package\": \"<clone>/mods/statusline/opencode\"} to \"plugins\" in ~/.config/opencode/cli.json"
+        }
+      }
     }
   ]
 }

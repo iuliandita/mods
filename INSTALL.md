@@ -97,6 +97,13 @@ OpenCode 2.x has no marketplace: clone this repository and add the package to `o
 { "plugins": [{ "package": "/path/to/clone/mods/guard-rules/opencode" }] }
 ```
 
+Terminal UI mods (`statusline`, `delegation-board`) are listed in `plugins` in
+`~/.config/opencode/cli.json` instead; OpenCode has no project-level file for these:
+
+```json
+{ "plugins": [{ "package": "/path/to/clone/mods/statusline/opencode" }] }
+```
+
 Options for both hosts live in `~/.config/iuliandita-mods/<mod>.json` (see the mod's README),
 never in a repository. After a Codex install the hook command is
 `node <plugin>/bin/guard-rules.mjs`; the same file in a clone (`mods/guard-rules/codex/bin/`) is

@@ -212,7 +212,7 @@ def _problems(path: Path, data: object, shared: Path) -> list[str]:
 # Files each host package must ship, and the manifest whose version must match the Claude plugin's.
 HOST_FILES = {
     "codex": ("host/bin.ts", "codex/.codex-plugin/plugin.json", "codex/hooks/hooks.json"),
-    "opencode": ("host/opencode.ts", "opencode/package.json"),
+    "opencode": ("opencode/package.json",),
 }
 HOST_VERSION_FILE = {"codex": "codex/.codex-plugin/plugin.json", "opencode": "opencode/package.json"}
 
@@ -232,6 +232,9 @@ def _host_problems(path: Path, hosts: list[str]) -> list[str]:
         missing = [f for f in HOST_FILES[host] if not (path / f).is_file()]
         if missing:
             errs.append(f"{path.name}: host {host} lacks {', '.join(missing)}")
+            continue
+        if host == "opencode" and not any((path / f).is_file() for f in ("host/opencode.ts", "host/tui.ts")):
+            errs.append(f"{path.name}: host opencode lacks host/opencode.ts or host/tui.ts")
             continue
         manifest = path / HOST_VERSION_FILE[host]
         if _field(manifest, "name") != path.name:

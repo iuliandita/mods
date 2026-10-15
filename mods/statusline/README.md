@@ -243,3 +243,11 @@ calls live in `claude/hooks/register.tsx`.
     scripts/typecheck statusline
     claude plugin test mods/statusline/claude
     claude plugin validate --strict mods/statusline/claude
+
+## OpenCode
+
+On OpenCode 2.x the mod is a terminal UI plugin: one line above the prompt with the model, folder, branch,
+context tokens, cost, elapsed time and a mark while a turn runs. List it in `plugins` in
+`~/.config/opencode/cli.json` (see [INSTALL.md](../../INSTALL.md)). It has no rate-limit bars, PR or issue
+counts, kube context or line counts: OpenCode does not hand those to a plugin. Codex has no way to draw from
+a plugin. Details in [docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md).

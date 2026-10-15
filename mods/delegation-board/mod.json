@@ -12,5 +12,6 @@
     "vscode": "untested",
     "headless": "untested"
   },
-  "verified_on": null
+  "verified_on": null,
+  "hosts": ["opencode"]
 }

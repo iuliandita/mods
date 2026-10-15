@@ -64,6 +64,9 @@
   dry-run measurement, a nested low-effort luna session as the small model) and OpenCode 2.x (a low-effort DeepSeek Flash
   model call and the host's skill list). `scripts/typecheck --hosts` checks them against a stand-in for the
   engine types.
+- `statusline` and `delegation-board` also run on OpenCode 2.x as terminal UI plugins (`opencode/tui.js`,
+  listed in `~/.config/opencode/cli.json`): a one-line status and a panel of child sessions. Codex
+  has no way to draw from a plugin. `scripts/mods generate` builds `host/tui.ts` into `opencode/tui.js`.
 - `prompt-gate` and `skill-pick` dry mode releases the prompt first and measures from a clock
   timer afterwards; `delegation-board` resets on `/clear` and prints a text table when its pane
   is not placed (Claude Desktop).

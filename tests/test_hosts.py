@@ -112,3 +112,16 @@ def test_host_files_cannot_overwrite_a_host_package_file(tmp_path: Path) -> None
     (mod / "claude" / "hooks" / "hooks.json").write_text("{}")
     with pytest.raises(CatalogError, match="would overwrite"):
         load_mods(tmp_path)
+
+
+def test_an_opencode_package_may_ship_only_a_terminal_ui_entry(tmp_path: Path) -> None:
+    mod = write_mod(tmp_path, "alpha", hosts=["opencode"])
+    add_hosts(mod, "opencode")
+    (mod / "host" / "opencode.ts").rename(mod / "host" / "tui.ts")
+    (loaded,) = load_mods(tmp_path)
+    assert generate_module.bundle_kinds(loaded) == ["opencode-tui"]
+    assert generate_module.bundle_path(loaded, "opencode-tui") == mod / "opencode" / "tui.js"
+    assert "cli.json" in generate_module.host_install(loaded)["opencode"]["install"]
+    (mod / "host" / "tui.ts").unlink()
+    with pytest.raises(CatalogError, match="lacks host/opencode.ts or host/tui.ts"):
+        load_mods(tmp_path)

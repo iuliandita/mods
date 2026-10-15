@@ -1,0 +1,13 @@
+{
+  "name": "delegation-board",
+  "version": "0.1.0",
+  "description": "A live pane of the session's subagents and teammates: type, model, effort, state, elapsed time, tokens, an optional cost estimate and the task description. It only observes; nothing leaves the machine.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "author": "iuliandita",
+  "repository": "https://github.com/iuliandita/mods",
+  "exports": {
+    "./tui": "./tui.js"
+  }
+}
