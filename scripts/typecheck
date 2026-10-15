@@ -27,8 +27,9 @@ if [ "${1:-}" = "--hosts" ]; then
     cat > "$htmp/tsconfig.json" <<JSON
 { "compilerOptions": { "target": "es2023", "lib": ["es2023"], "module": "esnext", "moduleResolution": "bundler",
   "strict": true, "noUncheckedIndexedAccess": true, "noEmit": true, "skipLibCheck": true,
-  "types": ["node", "bun"], "typeRoots": ["$htmp/node_modules/@types"] },
-  "include": ["$root/mods/$m/host"] }
+  "types": ["node", "bun"], "typeRoots": ["$htmp/node_modules/@types"],
+  "baseUrl": ".", "paths": { "claude-code": ["$root/scripts/host-shims/claude-code.d.ts"] } },
+  "include": ["$root/mods/$m/host", "$root/scripts/host-shims"] }
 JSON
     if "$htmp/node_modules/.bin/tsc" -p "$htmp/tsconfig.json"; then echo "typecheck: $m host ok"; else echo "typecheck: $m host FAILED" >&2; hfail=1; fi
   done

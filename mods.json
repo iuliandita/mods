@@ -81,7 +81,15 @@
         "headless": "untested"
       },
       "verified_on": null,
-      "install": "claude plugin marketplace add iuliandita/mods && claude plugin install prompt-gate@iuliandita-mods"
+      "install": "claude plugin marketplace add iuliandita/mods && claude plugin install prompt-gate@iuliandita-mods",
+      "hosts": {
+        "codex": {
+          "install": "codex plugin marketplace add iuliandita/mods && codex plugin add prompt-gate@iuliandita-mods"
+        },
+        "opencode": {
+          "install": "clone this repository and add {\"package\": \"<clone>/mods/prompt-gate/opencode\"} to \"plugins\" in opencode.json"
+        }
+      }
     },
     {
       "name": "secret-box",
@@ -140,7 +148,15 @@
         "headless": "untested"
       },
       "verified_on": null,
-      "install": "claude plugin marketplace add iuliandita/mods && claude plugin install skill-pick@iuliandita-mods"
+      "install": "claude plugin marketplace add iuliandita/mods && claude plugin install skill-pick@iuliandita-mods",
+      "hosts": {
+        "codex": {
+          "install": "codex plugin marketplace add iuliandita/mods && codex plugin add skill-pick@iuliandita-mods"
+        },
+        "opencode": {
+          "install": "clone this repository and add {\"package\": \"<clone>/mods/skill-pick/opencode\"} to \"plugins\" in opencode.json"
+        }
+      }
     },
     {
       "name": "statusline",

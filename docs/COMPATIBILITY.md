@@ -13,8 +13,8 @@ Versions checked: Claude Code 2.1.296, Codex CLI 0.162.1, OpenCode 2.0.29.
 | --- | --- | --- | --- |
 | `guard-rules` | **works** (terminal verified) | **works** | **works** |
 | `secret-box` | **works** (terminal verified) | **works**, partly: placeholders and the command's own output, see below | **works** |
-| `prompt-gate` | works, untested | **not ported**; needs its own model client and key | **not ported**; the host offers a model call |
-| `skill-pick` | works, untested | **not ported**; needs its own model client and key | **not ported**; the host lists skills and offers a model call |
+| `prompt-gate` | works, untested | **works**, needs `ANTHROPIC_API_KEY` for the small model | **works**; `on` runs as `flag` |
+| `skill-pick` | works, untested | **works**, needs `ANTHROPIC_API_KEY`; no use records | **works**; no use records |
 | `delegation-board` | works, untested | **not possible**: hooks cannot draw anything | **not ported**; its UI plugin entry is not evaluated yet |
 | `statusline` | works, untested | **not possible**: the status line only takes built-in items | **not ported**; its UI plugin entry is not evaluated yet |
 
@@ -100,11 +100,39 @@ the only one so far.
 
 ## prompt-gate and skill-pick
 
-Both call a small model, and both hook the prompt. Codex's `UserPromptSubmit` can block or add
-context but cannot rewrite the prompt, and a hook has no model of its own, so the mod would need
-its own client and API key, which changes what leaves your machine. OpenCode's v2 plugin context
-offers a model call through the host's own providers and a skill list, so a port is possible
-there.
+| | Claude Code | Codex | OpenCode |
+| --- | --- | --- | --- |
+| Hook | `prompt.submit` | `UserPromptSubmit` command hook | `session.prompt` hook |
+| Small model | the engine's model call | the Anthropic Messages API with `ANTHROPIC_API_KEY` (`ANTHROPIC_BASE_URL` is honored); no key means "error" and the prompt goes through | the host's `generate.text` with its own default model (the mod's `model` option is ignored) |
+| Stop a vague prompt (`on`) | drops it with the question | `decision: block` with the question; sending it again unchanged runs it | **runs as `flag`**: a throw stops the prompt but shows only a generic error, and the terminal UI sends it again |
+| Add a note (`flag`, skill-pick `on`) | adds context | `additionalContext` | appends the note to the prompt text |
+| Dry mode | measures from a timer after the prompt went on | the hook returns at once and starts a detached process that measures | measures from a timer in the host process |
+| Skill catalog (skill-pick) | the engine's skill listing | read from `SKILL.md` files in the folders Codex uses | `skill.list` |
+| Use records and agreement (skill-pick) | from the `Skill` tool call | **not possible**: Codex has no skill tool call to watch | **not ported** |
+| Options | plugin options | `~/.config/iuliandita-mods/<mod>.json` | the same file |
+| Stats | `/prompt-gate`, `/skill-pick` | `node .../<mod>.mjs summary\|last\|clear` | the same bundle |
+| Privacy notice for Jev | toast | `systemMessage` on the first prompt | host log |
+
+What was run on the real hosts, with a local stand-in for the Anthropic API (no real key was used):
+on Codex 0.162.1 a vague prompt was blocked with its question and the same prompt went through
+when sent again, `flag` put the note in the model's context, `dry` measured from the detached
+process and logged a record, and skill-pick put a skill name from the real skill folders in the
+model's context. On OpenCode 2.0.29 the note reached the model for both mods and `skill.list`
+supplied the catalog. The host's own model call failed in this environment (the provider refused
+the request for its default token limit), so the real OpenCode classification was not run; the
+adapter treats that as an error and lets the prompt through.
+
+Why the differences:
+
+- **A Codex hook has no model.** The small model call needs your Anthropic key, so the prompt goes
+  to Anthropic in addition to OpenAI. With `TYPESAFE_API_KEY` set it also goes to Jev, as in the
+  Claude plugin; set `classifier` / `picker` to `haiku` or use `jevPaths` to limit that.
+- **Dry mode on Codex needs a second process.** A hook must answer before the model sees the
+  prompt, and the hook process ends with its answer, so a detached `measure` process does the work.
+  It stops itself after 60 seconds.
+- **Bounced prompts are remembered in a file on Codex** (the hook is a new process each time), in
+  the mod's store under `~/.local/share/iuliandita-mods`.
+- **OpenCode cannot bounce a prompt.** The hook's only way to stop one is to throw.
 
 ## delegation-board and statusline
 

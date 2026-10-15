@@ -1,6 +1,6 @@
 # mods
 
-Claude Code mods you can install one at a time. `guard-rules` and `secret-box` also run on Codex and OpenCode;
+Claude Code mods you can install one at a time. `guard-rules`, `secret-box`, `prompt-gate` and `skill-pick` also run on Codex and OpenCode;
 [what works on which host, and why](docs/COMPATIBILITY.md).
 
 Mods are plugins built on the hooks-module API. They run with your permissions and are not

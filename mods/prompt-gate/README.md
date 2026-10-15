@@ -63,6 +63,22 @@ unusable answer falls back to Haiku alone and logs path `jev-fallback`. Haiku's 
 so in `on` and `flag` mode the worst case before the prompt goes on is about 14 s (6 s Jev, then 8 s
 Haiku).
 
+## Codex and OpenCode
+
+Install steps are in [INSTALL.md](../../INSTALL.md); what differs and why is in
+[docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md).
+
+- Options are the same names as below in `~/.config/iuliandita-mods/prompt-gate.json` (string
+  values). Nothing is read from a repository.
+- Codex: the small model is called with your `ANTHROPIC_API_KEY` (or `ANTHROPIC_BASE_URL` for a
+  proxy). Without a key every prompt counts as an error and goes through. `on` blocks with the
+  question and a second identical prompt runs. Dry mode measures from a detached process.
+- OpenCode: the host's own model answers; `on` runs as `flag`, because a hook can only stop a
+  prompt by throwing and OpenCode shows no reason for that.
+- Stats: `node <plugin>/bin/prompt-gate.mjs summary`, `last` or `clear`.
+- With `TYPESAFE_API_KEY` set, the prompt goes to Jev as described under Privacy; on Codex the
+  first dry-mode prompt shows that notice once.
+
 ## Options
 
 - `mode`: `off`, `dry`, `flag` or `on` (default `dry`).

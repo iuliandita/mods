@@ -14,5 +14,6 @@
   },
   "verified_on": null,
   "shared": ["advisory.ts", "hash.ts", "num.ts", "paths.ts", "reply.ts", "stats.ts"],
-  "inject": ["jev-client.inject.ts"]
+  "inject": ["jev-client.inject.ts"],
+  "hosts": ["codex", "opencode"]
 }

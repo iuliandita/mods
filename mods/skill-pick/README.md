@@ -83,6 +83,22 @@ anywhere; otherwise Jev is used only when the working directory is equal to or u
 (compared on path boundaries, after `..` segments are resolved). A non-blank value with no usable
 entry means nowhere. Setting it is recommended; see Privacy.
 
+## Codex and OpenCode
+
+Install steps are in [INSTALL.md](../../INSTALL.md); what differs and why is in
+[docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md).
+
+- Options are the same names as below in `~/.config/iuliandita-mods/skill-pick.json` (string
+  values). Nothing is read from a repository.
+- Codex: the catalog is read from the `SKILL.md` files in `.agents/skills` (working directory up
+  to your home), `~/.agents/skills`, `$CODEX_HOME/skills`, `/etc/codex/skills` and the skills of
+  installed plugins. The small model is called with your `ANTHROPIC_API_KEY` (or
+  `ANTHROPIC_BASE_URL`); without a key nothing is picked.
+- OpenCode: the catalog is the host's skill list and the host's own model answers.
+- No use records or agreement figures on either host: neither exposes a skill-load event to a
+  plugin the way Claude's `Skill` tool call does.
+- Stats: `node <plugin>/bin/skill-pick.mjs summary`, `last` or `clear`.
+
 ## Options
 
 - `mode`: `off`, `dry` or `on` (default `dry`).
