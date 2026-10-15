@@ -58,6 +58,12 @@ settings, never in a repository.
 
 Invalid options deny git and GitHub writes until fixed, so a typo cannot silently turn a rule off.
 
+`unprotectedRepos` exempts by location: it trusts the toplevel git reports for the directory the command
+runs in. A clone or linked worktree of another repository placed under a listed prefix is exempt too, and
+a push from a listed repository to an explicit URL or path is judged by the source repository only. Git
+reports physical paths while prefixes are compared as written, so a prefix that goes through a symlink
+never matches and the rule keeps applying. Keep the list to repositories where direct commits are intended.
+
 ## Classifying an environment
 
 A name that matches neither list is blocked, and the reason tells the model to ask you. You answer by

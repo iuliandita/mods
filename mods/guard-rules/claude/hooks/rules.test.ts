@@ -175,6 +175,9 @@ test('unprotectedRepos: a listed repository may commit, merge, rebase and push t
     expect((await evaluate(cmd, c, at('/h/personal/repo'))).enforced, cmd).toHaveLength(1)
     expect((await evaluate(cmd, cfg(), at('/h/notes'))).enforced, cmd).toHaveLength(1)
   }
+  // The exemption is decided per call, so a listed repository does not cover another repository in the same command.
+  const both = await evaluate('git -C /h/notes commit -m x && git -C /h/work/prod commit -m x', c, fakeEnv({ branch: 'main', topOf: (d) => d }))
+  expect(both.enforced).toHaveLength(1)
   // The prefix match stops at a path boundary, and a parent of a listed repository is not listed.
   for (const toplevel of ['/h/notes-old', '/h/notesx/repo', '/h', '/srv']) {
     expect((await evaluate('git commit -m x', c, at(toplevel))).enforced, toplevel).toHaveLength(1)
