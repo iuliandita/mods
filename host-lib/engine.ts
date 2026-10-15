@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { open, realpath } from 'node:fs/promises'
+import { dirname, join, resolve, sep } from 'node:path'
 
 import { dataDir, home } from './options'
 
@@ -23,6 +23,26 @@ export type EngineOptions = {
   // Where the mod's log and state live; the account's data directory unless a test says otherwise.
   store?: string
   fetch?: typeof fetch
+}
+
+const READ_MAX = 64 * 1024
+const FETCH_MS = 10_000
+
+// A regular file under `cwd` (after symlinks are resolved), at most READ_MAX bytes of it: a repository must not be able
+// to point AGENTS.md at a secret file or at a device and have it read into a prompt.
+export async function readUnder(cwd: string, name: string): Promise<string> {
+  const root = await realpath(cwd)
+  const file = await realpath(resolve(root, name))
+  if (file !== root && !file.startsWith(root + sep)) throw new Error('outside the working directory')
+  const handle = await open(file, 'r')
+  try {
+    if (!(await handle.stat()).isFile()) throw new Error('not a regular file')
+    const buf = Buffer.alloc(READ_MAX)
+    const { bytesRead } = await handle.read(buf, 0, READ_MAX, 0)
+    return buf.subarray(0, bytesRead).toString('utf8')
+  } finally {
+    await handle.close()
+  }
 }
 
 export const storeFile = (mod: string): string => join(dataDir(), mod, 'store.json')
@@ -86,11 +106,11 @@ export function createEngine(o: EngineOptions) {
     store,
     ui: { toast: (text: string): void => o.notify(text) },
     session: { cwd: async (): Promise<string> => o.cwd },
-    fs: { read: async (name: string): Promise<string> => readFile(resolve(o.cwd, name), 'utf8') },
+    fs: { read: (name: string): Promise<string> => readUnder(o.cwd, name) },
     model: { complete: o.complete },
     http: {
       fetch: async (url: string, init: { method?: string; headers?: Record<string, string>; body?: string }): Promise<{ status: number; text: string }> => {
-        const r = await doFetch(url, init)
+        const r = await doFetch(url, { ...init, signal: AbortSignal.timeout(FETCH_MS) })
         return { status: r.status, text: await r.text() }
       },
     },
@@ -98,6 +118,19 @@ export function createEngine(o: EngineOptions) {
 }
 
 export type NodeEngine = ReturnType<typeof createEngine>
+
+// The key goes wherever this points, so only https (or a loopback address, for a local proxy) is accepted.
+export function baseUrl(v: string | undefined): string {
+  const fallback = 'https://api.anthropic.com'
+  if (!v) return fallback
+  try {
+    const u = new URL(v)
+    const loopback = ['127.0.0.1', 'localhost', '[::1]'].includes(u.hostname)
+    return u.protocol === 'https:' || (u.protocol === 'http:' && loopback) ? v.replace(/\/+$/, '') : fallback
+  } catch {
+    return fallback
+  }
+}
 
 const ALIASES: Record<string, string> = { haiku: 'claude-haiku-5-5', sonnet: 'claude-sonnet-5-5', opus: 'claude-opus-5-5' }
 
@@ -107,7 +140,7 @@ export function anthropicComplete(key: () => string | undefined, doFetch: typeof
   return async (req) => {
     const apiKey = key()
     if (!apiKey) return { isAnswered: false, text: '' }
-    const r = await doFetch(`${(process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').replace(/\/+$/, '')}/v1/messages`, {
+    const r = await doFetch(`${baseUrl(process.env.ANTHROPIC_BASE_URL)}/v1/messages`, {
       method: 'POST',
       headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
       body: JSON.stringify({ model: ALIASES[req.model] ?? req.model, max_tokens: req.maxTokens, system: req.system, messages: [{ role: 'user', content: typeof req.prompt === 'string' ? req.prompt : req.prompt.map((b) => ({ type: 'text', text: b.text, ...(b.cache ? { cache_control: { type: 'ephemeral' } } : {}) })) }] }),

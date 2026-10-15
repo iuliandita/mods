@@ -1,9 +1,10 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import type { Complete } from '../../../host-lib/engine'
+import { baseUrl, readUnder, type Complete } from '../../../host-lib/engine'
 import type { PromptInput } from '../../../host-lib/prompt'
 import { main, type Io } from './cli'
 import { setup } from './opencode'
@@ -188,4 +189,52 @@ test('opencode: mode on runs as flag and appends the question; dry and a clear v
   const failed = { prompt: { text: VAGUE } }
   await (await plugin()).run(failed)
   expect(failed.prompt.text).toBe(VAGUE)
+})
+
+test('codex: a bounced prompt is remembered per working directory', async () => {
+  setOptions({ mode: 'on' })
+  const other = join(root, 'other')
+  mkdirSync(other, { recursive: true })
+  const at = (cwd: string) => JSON.stringify({ hook_event_name: 'UserPromptSubmit', prompt: VAGUE, cwd })
+  const run = async (cwd: string) => {
+    const i = io(at(cwd))
+    await main(['hook'], i)
+    return i.stdout ? JSON.parse(i.stdout) : null
+  }
+  expect((await run(root)).decision).toBe('block')
+  expect((await run(other)).decision).toBe('block')
+  expect(await run(root)).toBeNull()
+  expect(await run(other)).toBeNull()
+})
+
+test('a file read for the vocabulary stays under the working directory, is a regular file, and is capped', async () => {
+  const dir = join(root, 'repo')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(root, 'secret.txt'), 'top secret')
+  writeFileSync(join(dir, 'AGENTS.md'), 'x'.repeat(200_000))
+  symlinkSync(join(root, 'secret.txt'), join(dir, 'LEAK.md'))
+  symlinkSync(join(dir, 'AGENTS.md'), join(dir, 'CLAUDE.md'))
+  symlinkSync('/dev/zero', join(dir, 'ZERO.md'))
+  mkdirSync(join(dir, 'sub'))
+  await expect(readUnder(dir, 'LEAK.md')).rejects.toThrow('outside')
+  await expect(readUnder(dir, 'ZERO.md')).rejects.toThrow()
+  await expect(readUnder(dir, 'sub')).rejects.toThrow('not a regular file')
+  expect((await readUnder(dir, 'CLAUDE.md')).length).toBe(64 * 1024)
+})
+
+test('the Anthropic base URL must be https, or a loopback address', () => {
+  expect(baseUrl(undefined)).toBe('https://api.anthropic.com')
+  expect(baseUrl('https://proxy.example.com/')).toBe('https://proxy.example.com')
+  expect(baseUrl('http://127.0.0.1:8080')).toBe('http://127.0.0.1:8080')
+  expect(baseUrl('http://attacker.example.com')).toBe('https://api.anthropic.com')
+  expect(baseUrl('not a url')).toBe('https://api.anthropic.com')
+})
+
+// The committed Codex bundle under plain node, with no keys: it must answer and exit on its own.
+test('the built Codex bundle runs under node and exits after answering', () => {
+  const bundle = join(import.meta.dir, '..', 'codex', 'bin', 'prompt-gate.mjs')
+  const r = spawnSync('node', [bundle, 'hook'], { input: submit(VAGUE), encoding: 'utf8', env: { PATH: process.env.PATH ?? '' }, timeout: 20_000 })
+  expect(r.status).toBe(0)
+  expect(r.signal).toBeNull()
+  expect(spawnSync('node', [bundle, 'hook'], { input: 'not json', encoding: 'utf8', env: { PATH: process.env.PATH ?? '' }, timeout: 20_000 }).status).toBe(0)
 })

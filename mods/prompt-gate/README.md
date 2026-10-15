@@ -71,7 +71,7 @@ Install steps are in [INSTALL.md](../../INSTALL.md); what differs and why is in
 - Options are the same names as below in `~/.config/iuliandita-mods/prompt-gate.json` (string
   values). Nothing is read from a repository.
 - Codex: the small model is called with your `ANTHROPIC_API_KEY` (or `ANTHROPIC_BASE_URL` for a
-  proxy). Without a key every prompt counts as an error and goes through. `on` blocks with the
+  https or loopback proxy). Without a key every prompt counts as an error and goes through. `on` blocks with the
   question and a second identical prompt runs. Dry mode measures from a detached process.
 - OpenCode: the host's own model answers; `on` runs as `flag`, because a hook can only stop a
   prompt by throwing and OpenCode shows no reason for that.

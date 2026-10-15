@@ -4,8 +4,8 @@ import { fileURLToPath } from "node:url";
 
 // host-lib/engine.ts
 import { mkdirSync, readFileSync as readFileSync2, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { dirname, join as join2, resolve } from "node:path";
+import { open, realpath } from "node:fs/promises";
+import { dirname, join as join2, resolve, sep } from "node:path";
 
 // host-lib/options.ts
 import { readFileSync } from "node:fs";
@@ -35,6 +35,24 @@ function loadOptions(mod, path = optionsPath(mod)) {
 }
 
 // host-lib/engine.ts
+var READ_MAX = 64 * 1024;
+var FETCH_MS = 1e4;
+async function readUnder(cwd, name) {
+  const root = await realpath(cwd);
+  const file = await realpath(resolve(root, name));
+  if (file !== root && !file.startsWith(root + sep))
+    throw new Error("outside the working directory");
+  const handle = await open(file, "r");
+  try {
+    if (!(await handle.stat()).isFile())
+      throw new Error("not a regular file");
+    const buf = Buffer.alloc(READ_MAX);
+    const { bytesRead } = await handle.read(buf, 0, READ_MAX, 0);
+    return buf.subarray(0, bytesRead).toString("utf8");
+  } finally {
+    await handle.close();
+  }
+}
 var storeFile = (mod) => join2(dataDir(), mod, "store.json");
 function readStore(path) {
   try {
@@ -88,15 +106,27 @@ function createEngine(o) {
     store,
     ui: { toast: (text) => o.notify(text) },
     session: { cwd: async () => o.cwd },
-    fs: { read: async (name) => readFile(resolve(o.cwd, name), "utf8") },
+    fs: { read: (name) => readUnder(o.cwd, name) },
     model: { complete: o.complete },
     http: {
       fetch: async (url, init) => {
-        const r = await doFetch(url, init);
+        const r = await doFetch(url, { ...init, signal: AbortSignal.timeout(FETCH_MS) });
         return { status: r.status, text: await r.text() };
       }
     }
   };
+}
+function baseUrl(v) {
+  const fallback = "https://api.anthropic.com";
+  if (!v)
+    return fallback;
+  try {
+    const u = new URL(v);
+    const loopback = ["127.0.0.1", "localhost", "[::1]"].includes(u.hostname);
+    return u.protocol === "https:" || u.protocol === "http:" && loopback ? v.replace(/\/+$/, "") : fallback;
+  } catch {
+    return fallback;
+  }
 }
 var ALIASES = { haiku: "claude-haiku-5-5", sonnet: "claude-sonnet-5-5", opus: "claude-opus-5-5" };
 function anthropicComplete(key, doFetch = fetch) {
@@ -104,7 +134,7 @@ function anthropicComplete(key, doFetch = fetch) {
     const apiKey = key();
     if (!apiKey)
       return { isAnswered: false, text: "" };
-    const r = await doFetch(`${(process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com").replace(/\/+$/, "")}/v1/messages`, {
+    const r = await doFetch(`${baseUrl(process.env.ANTHROPIC_BASE_URL)}/v1/messages`, {
       method: "POST",
       headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
       body: JSON.stringify({ model: ALIASES[req.model] ?? req.model, max_tokens: req.maxTokens, system: req.system, messages: [{ role: "user", content: typeof req.prompt === "string" ? req.prompt : req.prompt.map((b) => ({ type: "text", text: b.text, ...b.cache ? { cache_control: { type: "ephemeral" } } : {} })) }] }),
@@ -141,7 +171,7 @@ function promptOutput(r, notices) {
   return notices.length ? JSON.stringify(systemMessage) : null;
 }
 function spawnMeasure(bundle, payload) {
-  const child = spawn(process.execPath, [bundle, "measure"], { detached: true, stdio: ["pipe", "ignore", "ignore"] });
+  const child = spawn(process.execPath, [bundle, "measure"], { detached: true, stdio: ["pipe", "ignore", "ignore"], windowsHide: true });
   child.on("error", () => {});
   child.stdin.on("error", () => {});
   child.stdin.end(JSON.stringify(payload));
@@ -161,14 +191,29 @@ function makePromptCli(spec) {
     const loaded = loadOptions(sp.mod, io.options);
     return sp.config(loaded.error ? {} : loaded.options);
   };
-  async function judge(io, sp, input, c) {
+  async function judge(io, sp, input, c, ctl = { expired: false }) {
     const notices = [];
     const complete = io.complete ?? anthropicComplete(() => process.env.ANTHROPIC_API_KEY);
     const engine = createEngine({ mod: sp.mod, cwd: input.cwd, complete, notify: (t) => notices.push(t), store: io.store });
-    const result = await sp.run(engine, c, input);
+    const result = await sp.run(engine, c, input, ctl);
     if (process.env.TYPESAFE_API_KEY)
       await new Promise((done) => setTimeout(done, 100));
     return { result, notices };
+  }
+  async function firstNotices(io, sp, c) {
+    const store = fileStore(io.store ?? storeFile(sp.mod));
+    const wanted = [
+      ["anthropicNotice", process.env.ANTHROPIC_API_KEY ? `${sp.mod}: prompts are sent to api.anthropic.com with ANTHROPIC_API_KEY to be judged. Set mode=off in ~/.config/iuliandita-mods/${sp.mod}.json to stop.` : null],
+      ["jevNotice", sp.notice(c)]
+    ];
+    const out = [];
+    for (const [key, text] of wanted) {
+      if (text && await store.get(key) !== true) {
+        out.push(text);
+        await store.set(key, true);
+      }
+    }
+    return out;
   }
   async function hook(io) {
     const input = parsePrompt(await io.stdin());
@@ -180,22 +225,19 @@ function makePromptCli(spec) {
       if (c.mode === "off" || sp.skip(input, c))
         return 0;
       if (c.mode === "dry") {
-        const notices = [];
-        const text = sp.notice(c);
-        if (text) {
-          const store = fileStore(io.store ?? storeFile(sp.mod));
-          if (await store.get("jevNotice") !== true) {
-            notices.push(text);
-            await store.set("jevNotice", true);
-          }
-        }
+        if (!io.measure && !process.env.ANTHROPIC_API_KEY && !process.env.TYPESAFE_API_KEY)
+          return 0;
+        const notices = await firstNotices(io, sp, c);
         (io.measure ?? ((p) => spawnMeasure(io.bundle, p)))(input);
         const out = promptOutput({}, notices);
         if (out)
           io.out(out);
         return 0;
       }
-      const done = await withDeadline(judge(io, sp, input, c), io.deadlineMs ?? DEADLINE_MS);
+      const ctl = { expired: false };
+      const done = await withDeadline(judge(io, sp, input, c, ctl), io.deadlineMs ?? DEADLINE_MS);
+      if (!done)
+        ctl.expired = true;
       const out = done ? promptOutput(done.result, done.notices) : null;
       if (out)
         io.out(out);
@@ -727,16 +769,31 @@ async function gate($, s, e, next) {
 
 // mods/prompt-gate/host/cli.ts
 var asBounced = (raw) => new Map(Object.entries(raw !== null && typeof raw === "object" ? raw : {}).filter((e) => typeof e[1] === "number"));
+var KEY = "\x00";
+var scoped = (cwd, m) => new Map([...m].filter(([k]) => k.startsWith(cwd + KEY)).map(([k, t]) => [k.slice(cwd.length + 1), t]));
 var cli = makePromptCli(() => ({
   mod: "prompt-gate",
   config: parseConfig,
   skip: (input, c) => skipReason({ text: input.prompt, wait: false, origin: { kind: "composer" } }, c) !== null,
   notice: (c) => process.env.TYPESAFE_API_KEY && c.classifier !== "haiku" ? `prompt-gate: prompts are sent to api.typesafe.ai (Jev) from ${c.jevPaths.trim() || "every directory"}. Restrict with the jevPaths option, or set classifier=haiku. See the README Privacy section.` : null,
-  run: async (engine, c, input) => {
-    const s = { ...c, vocab: null, bounced: asBounced(await engine.store.get("bounced")) };
+  run: async (engine, c, input, ctl) => {
+    const all = asBounced(await engine.store.get("bounced"));
+    const before = scoped(input.cwd, all);
+    const s = { ...c, vocab: null, bounced: new Map(before) };
     const e = { text: input.prompt, wait: false, origin: { kind: "composer" } };
     const r = await gate(engine, s, e, async (x) => ({ text: x.text, context: x.context }));
-    await engine.store.set("bounced", Object.fromEntries(s.bounced));
+    if (!ctl.expired) {
+      try {
+        const latest = asBounced(await engine.store.get("bounced"));
+        for (const h of before.keys())
+          if (!s.bounced.has(h))
+            latest.delete(input.cwd + KEY + h);
+        for (const [h, t] of s.bounced)
+          if (!before.has(h))
+            latest.set(input.cwd + KEY + h, t);
+        await engine.store.set("bounced", Object.fromEntries(latest));
+      } catch {}
+    }
     return r;
   },
   stats: async (cmd, c, store) => {
@@ -761,7 +818,7 @@ async function readStdin() {
 }
 setTimeout(() => process.exit(0), 60000).unref();
 try {
-  process.exitCode = await main(process.argv.slice(2), {
+  const code = await main(process.argv.slice(2), {
     stdin: readStdin,
     out: (s) => void process.stdout.write(s),
     err: (s) => void process.stderr.write(s.endsWith(`
@@ -769,6 +826,9 @@ try {
 `),
     bundle: fileURLToPath(import.meta.url)
   });
+  process.exitCode = code;
+  if (process.argv[2] === "hook")
+    process.stdout.write("", () => process.exit(code));
 } catch (e) {
   process.stderr.write(`prompt-gate: failed: ${e instanceof Error ? e.message : String(e)}
 `);

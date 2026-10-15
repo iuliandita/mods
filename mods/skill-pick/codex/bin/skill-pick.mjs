@@ -4,8 +4,8 @@ import { fileURLToPath } from "node:url";
 
 // host-lib/engine.ts
 import { mkdirSync, readFileSync as readFileSync2, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { dirname, join as join2, resolve } from "node:path";
+import { open, realpath } from "node:fs/promises";
+import { dirname, join as join2, resolve, sep } from "node:path";
 
 // host-lib/options.ts
 import { readFileSync } from "node:fs";
@@ -35,6 +35,24 @@ function loadOptions(mod, path = optionsPath(mod)) {
 }
 
 // host-lib/engine.ts
+var READ_MAX = 64 * 1024;
+var FETCH_MS = 1e4;
+async function readUnder(cwd, name) {
+  const root = await realpath(cwd);
+  const file = await realpath(resolve(root, name));
+  if (file !== root && !file.startsWith(root + sep))
+    throw new Error("outside the working directory");
+  const handle = await open(file, "r");
+  try {
+    if (!(await handle.stat()).isFile())
+      throw new Error("not a regular file");
+    const buf = Buffer.alloc(READ_MAX);
+    const { bytesRead } = await handle.read(buf, 0, READ_MAX, 0);
+    return buf.subarray(0, bytesRead).toString("utf8");
+  } finally {
+    await handle.close();
+  }
+}
 var storeFile = (mod) => join2(dataDir(), mod, "store.json");
 function readStore(path) {
   try {
@@ -88,15 +106,27 @@ function createEngine(o) {
     store,
     ui: { toast: (text) => o.notify(text) },
     session: { cwd: async () => o.cwd },
-    fs: { read: async (name) => readFile(resolve(o.cwd, name), "utf8") },
+    fs: { read: (name) => readUnder(o.cwd, name) },
     model: { complete: o.complete },
     http: {
       fetch: async (url, init) => {
-        const r = await doFetch(url, init);
+        const r = await doFetch(url, { ...init, signal: AbortSignal.timeout(FETCH_MS) });
         return { status: r.status, text: await r.text() };
       }
     }
   };
+}
+function baseUrl(v) {
+  const fallback = "https://api.anthropic.com";
+  if (!v)
+    return fallback;
+  try {
+    const u = new URL(v);
+    const loopback = ["127.0.0.1", "localhost", "[::1]"].includes(u.hostname);
+    return u.protocol === "https:" || u.protocol === "http:" && loopback ? v.replace(/\/+$/, "") : fallback;
+  } catch {
+    return fallback;
+  }
 }
 var ALIASES = { haiku: "claude-haiku-5-5", sonnet: "claude-sonnet-5-5", opus: "claude-opus-5-5" };
 function anthropicComplete(key, doFetch = fetch) {
@@ -104,7 +134,7 @@ function anthropicComplete(key, doFetch = fetch) {
     const apiKey = key();
     if (!apiKey)
       return { isAnswered: false, text: "" };
-    const r = await doFetch(`${(process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com").replace(/\/+$/, "")}/v1/messages`, {
+    const r = await doFetch(`${baseUrl(process.env.ANTHROPIC_BASE_URL)}/v1/messages`, {
       method: "POST",
       headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
       body: JSON.stringify({ model: ALIASES[req.model] ?? req.model, max_tokens: req.maxTokens, system: req.system, messages: [{ role: "user", content: typeof req.prompt === "string" ? req.prompt : req.prompt.map((b) => ({ type: "text", text: b.text, ...b.cache ? { cache_control: { type: "ephemeral" } } : {} })) }] }),
@@ -141,7 +171,7 @@ function promptOutput(r, notices) {
   return notices.length ? JSON.stringify(systemMessage) : null;
 }
 function spawnMeasure(bundle, payload) {
-  const child = spawn(process.execPath, [bundle, "measure"], { detached: true, stdio: ["pipe", "ignore", "ignore"] });
+  const child = spawn(process.execPath, [bundle, "measure"], { detached: true, stdio: ["pipe", "ignore", "ignore"], windowsHide: true });
   child.on("error", () => {});
   child.stdin.on("error", () => {});
   child.stdin.end(JSON.stringify(payload));
@@ -161,14 +191,29 @@ function makePromptCli(spec) {
     const loaded = loadOptions(sp.mod, io.options);
     return sp.config(loaded.error ? {} : loaded.options);
   };
-  async function judge(io, sp, input, c) {
+  async function judge(io, sp, input, c, ctl = { expired: false }) {
     const notices = [];
     const complete = io.complete ?? anthropicComplete(() => process.env.ANTHROPIC_API_KEY);
     const engine = createEngine({ mod: sp.mod, cwd: input.cwd, complete, notify: (t) => notices.push(t), store: io.store });
-    const result = await sp.run(engine, c, input);
+    const result = await sp.run(engine, c, input, ctl);
     if (process.env.TYPESAFE_API_KEY)
       await new Promise((done) => setTimeout(done, 100));
     return { result, notices };
+  }
+  async function firstNotices(io, sp, c) {
+    const store = fileStore(io.store ?? storeFile(sp.mod));
+    const wanted = [
+      ["anthropicNotice", process.env.ANTHROPIC_API_KEY ? `${sp.mod}: prompts are sent to api.anthropic.com with ANTHROPIC_API_KEY to be judged. Set mode=off in ~/.config/iuliandita-mods/${sp.mod}.json to stop.` : null],
+      ["jevNotice", sp.notice(c)]
+    ];
+    const out = [];
+    for (const [key, text] of wanted) {
+      if (text && await store.get(key) !== true) {
+        out.push(text);
+        await store.set(key, true);
+      }
+    }
+    return out;
   }
   async function hook(io) {
     const input = parsePrompt(await io.stdin());
@@ -180,22 +225,19 @@ function makePromptCli(spec) {
       if (c.mode === "off" || sp.skip(input, c))
         return 0;
       if (c.mode === "dry") {
-        const notices = [];
-        const text = sp.notice(c);
-        if (text) {
-          const store = fileStore(io.store ?? storeFile(sp.mod));
-          if (await store.get("jevNotice") !== true) {
-            notices.push(text);
-            await store.set("jevNotice", true);
-          }
-        }
+        if (!io.measure && !process.env.ANTHROPIC_API_KEY && !process.env.TYPESAFE_API_KEY)
+          return 0;
+        const notices = await firstNotices(io, sp, c);
         (io.measure ?? ((p) => spawnMeasure(io.bundle, p)))(input);
         const out = promptOutput({}, notices);
         if (out)
           io.out(out);
         return 0;
       }
-      const done = await withDeadline(judge(io, sp, input, c), io.deadlineMs ?? DEADLINE_MS);
+      const ctl = { expired: false };
+      const done = await withDeadline(judge(io, sp, input, c, ctl), io.deadlineMs ?? DEADLINE_MS);
+      if (!done)
+        ctl.expired = true;
       const out = done ? promptOutput(done.result, done.notices) : null;
       if (out)
         io.out(out);
@@ -231,9 +273,21 @@ function makePromptCli(spec) {
 }
 
 // host-lib/skills.ts
-import { existsSync, readdirSync, readFileSync as readFileSync3, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { dirname as dirname2, join as join3, resolve as resolve2 } from "node:path";
 var DESC_MAX = 400;
+var FILE_MAX = 8 * 1024;
+var DIR_MAX = 300;
+var REPO_MAX = 100;
+function readHead(file) {
+  const fd = openSync(file, "r");
+  try {
+    const buf = Buffer.alloc(FILE_MAX);
+    return buf.subarray(0, readSync(fd, buf, 0, FILE_MAX, 0)).toString("utf8");
+  } finally {
+    closeSync(fd);
+  }
+}
 function parseSkill(text) {
   const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
   if (!m)
@@ -266,12 +320,12 @@ function skillsIn(dir) {
     return [];
   }
   const out = [];
-  for (const entry of entries.sort()) {
+  for (const entry of entries.sort().slice(0, DIR_MAX)) {
     const file = join3(dir, entry, "SKILL.md");
     try {
       if (!statSync(file).isFile())
         continue;
-      const info = parseSkill(readFileSync3(file, "utf8"));
+      const info = parseSkill(readHead(file));
       if (info)
         out.push(info);
     } catch {}
@@ -279,30 +333,36 @@ function skillsIn(dir) {
   return out;
 }
 function codexSkillDirs(cwd, env = {}) {
-  const dirs = [];
-  const stop = home();
-  for (let dir = resolve2(cwd);; dir = dirname2(dir)) {
-    dirs.push(join3(dir, ".agents", "skills"));
-    if (dir === stop || dirname2(dir) === dir)
-      break;
-  }
-  dirs.push(join3(home(), ".agents", "skills"));
   const codexHome = env.codexHome ?? process.env.CODEX_HOME ?? join3(home(), ".codex");
-  dirs.push(join3(codexHome, "skills"), join3(codexHome, "skills", ".system"), "/etc/codex/skills");
+  const user = [join3(home(), ".agents", "skills"), join3(codexHome, "skills"), join3(codexHome, "skills", ".system"), "/etc/codex/skills"];
   const cache = join3(codexHome, "plugins", "cache");
   if (existsSync(cache)) {
     try {
       for (const market of readdirSync(cache))
         for (const plugin of readdirSync(join3(cache, market)))
           for (const version of readdirSync(join3(cache, market, plugin)))
-            dirs.push(join3(cache, market, plugin, version, "skills"));
+            user.push(join3(cache, market, plugin, version, "skills"));
     } catch {}
   }
-  return dirs;
+  const repo = [];
+  const start = resolve2(cwd);
+  let bounded = false;
+  for (let dir = start;; dir = dirname2(dir)) {
+    repo.push(join3(dir, ".agents", "skills"));
+    if (existsSync(join3(dir, ".git")) || dir === home()) {
+      bounded = true;
+      break;
+    }
+    if (dirname2(dir) === dir)
+      break;
+  }
+  return { user, repo: bounded ? repo : repo.slice(0, 1) };
 }
 function scanSkills(dirs) {
+  const { user, repo } = Array.isArray(dirs) ? { user: dirs, repo: [] } : dirs;
   const seen = new Set;
-  return dirs.flatMap(skillsIn).filter((s) => !seen.has(s.name) && !!seen.add(s.name));
+  const fresh = (s) => !seen.has(s.name) && !!seen.add(s.name);
+  return [...user.flatMap(skillsIn).filter(fresh), ...repo.flatMap(skillsIn).filter(fresh).slice(0, REPO_MAX)];
 }
 var listing = (skills) => skills.map((s) => `- ${s.name}: ${s.description}`).join(`
 `);
@@ -920,7 +980,7 @@ async function readStdin() {
 }
 setTimeout(() => process.exit(0), 60000).unref();
 try {
-  process.exitCode = await main(process.argv.slice(2), {
+  const code = await main(process.argv.slice(2), {
     stdin: readStdin,
     out: (s) => void process.stdout.write(s),
     err: (s) => void process.stderr.write(s.endsWith(`
@@ -928,6 +988,9 @@ try {
 `),
     bundle: fileURLToPath(import.meta.url)
   });
+  process.exitCode = code;
+  if (process.argv[2] === "hook")
+    process.stdout.write("", () => process.exit(code));
 } catch (e) {
   process.stderr.write(`skill-pick: failed: ${e instanceof Error ? e.message : String(e)}
 `);

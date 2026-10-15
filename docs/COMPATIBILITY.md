@@ -103,7 +103,7 @@ the only one so far.
 | | Claude Code | Codex | OpenCode |
 | --- | --- | --- | --- |
 | Hook | `prompt.submit` | `UserPromptSubmit` command hook | `session.prompt` hook |
-| Small model | the engine's model call | the Anthropic Messages API with `ANTHROPIC_API_KEY` (`ANTHROPIC_BASE_URL` is honored); no key means "error" and the prompt goes through | the host's `generate.text` with its own default model (the mod's `model` option is ignored) |
+| Small model | the engine's model call | the Anthropic Messages API with `ANTHROPIC_API_KEY` (`ANTHROPIC_BASE_URL` is honored when it is https or a loopback address); no key means "error" and the prompt goes through | the host's `generate.text` with its own default model (the mod's `model` option is ignored) |
 | Stop a vague prompt (`on`) | drops it with the question | `decision: block` with the question; sending it again unchanged runs it | **runs as `flag`**: a throw stops the prompt but shows only a generic error, and the terminal UI sends it again |
 | Add a note (`flag`, skill-pick `on`) | adds context | `additionalContext` | appends the note to the prompt text |
 | Dry mode | measures from a timer after the prompt went on | the hook returns at once and starts a detached process that measures | measures from a timer in the host process |
@@ -131,7 +131,16 @@ Why the differences:
   prompt, and the hook process ends with its answer, so a detached `measure` process does the work.
   It stops itself after 60 seconds.
 - **Bounced prompts are remembered in a file on Codex** (the hook is a new process each time), in
-  the mod's store under `~/.local/share/iuliandita-mods`.
+  the mod's store under `~/.local/share/iuliandita-mods`, per working directory.
+- **Where a prompt goes is announced once.** With `ANTHROPIC_API_KEY` set, the first dry-mode prompt
+  carries a notice that prompts are sent to api.anthropic.com; with a Jev key, one for Jev. Dry mode
+  does nothing (no process is started) while neither key is set.
+- **The vocabulary file is confined.** `AGENTS.md` or `CLAUDE.md` is read only when it resolves to a
+  regular file under the working directory, up to 64 KiB; skill files are read for their front
+  matter only, at most 300 folders per directory and 100 repository skills, and the user's and
+  system skills come before the repository's.
+- **The OpenCode note is part of your message.** The flag line is appended to the prompt text, so
+  it shows in the history.
 - **OpenCode cannot bounce a prompt.** The hook's only way to stop one is to throw.
 
 ## delegation-board and statusline

@@ -30,10 +30,16 @@ export async function setup(ctx: Context, deps: Deps = {}): Promise<void> {
       const loaded = loadOptions('prompt-gate', deps.options)
       Object.assign(s, parseConfig(loaded.error ? {} : loaded.options))
       if (s.mode === 'off') return
-      const run: State = s.mode === 'on' ? { ...s, mode: 'flag' } : s
       const engine = createEngine({ mod: 'prompt-gate', cwd: ctx.location.directory, complete, notify: (t) => console.error(t), store: deps.store })
       const next = async (x: { text: string; context?: readonly string[] }) => ({ text: x.text, context: x.context })
-      const r = (await gate(engine as never, run, { text: e.prompt.text, wait: false, origin: { kind: 'composer' } } as never, next as never)) as { context?: readonly string[] }
+      const configured = s.mode
+      if (s.mode === 'on') s.mode = 'flag'
+      let r: { context?: readonly string[] }
+      try {
+        r = (await gate(engine as never, s, { text: e.prompt.text, wait: false, origin: { kind: 'composer' } } as never, next as never)) as { context?: readonly string[] }
+      } finally {
+        s.mode = configured
+      }
       if (r.context?.length) e.prompt.text = `${e.prompt.text}\n\n${r.context.join('\n')}`
     } catch {
       // advisory: any failure lets the prompt through

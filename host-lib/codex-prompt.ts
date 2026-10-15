@@ -24,8 +24,8 @@ export type Spec<C extends { mode: string }> = {
   skip: (input: PromptInput, c: C) => boolean
   // The notice to show once when this config may send the prompt to a third party; null when it cannot.
   notice: (c: C) => string | null
-  // One prompt through the mod's shared logic. `notify` collects toasts.
-  run: (engine: NodeEngine, c: C, input: PromptInput) => Promise<GateResult>
+  // One prompt through the mod's shared logic. `ctl.expired` turns true when the hook gave up on the answer.
+  run: (engine: NodeEngine, c: C, input: PromptInput, ctl: { expired: boolean }) => Promise<GateResult>
   // Text for `summary`, `last` and `clear`.
   stats: (cmd: 'summary' | 'last' | 'clear', c: C, store: ReturnType<typeof fileStore>) => Promise<string>
   usage: string
@@ -40,14 +40,31 @@ export function makePromptCli<C extends { mode: string }>(spec: (io: Io) => Spec
     return sp.config(loaded.error ? {} : loaded.options)
   }
 
-  async function judge(io: Io, sp: Spec<C>, input: PromptInput, c: C): Promise<{ result: GateResult; notices: string[] }> {
+  async function judge(io: Io, sp: Spec<C>, input: PromptInput, c: C, ctl = { expired: false }): Promise<{ result: GateResult; notices: string[] }> {
     const notices: string[] = []
     const complete = io.complete ?? anthropicComplete(() => process.env.ANTHROPIC_API_KEY)
     const engine = createEngine({ mod: sp.mod, cwd: input.cwd, complete, notify: (t) => notices.push(t), store: io.store })
-    const result = await sp.run(engine, c, input)
+    const result = await sp.run(engine, c, input, ctl)
     // Notices are fire and forget in the shared code; give them a moment to land.
     if (process.env.TYPESAFE_API_KEY) await new Promise((done) => setTimeout(done, 100))
     return { result, notices }
+  }
+
+  // Notices about where a prompt goes, each shown once per install: the judging model, and Jev when it may be used.
+  async function firstNotices(io: Io, sp: Spec<C>, c: C): Promise<string[]> {
+    const store = fileStore(io.store ?? storeFile(sp.mod))
+    const wanted: [string, string | null][] = [
+      ['anthropicNotice', process.env.ANTHROPIC_API_KEY ? `${sp.mod}: prompts are sent to api.anthropic.com with ANTHROPIC_API_KEY to be judged. Set mode=off in ~/.config/iuliandita-mods/${sp.mod}.json to stop.` : null],
+      ['jevNotice', sp.notice(c)],
+    ]
+    const out: string[] = []
+    for (const [key, text] of wanted) {
+      if (text && (await store.get(key)) !== true) {
+        out.push(text)
+        await store.set(key, true)
+      }
+    }
+    return out
   }
 
   // Advisory: any failure lets the prompt through. In dry mode the prompt goes on at once and a process of its own
@@ -60,22 +77,18 @@ export function makePromptCli<C extends { mode: string }>(spec: (io: Io) => Spec
       const c = config(io, sp)
       if (c.mode === 'off' || sp.skip(input, c)) return 0
       if (c.mode === 'dry') {
-        const notices: string[] = []
-        const text = sp.notice(c)
-        if (text) {
-          // The measuring process cannot show anything, so the notice is shown here, once per install.
-          const store = fileStore(io.store ?? storeFile(sp.mod))
-          if ((await store.get('jevNotice')) !== true) {
-            notices.push(text)
-            await store.set('jevNotice', true)
-          }
-        }
+        // Nothing can be judged without a key, and a process per prompt that only logs an error is not worth it.
+        if (!io.measure && !process.env.ANTHROPIC_API_KEY && !process.env.TYPESAFE_API_KEY) return 0
+        // The measuring process cannot show anything, so the notices are shown here, once per install.
+        const notices = await firstNotices(io, sp, c)
         ;(io.measure ?? ((p) => spawnMeasure(io.bundle, p)))(input)
         const out = promptOutput({}, notices)
         if (out) io.out(out)
         return 0
       }
-      const done = await withDeadline(judge(io, sp, input, c), io.deadlineMs ?? DEADLINE_MS)
+      const ctl = { expired: false }
+      const done = await withDeadline(judge(io, sp, input, c, ctl), io.deadlineMs ?? DEADLINE_MS)
+      if (!done) ctl.expired = true
       const out = done ? promptOutput(done.result, done.notices) : null
       if (out) io.out(out)
     } catch {

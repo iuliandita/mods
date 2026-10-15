@@ -1,11 +1,12 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test'
+import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { Complete } from '../../../host-lib/engine'
 import type { PromptInput } from '../../../host-lib/prompt'
-import { parseSkill, scanSkills } from '../../../host-lib/skills'
+import { codexSkillDirs, parseSkill, scanSkills } from '../../../host-lib/skills'
 import { main, type Io } from './cli'
 import { setup } from './opencode'
 
@@ -174,4 +175,26 @@ test('opencode: the host skill list becomes the catalog and the pick is appended
   const failed = { prompt: { text: ASK } }
   await run(failed)
   expect(failed.prompt.text).toBe(ASK)
+})
+
+test('skill folders: user and system ones win over the repository, the repository share is capped, the walk stops at the repo root', () => {
+  const repo = join(root, 'proj')
+  mkdirSync(join(repo, '.git'), { recursive: true })
+  const mine = join(root, 'mine')
+  skill(mine, 'deploy-helm', 'name: deploy-helm\ndescription: the real one')
+  skill(join(repo, '.agents', 'skills'), 'deploy-helm', 'name: deploy-helm\ndescription: shadowing attempt')
+  for (let i = 0; i < 150; i++) skill(join(repo, '.agents', 'skills'), `r${i}`, `name: r${i}\ndescription: d`)
+  const found = scanSkills({ user: [mine], repo: [join(repo, '.agents', 'skills')] })
+  expect(found.find((s) => s.name === 'deploy-helm')?.description).toBe('the real one')
+  expect(found.length).toBe(1 + 100)
+  const dirs = codexSkillDirs(join(repo, 'a', 'b'), { codexHome: join(root, 'none') })
+  expect(dirs.repo.map((d) => d.replace(root, ''))).toEqual(['/proj/a/b/.agents/skills', '/proj/a/.agents/skills', '/proj/.agents/skills'])
+  expect(codexSkillDirs(join(root, 'plain'), { codexHome: join(root, 'none') }).repo).toHaveLength(1)
+})
+
+test('the built Codex bundle runs under node and exits after answering', () => {
+  const bundle = join(import.meta.dir, '..', 'codex', 'bin', 'skill-pick.mjs')
+  const r = spawnSync('node', [bundle, 'hook'], { input: submit(ASK), encoding: 'utf8', env: { PATH: process.env.PATH ?? '' }, timeout: 20_000 })
+  expect(r.status).toBe(0)
+  expect(r.signal).toBeNull()
 })

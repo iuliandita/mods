@@ -12,12 +12,15 @@ async function readStdin(): Promise<string> {
 setTimeout(() => process.exit(0), 60_000).unref()
 
 try {
-  process.exitCode = await main(process.argv.slice(2), {
+  const code = await main(process.argv.slice(2), {
     stdin: readStdin,
     out: (s) => void process.stdout.write(s),
     err: (s) => void process.stderr.write(s.endsWith('\n') ? s : s + '\n'),
     bundle: fileURLToPath(import.meta.url),
   })
+  process.exitCode = code
+  // A hook is done once it has answered, even if a stalled request is still open; `measure` runs until its work ends.
+  if (process.argv[2] === 'hook') process.stdout.write('', () => process.exit(code))
 } catch (e) {
   process.stderr.write(`skill-pick: failed: ${e instanceof Error ? e.message : String(e)}\n`)
   process.exitCode = 0

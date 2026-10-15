@@ -25,7 +25,7 @@ export function promptOutput(r: GateResult, notices: readonly string[]): string 
 
 // The prompt is released first and measured from a process of its own, which outlives the hook.
 export function spawnMeasure(bundle: string, payload: PromptInput): void {
-  const child = spawn(process.execPath, [bundle, 'measure'], { detached: true, stdio: ['pipe', 'ignore', 'ignore'] })
+  const child = spawn(process.execPath, [bundle, 'measure'], { detached: true, stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true })
   child.on('error', () => {})
   child.stdin.on('error', () => {})
   child.stdin.end(JSON.stringify(payload))
