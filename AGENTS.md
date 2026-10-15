@@ -89,6 +89,10 @@ a terminal install at user scope loads in Desktop sessions too.
   The `codex/` and `opencode/` manifests carry the same version as the Claude plugin. What each
   host can and cannot do is in `docs/COMPATIBILITY.md`; update it when a mod gains or loses a host.
   A host adapter reads its options only from the user's config dir, never a repository file.
+  `host_files` in mod.json copies a plugin file (a helper script) into each host package.
+  `prompt-gate` and `skill-pick` run the exported `gate`/`choose` of their `register.ts` on a Node
+  stand-in for the engine (`host-lib/engine.ts`), so that file may import only types from
+  `claude-code`; `scripts/host-shims/claude-code.d.ts` models those types for `typecheck --hosts`.
 - `local/` is gitignored: private mods (`local/mods/<name>/`) installed with `--local`.
 - `scripts/modslib/` is the CLI package; `tests/` is its pytest suite; `.github/` holds CI.
 - `private-patterns.txt` (gitignored, one regex per line; see `private-patterns.example.txt`)

@@ -63,6 +63,24 @@ unusable answer falls back to Haiku alone and logs path `jev-fallback`. Haiku's 
 so in `on` and `flag` mode the worst case before the prompt goes on is about 14 s (6 s Jev, then 8 s
 Haiku).
 
+## Codex and OpenCode
+
+Install steps are in [INSTALL.md](../../INSTALL.md); what differs and why is in
+[docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md).
+
+- Options are the same names as below in `~/.config/iuliandita-mods/prompt-gate.json` (string
+  values). Nothing is read from a repository.
+- Codex: each prompt is judged by a nested `codex exec` session (luna, low effort, read-only, about
+  18k tokens of your plan). `jevPaths` also limits this call. `on` blocks with the question and a
+  second identical prompt runs. Dry mode measures from a detached process, which also starts a
+  nested session per prompt.
+- OpenCode: a low-effort DeepSeek Flash model from the host's model list answers (falling back to
+  the host's default); `jevPaths` limits it. `on` runs as `flag`, because a hook can only stop a
+  prompt by throwing and OpenCode shows no reason for that.
+- Stats: `node <plugin>/bin/prompt-gate.mjs summary`, `last` or `clear`.
+- With `TYPESAFE_API_KEY` set, the prompt goes to Jev as described under Privacy; on Codex the
+  first dry-mode prompt shows that notice once.
+
 ## Options
 
 - `mode`: `off`, `dry`, `flag` or `on` (default `dry`).

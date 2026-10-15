@@ -13,8 +13,8 @@ Versions checked: Claude Code 2.1.296, Codex CLI 0.162.1, OpenCode 2.0.29.
 | --- | --- | --- | --- |
 | `guard-rules` | **works** (terminal verified) | **works** | **works** |
 | `secret-box` | **works** (terminal verified) | **works**, partly: placeholders and the command's own output, see below | **works** |
-| `prompt-gate` | works, untested | **not ported**; needs its own model client and key | **not ported**; the host offers a model call |
-| `skill-pick` | works, untested | **not ported**; needs its own model client and key | **not ported**; the host lists skills and offers a model call |
+| `prompt-gate` | works, untested | **works**, judged by a nested Codex session (luna, low effort) | **works**, judged by a low-effort DeepSeek Flash; `on` runs as `flag` |
+| `skill-pick` | works, untested | **works**, judged by a nested Codex session (luna, low effort); no use records | **works**; no use records |
 | `delegation-board` | works, untested | **not possible**: hooks cannot draw anything | **not ported**; its UI plugin entry is not evaluated yet |
 | `statusline` | works, untested | **not possible**: the status line only takes built-in items | **not ported**; its UI plugin entry is not evaluated yet |
 
@@ -100,11 +100,50 @@ the only one so far.
 
 ## prompt-gate and skill-pick
 
-Both call a small model, and both hook the prompt. Codex's `UserPromptSubmit` can block or add
-context but cannot rewrite the prompt, and a hook has no model of its own, so the mod would need
-its own client and API key, which changes what leaves your machine. OpenCode's v2 plugin context
-offers a model call through the host's own providers and a skill list, so a port is possible
-there.
+| | Claude Code | Codex | OpenCode |
+| --- | --- | --- | --- |
+| Hook | `prompt.submit` | `UserPromptSubmit` command hook | `session.prompt` hook |
+| Small model | the engine's model call | a nested `codex exec` session on `gpt-6-luna` at low effort (read-only, hooks off, throwaway directory), about 18k tokens of your plan per prompt; a failure means "error" and the prompt goes through. The mod's `model` option counts only when it names a `gpt-*` model | the host's `generate.text` with a low-effort DeepSeek Flash model picked from the host's model list (up to three candidates are tried, then the host's default model); the `model` option counts only as `provider/model` |
+| Stop a vague prompt (`on`) | drops it with the question | `decision: block` with the question; sending it again unchanged runs it | **runs as `flag`**: a throw stops the prompt but shows only a generic error, and the terminal UI sends it again |
+| Add a note (`flag`, skill-pick `on`) | adds context | `additionalContext` | appends the note to the prompt text |
+| Dry mode | measures from a timer after the prompt went on | the hook returns at once and starts a detached process that measures | measures from a timer in the host process |
+| Skill catalog (skill-pick) | the engine's skill listing | read from `SKILL.md` files in the folders Codex uses | `skill.list` |
+| Use records and agreement (skill-pick) | from the `Skill` tool call | **not possible**: Codex has no skill tool call to watch | **not ported** |
+| Options | plugin options | `~/.config/iuliandita-mods/<mod>.json` | the same file |
+| Stats | `/prompt-gate`, `/skill-pick` | `node .../<mod>.mjs summary\|last\|clear` | the same bundle |
+| Privacy notice for Jev | toast | `systemMessage` on the first prompt | host log |
+
+What was run on the real hosts, with a stand-in model call for most checks and one real nested luna call on Codex:
+on Codex 0.162.1 a vague prompt was blocked with its question and the same prompt went through
+when sent again, `flag` put the note in the model's context, `dry` measured from the detached
+process and logged a record, and skill-pick put a skill name from the real skill folders in the
+model's context. On OpenCode 2.0.29 the note reached the model for both mods and `skill.list`
+supplied the catalog. The real OpenCode classification ran through the fallback list of DeepSeek Flash candidates
+(18 s on a fresh process, so the call has a 20 s deadline); a failure is an error and the prompt
+goes through.
+
+Why the differences:
+
+- **A Codex hook has no model.** The hook starts a nested `codex exec` session on luna, which uses
+  your Codex plan (about 18k tokens per prompt) and sends the prompt to OpenAI only. With
+  `TYPESAFE_API_KEY` set it also goes to Jev, as in the Claude plugin. `jevPaths` limits every model
+  call on the hosts, not only Jev: outside those folders no prompt is judged. The default `haiku`
+  value of `classifier` / `picker` is ignored on Codex and OpenCode.
+- **Dry mode on Codex needs a second process.** A hook must answer before the model sees the
+  prompt, and the hook process ends with its answer, so a detached `measure` process does the work.
+  It stops itself after 60 seconds.
+- **Bounced prompts are remembered in a file on Codex** (the hook is a new process each time), in
+  the mod's store under `~/.local/share/iuliandita-mods`, per working directory.
+- **Where a prompt goes is announced once.** The first dry-mode prompt on Codex carries a
+  notice that each prompt is judged by a nested Codex session and costs plan tokens; with a Jev key,
+  one for Jev. Dry mode spawns a nested judgement per prompt until the mode is set to `off`.
+- **The vocabulary file is confined.** `AGENTS.md` or `CLAUDE.md` is read only when it resolves to a
+  regular file under the working directory, up to 64 KiB; skill files are read for their front
+  matter only, at most 300 folders per directory and 100 repository skills, and the user's and
+  system skills come before the repository's.
+- **The OpenCode note is part of your message.** The flag line is appended to the prompt text, so
+  it shows in the history.
+- **OpenCode cannot bounce a prompt.** The hook's only way to stop one is to throw.
 
 ## delegation-board and statusline
 

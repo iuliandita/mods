@@ -84,7 +84,7 @@ Codex:
 
 ```bash
 codex plugin marketplace add iuliandita/mods
-codex plugin add guard-rules@iuliandita-mods   # or secret-box@iuliandita-mods
+codex plugin add guard-rules@iuliandita-mods   # or secret-box, prompt-gate, skill-pick @iuliandita-mods
 ```
 
 Codex skips a plugin hook until you trust it once with `/hooks` in the Codex terminal UI.
