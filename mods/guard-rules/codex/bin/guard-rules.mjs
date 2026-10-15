@@ -2952,10 +2952,39 @@ function formatDeny(violations) {
 }
 
 // mods/guard-rules/host/env.ts
-import { execFile } from "node:child_process";
-import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync as readFileSync2, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, join as join2 } from "node:path";
+
+// host-lib/options.ts
+import { readFileSync } from "node:fs";
 import { userInfo } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
+var home = () => userInfo().homedir;
+var configDir = () => join(home(), ".config", "iuliandita-mods");
+var dataDir = () => join(home(), ".local", "share", "iuliandita-mods");
+var ownDirs = () => [configDir(), dataDir()];
+var optionsPath = (mod) => join(configDir(), `${mod}.json`);
+function loadOptions(mod, path = optionsPath(mod)) {
+  let text;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (e) {
+    if (e.code === "ENOENT")
+      return { options: {} };
+    return { options: {}, error: `${path} could not be read` };
+  }
+  try {
+    const raw = JSON.parse(text);
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw))
+      throw new Error("not an object");
+    return { options: raw };
+  } catch {
+    return { options: {}, error: `${path} is not a JSON object` };
+  }
+}
+
+// host-lib/proc.ts
+import { execFile } from "node:child_process";
 var TIMEOUT_MS = 5000;
 var MAX_BUFFER = 1 << 20;
 var running = new Set;
@@ -2963,12 +2992,12 @@ function killAll() {
   for (const child of running)
     child.kill("SIGKILL");
 }
-function run(dir, argv, vars) {
+function run(dir, argv, vars, timeoutMs = TIMEOUT_MS) {
   return new Promise((resolve) => {
     const [cmd, ...args] = argv;
     if (cmd === undefined)
       return resolve({ ok: false, out: "", failed: true });
-    const child = execFile(cmd, args, { cwd: dir, env: vars ? { ...process.env, ...vars } : process.env, timeout: TIMEOUT_MS, maxBuffer: MAX_BUFFER, encoding: "utf8" }, (err, stdout) => {
+    const child = execFile(cmd, args, { cwd: dir, env: vars ? { ...process.env, ...vars } : process.env, timeout: timeoutMs, maxBuffer: MAX_BUFFER, encoding: "utf8" }, (err, stdout) => {
       running.delete(child);
       if (!err)
         return resolve({ ok: true, out: stdout.trim() });
@@ -2978,38 +3007,19 @@ function run(dir, argv, vars) {
     running.add(child);
   });
 }
-var home = () => userInfo().homedir;
-function configPath() {
-  return join(home(), ".config", "iuliandita-mods", "guard-rules.json");
-}
-function guardDirs() {
-  return [join(home(), ".config", "iuliandita-mods"), join(home(), ".local", "share", "iuliandita-mods")];
-}
-function storePath() {
-  return join(home(), ".local", "share", "iuliandita-mods", "guard-rules", "contexts.json");
-}
+
+// mods/guard-rules/host/env.ts
+var configPath = () => optionsPath("guard-rules");
+var guardDirs = ownDirs;
+var storePath = () => join2(dataDir(), "guard-rules", "contexts.json");
 function loadConfig(path = configPath()) {
-  let text;
-  try {
-    text = readFileSync(path, "utf8");
-  } catch (e) {
-    if (e.code === "ENOENT")
-      return parseConfig({});
-    return { ...parseConfig({}), error: `${path} could not be read` };
-  }
-  try {
-    const raw = JSON.parse(text);
-    if (raw === null || typeof raw !== "object" || Array.isArray(raw))
-      throw new Error("not an object");
-    return parseConfig(raw);
-  } catch {
-    return { ...parseConfig({}), error: `${path} is not a JSON object` };
-  }
+  const loaded = loadOptions("guard-rules", path);
+  return loaded.error ? { ...parseConfig({}), error: loaded.error } : parseConfig(loaded.options);
 }
 function loadClasses(path = storePath()) {
   let text;
   try {
-    text = readFileSync(path, "utf8");
+    text = readFileSync2(path, "utf8");
   } catch (e) {
     if (e.code === "ENOENT")
       return {};
@@ -3037,13 +3047,13 @@ function saveClasses(classes, path = storePath()) {
 function nodeEnv(cwd, classes = loadClasses) {
   return {
     cwd,
-    home: process.env.HOME || userInfo().homedir,
+    home: process.env.HOME || home(),
     git: (dir, args, vars) => run(dir, ["git", "-C", dir, ...args], vars),
     run,
     contexts: async () => classes(),
     read: async (path) => {
       try {
-        return readFileSync(path, "utf8");
+        return readFileSync2(path, "utf8");
       } catch {
         return null;
       }

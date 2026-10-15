@@ -108,7 +108,15 @@
         "headless": "untested"
       },
       "verified_on": "2.1.296",
-      "install": "claude plugin marketplace add iuliandita/mods && claude plugin install secret-box@iuliandita-mods"
+      "install": "claude plugin marketplace add iuliandita/mods && claude plugin install secret-box@iuliandita-mods",
+      "hosts": {
+        "codex": {
+          "install": "codex plugin marketplace add iuliandita/mods && codex plugin add secret-box@iuliandita-mods"
+        },
+        "opencode": {
+          "install": "clone this repository and add {\"package\": \"<clone>/mods/secret-box/opencode\"} to \"plugins\" in opencode.json"
+        }
+      }
     },
     {
       "name": "skill-pick",

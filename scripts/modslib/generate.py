@@ -155,6 +155,11 @@ def bundle_path(mod: Mod, host: str) -> Path:
     return mod.path / HOST_BUNDLES[host][1].format(name=mod.name)
 
 
+# Files from the Claude plugin that a host package ships as they are (a helper the host bundle runs).
+def host_copies(mod: Mod) -> dict[Path, Path]:
+    return {mod.host_dir(h) / f: mod.plugin_dir / f for h in mod.hosts for f in mod.host_files}
+
+
 def targets(root: Path, *, include_local: bool, bundles: bool = False) -> dict[Path, str]:
     mods = load_all(root, include_local=include_local)
     public = load_mods(root)
@@ -162,6 +167,8 @@ def targets(root: Path, *, include_local: bool, bundles: bool = False) -> dict[P
         shared_copy_dir(m) / name: shared_copy(root, name) for m in mods for name in m.shared
     }
     out |= {register_path(m): injected(root, m) for m in mods if m.inject}
+    for m in mods:
+        out |= {dest: src.read_text() for dest, src in host_copies(m).items()}
     if bundles:
         out |= {bundle_path(m, h): bundle(root, m, h) for m in mods for h in m.hosts}
     out |= {
@@ -212,10 +219,14 @@ def generate(root: Path, *, check: bool = False, include_local: bool = False, bu
         changed.append(path)
         if not check:
             path.unlink()
+    modes = {dest: src.stat().st_mode & 0o111 for m in load_all(root, include_local=include_local) for dest, src in host_copies(m).items()}
     for path, text in targets(root, include_local=include_local, bundles=with_bundles).items():
-        if not path.is_file() or path.read_text() != text:
+        stale = not path.is_file() or path.read_text() != text or (path in modes and path.stat().st_mode & 0o111 != modes[path])
+        if stale:
             changed.append(path)
             if not check:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(text)
+                if path in modes:
+                    path.chmod(0o755 if modes[path] else 0o644)
     return changed

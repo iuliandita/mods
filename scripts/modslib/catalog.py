@@ -16,9 +16,10 @@ REQUIRED = (
     "name", "summary", "kind", "egress", "modes", "default_mode",
     "requires", "surfaces", "verified_on",
 )
-OPTIONAL = ("shared", "inject", "hosts")
+OPTIONAL = ("shared", "inject", "hosts", "host_files")
 SHARED_RE = re.compile(r"^[a-z][a-z0-9-]*\.ts$")
 INJECT_RE = re.compile(r"^([a-z][a-z0-9-]*)\.inject\.ts$")
+HOST_FILE_RE = re.compile(r"^[a-z][a-z0-9-]*(/[a-z][a-z0-9._-]*)+$")
 
 
 def inject_markers(file: str) -> tuple[str, str]:
@@ -62,6 +63,7 @@ class Mod:
     shared: tuple[str, ...] = ()
     inject: tuple[str, ...] = ()
     hosts: tuple[str, ...] = ()
+    host_files: tuple[str, ...] = ()
 
     @property
     def plugin_dir(self) -> Path:
@@ -187,6 +189,19 @@ def _problems(path: Path, data: object, shared: Path) -> list[str]:
         errs.append(f"{where}: hosts must list distinct names from {', '.join(HOSTS)}")
     else:
         errs += _host_problems(path, hosts)
+    copies = data.get("host_files", [])
+    if not (
+        isinstance(copies, list)
+        and all(isinstance(f, str) and HOST_FILE_RE.match(f) and ".." not in f for f in copies)
+        and len(set(copies)) == len(copies)
+    ):
+        errs.append(f"{where}: host_files must list distinct paths under claude/ (dir/file)")
+    else:
+        missing = [f for f in copies if not (path / "claude" / f).is_file()]
+        if missing:
+            errs.append(f"{where}: host_files not found under claude/: {', '.join(missing)}")
+        if copies and not data.get("hosts"):
+            errs.append(f"{where}: host_files needs hosts")
     return errs
 
 
@@ -267,6 +282,7 @@ def parse_mod(path: Path, *, is_local: bool, shared: Path) -> Mod:
         shared=tuple(data.get("shared", [])),
         inject=tuple(data.get("inject", [])),
         hosts=tuple(data.get("hosts", [])),
+        host_files=tuple(data.get("host_files", [])),
     )
 
 
