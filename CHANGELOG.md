@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v0.1.0 - 2026-10-15
+
+First collection prerelease. Individual plugin versions remain independent of this tag.
+
 - Mod schema: `mods/<name>/mod.json` with a plugin under `mods/<name>/claude/`.
 - Generated `.claude-plugin/marketplace.json` and `mods.json` catalog (`scripts/mods generate`).
 - Installer CLI `scripts/mods` with `list`, `install`, `uninstall`, `doctor`, `validate`, and
@@ -67,6 +71,12 @@
 - `statusline` and `delegation-board` also run on OpenCode 2.x as terminal UI plugins (`opencode/tui.js`,
   listed in `~/.config/opencode/cli.json`): a one-line status and a panel of child sessions. Codex
   has no way to draw from a plugin. `scripts/mods generate` builds `host/tui.ts` into `opencode/tui.js`.
+- OpenCode prompt advisers honor a changed model setting on the next call, including when an
+  earlier request is still in flight.
+- Host limits and costs: Codex secret scrubbing covers only helper-wrapped commands; prompt
+  advisers use plan tokens on Codex and the selected model provider on OpenCode, including in
+  `dry` mode. On these hosts `jevPaths` restricts all model calls. OpenCode terminal UI plugins
+  use host data without their own model or forge calls.
 - `prompt-gate` and `skill-pick` dry mode releases the prompt first and measures from a clock
   timer afterwards; `delegation-board` resets on `/clear` and prints a text table when its pane
   is not placed (Claude Desktop).

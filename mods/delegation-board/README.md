@@ -98,5 +98,8 @@ rows above the prompt, and prints the table as text; `/board status` prints the 
 On OpenCode 2.x the mod is a terminal UI plugin: `/board` or **Delegation board** in the command palette (`ctrl+p`) opens a
 panel listing the session's child sessions (subagents) with state, agent, time, tokens, cost and title, redrawn
 every second. List the package in `plugins` in `~/.config/opencode/cli.json` (see [INSTALL.md](../../INSTALL.md)).
-There is no effort or price table. Codex has no way to draw from a plugin. Details in
+There is no effort or price table. The port makes no model calls, does not read the Claude
+options above or `~/.config/iuliandita-mods/delegation-board.json`, and shows up to 40 recent
+descendant sessions while its total includes every recorded descendant. Remove its entry from
+`cli.json` and restart OpenCode to disable it. Codex has no way to draw from a plugin. Details in
 [docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md).

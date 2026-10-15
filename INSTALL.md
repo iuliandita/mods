@@ -37,6 +37,9 @@ Private mods use `scripts/mods install <name> --local`; they register `<clone>/l
 
 ## Updates and source mismatch
 
+Collection tags (starting with the `v0.1.0` prerelease) identify a repository snapshot. Each
+plugin keeps its own version; a collection tag does not set every plugin to that version.
+
 There is no `scripts/mods update` command. For a GitHub marketplace, refresh and update with
 Claude's CLI:
 
@@ -104,8 +107,18 @@ Terminal UI mods (`statusline`, `delegation-board`) are listed in `plugins` in
 { "plugins": [{ "package": "/path/to/clone/mods/statusline/opencode" }] }
 ```
 
-Options for both hosts live in `~/.config/iuliandita-mods/<mod>.json` (see the mod's README),
-never in a repository. After a Codex install the hook command is
+Hook-adapter options for both hosts live in `~/.config/iuliandita-mods/<mod>.json` (see the
+mod's README), never in a repository. OpenCode terminal UI plugins do not read those files or
+Claude plugin options. Remove their `cli.json` entries and restart OpenCode to disable them;
+remove hook-plugin entries from `opencode.json` to uninstall those. Preserve the clone and
+user-level configuration when updating or rolling back a path-based install.
+
+`prompt-gate` and `skill-pick` default to `dry`, which still sends eligible prompts to a model:
+a nested Codex session uses plan tokens, and OpenCode uses its selected model provider. With a
+TypeSafe key, Jev may also receive them. On these two hosts, `jevPaths` restricts all of those
+calls; `mode: "off"` stops them. See the mod READMEs before enabling either.
+
+After a Codex install the hook command is
 `node <plugin>/bin/guard-rules.mjs`; the same file in a clone (`mods/guard-rules/codex/bin/`) is
 the command line tool for OpenCode users too.
 
