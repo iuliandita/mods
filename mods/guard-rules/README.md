@@ -47,6 +47,7 @@ settings, never in a repository.
 | Option | Default | Meaning |
 |---|---|---|
 | `protectedBranches` | `develop,main` | Comma-separated names; `*` is a wildcard (`release/*`). An empty list is an error; set `modeProtectedBranch` to `off` instead |
+| `unprotectedRepos` | empty | Comma-separated path prefixes (`~` allowed), for example `~/notes`. A repository whose toplevel is at or under a prefix is exempt from the protected-branch rule only (commits, merges, rebases, pushes); attribution and identity still apply there. The match stops at a path boundary (`~/notes` does not cover `~/notes-old`), and a toplevel git cannot report never exempts |
 | `identityRules` | empty | JSON array, for example `[{"prefix": "~/personal/", "email": "me@example.com"}]` |
 | `protectedContexts` | `*prod*,*production*,*live*,*qa*,*staging*,*stage*,*uat*,*preprod*,*pre-prod*` | Environment names blocked for changing commands; `*` is a wildcard, matching is case-insensitive |
 | `relaxedContexts` | `*dev*,*development*,*test*,*local*,*sandbox*,minikube,kind-*,k3d-*,docker-desktop,rancher-desktop` | Environment names where changing commands are allowed. A `*` next to a literal must meet it at `-`, `_`, `.`, `/`, `:` or `@`, so `*dev*` matches `dev` and `my-dev-x` but not `devops-eu` |

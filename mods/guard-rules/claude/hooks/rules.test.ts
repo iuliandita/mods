@@ -163,6 +163,45 @@ test('protected push: refspecs, --all and implicit pushes to a protected branch 
   expect((await evaluate('git push --tags', cfg(), fakeEnv({ branch: 'develop' }))).enforced).toEqual([])
 })
 
+test('unprotectedRepos: a listed repository may commit, merge, rebase and push to a protected branch, any other may not', async () => {
+  const c = cfg({ unprotectedRepos: ' ~/notes , ,/srv/vault ' })
+  expect(c.unprotectedRepos).toEqual(['~/notes', '/srv/vault'])
+  expect(cfg().unprotectedRepos).toEqual([])
+  const at = (toplevel: string) => fakeEnv({ branch: 'main', toplevel })
+  for (const cmd of ['git commit -m x', 'git merge feature/x', 'git rebase develop', 'git push origin main', 'git push']) {
+    expect((await evaluate(cmd, c, at('/h/notes'))).enforced, cmd).toEqual([])
+    expect((await evaluate(cmd, c, at('/h/notes/sub/repo'))).enforced, cmd).toEqual([])
+    expect((await evaluate(cmd, c, at('/srv/vault'))).enforced, cmd).toEqual([])
+    expect((await evaluate(cmd, c, at('/h/personal/repo'))).enforced, cmd).toHaveLength(1)
+    expect((await evaluate(cmd, cfg(), at('/h/notes'))).enforced, cmd).toHaveLength(1)
+  }
+  // The prefix match stops at a path boundary, and a parent of a listed repository is not listed.
+  for (const toplevel of ['/h/notes-old', '/h/notesx/repo', '/h', '/srv']) {
+    expect((await evaluate('git commit -m x', c, at(toplevel))).enforced, toplevel).toHaveLength(1)
+  }
+})
+
+test('unprotectedRepos: attribution and identity still apply in a listed repository', async () => {
+  const c = cfg({ unprotectedRepos: '~/personal/', identityRules: IDENTITIES })
+  const main = (email = 'me@personal.example') => fakeEnv({ branch: 'main', email })
+  expect((await evaluate('git commit -m x', c, main())).enforced).toEqual([])
+  const attribution = await evaluate(heredoc('feat: x\n\nCo-Authored-By: A <a@b.c>'), c, main())
+  expect(attribution.enforced.map((x) => x.rule)).toEqual(['attribution'])
+  const identity = await evaluate('git commit -m x', c, main('me@work.example'))
+  expect(identity.enforced.map((x) => x.rule)).toEqual(['identity'])
+})
+
+test('unprotectedRepos: a toplevel lookup that fails or finds no repository does not exempt', async () => {
+  const c = cfg({ unprotectedRepos: '~/personal' })
+  for (const failure of [{ ok: false, out: '', failed: true }, { ok: false, out: '' }, { ok: true, out: '' }]) {
+    const e = fakeEnv({ branch: 'main' })
+    const git = e.git
+    e.git = async (dir, args, env) => (args[0] === 'rev-parse' && args[1] === '--show-toplevel' ? failure : git(dir, args, env))
+    const rules = (await evaluate('git commit -m x', c, e)).enforced.map((x) => x.rule)
+    expect(rules, JSON.stringify(failure)).toContain('protected-branch')
+  }
+})
+
 test('branch switches inside one command are followed', async () => {
   expect((await evaluate('git checkout -b feat/x && git commit -m x', cfg(), fakeEnv({ branch: 'develop' }))).enforced).toEqual([])
   expect((await evaluate('git switch -c feat/x && git add . && git commit -m x', cfg(), fakeEnv({ branch: 'develop' }))).enforced).toEqual([])

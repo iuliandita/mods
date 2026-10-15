@@ -16,6 +16,7 @@ export type Config = {
   identity: Mode
   context: Mode
   protectedBranches: string[]
+  unprotectedRepos: string[]
   identityRules: IdentityRule[]
   protectedContexts: string[]
   relaxedContexts: string[]
@@ -118,6 +119,7 @@ export function parseConfig(options: Readonly<Record<string, unknown>>): Config 
     identity: parseMode(options.modeIdentity, 'modeIdentity', errors),
     context: parseMode(options.modeContext, 'modeContext', errors),
     protectedBranches: branches,
+    unprotectedRepos: parseList(options.unprotectedRepos, ''),
     identityRules,
     protectedContexts: parseList(options.protectedContexts, DEFAULT_PROTECTED_CONTEXTS),
     relaxedContexts: parseList(options.relaxedContexts, DEFAULT_RELAXED_CONTEXTS),
