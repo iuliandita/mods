@@ -6,8 +6,10 @@ import os
 import random
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 from urllib.parse import quote
 
@@ -162,3 +164,26 @@ def test_exec_without_scrub_still_works(tmp_path):
     p = run(tmp_path, "exec", "--", "printf '%s\\n' {{secret:tok}}", secrets={"tok": VALUE})
     assert p.returncode == 0 and p.stdout == VALUE.encode() + b"\n"
     assert run(tmp_path, "exec", "--scrub", "x").returncode == 1
+
+
+def test_scrub_returns_when_a_background_child_keeps_the_pipes_open(tmp_path):
+    started = time.monotonic()
+    p = subprocess.run(
+        [sys.executable, str(BIN), "exec", "--scrub", "--", "sleep 30 & echo started"],
+        env=dict(os.environ, SECRET_BOX_TEST="1", SECRET_BOX_BACKEND=f"file:{tmp_path / 's.json'}"),
+        capture_output=True,
+        timeout=20,
+    )
+    assert p.stdout == b"started\n"
+    assert time.monotonic() - started < 10
+
+
+def test_scrub_forwards_sigterm_to_the_command(tmp_path):
+    marker = tmp_path / "ran"
+    env = dict(os.environ, SECRET_BOX_TEST="1", SECRET_BOX_BACKEND=f"file:{tmp_path / 's.json'}")
+    script = f"trap 'echo got > {marker}; exit 7' TERM; echo ready; while :; do sleep 0.1; done"
+    proc = subprocess.Popen([sys.executable, str(BIN), "exec", "--scrub", "--", script], env=env, stdout=subprocess.PIPE)
+    assert proc.stdout.readline() == b"ready\n"
+    proc.send_signal(signal.SIGTERM)
+    assert proc.wait(timeout=10) == 7
+    assert marker.read_text() == "got\n"

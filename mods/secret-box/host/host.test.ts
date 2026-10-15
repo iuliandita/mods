@@ -139,3 +139,28 @@ test('opencode: other tools are not rewritten, off does nothing, a missing helpe
   await off.after!(after)
   expect(after.result).toBe(SECRET)
 })
+
+test('opencode: a failed call is scrubbed in result and error, keys are scrubbed, and a too-deep value is withheld', async () => {
+  withMode()
+  const h = await plugin()
+  const failed = { tool: 'shell', id: 'c5', status: 'error', result: { stdout: SECRET }, error: `boom ${SECRET}` }
+  await h.after!(failed)
+  expect(JSON.stringify(failed)).not.toContain(SECRET)
+
+  const keyed = { tool: 'mcp', id: 'c6', status: 'completed', result: { [SECRET]: 1, [`${SECRET}`.toUpperCase()]: 2 } }
+  await h.after!(keyed)
+  expect(JSON.stringify(keyed)).not.toContain(SECRET)
+
+  let deep: unknown = SECRET
+  for (let i = 0; i < 40; i++) deep = { next: deep }
+  const nested = { tool: 'mcp', id: 'c7', status: 'completed', result: deep }
+  await h.after!(nested)
+  expect(JSON.stringify(nested.result)).not.toContain(SECRET)
+  expect(JSON.stringify(nested.result)).toContain('withheld')
+
+  const cyc: Record<string, unknown> = { s: SECRET }
+  cyc.self = cyc
+  const looped = { tool: 'mcp', id: 'c8', status: 'completed', result: cyc }
+  await h.after!(looped)
+  expect(JSON.stringify(looped.result)).not.toContain(SECRET)
+})

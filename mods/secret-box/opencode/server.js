@@ -181,25 +181,45 @@ var WITHHELD = "[secret-box: this content was withheld because scrubbing failed]
 var MAX_DEPTH = 24;
 function scrubValue(value, scrub) {
   const names = new Set;
+  let changed = false;
+  const text = (s) => {
+    const r = scrub(s);
+    r.names.forEach((n) => names.add(n));
+    if (r.names.length)
+      changed = true;
+    return r.text;
+  };
   const walk = (v, depth, path) => {
-    if (typeof v === "string") {
-      const r = scrub(v);
-      r.names.forEach((n) => names.add(n));
-      return r.text;
-    }
+    if (typeof v === "string")
+      return text(v);
     if (v === null || typeof v !== "object")
       return v;
-    if (depth > MAX_DEPTH || path.has(v))
+    if (depth > MAX_DEPTH || path.has(v)) {
+      changed = true;
       return WITHHELD;
+    }
     path.add(v);
     try {
-      return Array.isArray(v) ? v.map((x) => walk(x, depth + 1, path)) : Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x, depth + 1, path)]));
+      if (Array.isArray(v))
+        return v.map((x) => walk(x, depth + 1, path));
+      const entries = Object.entries(v);
+      if (entries.length === 0)
+        return v;
+      const out = Object.create(Object.getPrototypeOf(v));
+      for (const [k, x] of entries) {
+        const base = text(k);
+        let key = base;
+        for (let n = 2;key in out; n++)
+          key = `${base}#${n}`;
+        out[key] = walk(x, depth + 1, path);
+      }
+      return out;
     } finally {
       path.delete(v);
     }
   };
   const out = walk(value, 0, new Set);
-  return { value: out, names: [...names] };
+  return { value: out, names: [...names], changed };
 }
 var RETRY_MS = 30000;
 function createBox(helper, now = Date.now) {
@@ -273,13 +293,16 @@ async function setup(ctx, deps) {
     const scrub = await box.scrubber();
     if (!scrub)
       return;
-    const key = e.status === "completed" ? "result" : "error";
-    try {
-      const r = scrubValue(e[key], scrub);
-      if (r.names.length)
-        e[key] = r.value;
-    } catch {
-      e[key] = scrubValue(e[key], () => ({ text: WITHHELD2, names: ["x"] })).value;
+    for (const key of ["result", "error"]) {
+      if (e[key] === undefined)
+        continue;
+      try {
+        const r = scrubValue(e[key], scrub);
+        if (r.changed)
+          e[key] = r.value;
+      } catch {
+        e[key] = WITHHELD2;
+      }
     }
   });
   await ctx.session.hook("context", async (e) => {
@@ -289,7 +312,7 @@ async function setup(ctx, deps) {
     if (!scrub)
       return;
     const r = scrubValue(e.messages, scrub);
-    if (r.names.length)
+    if (r.changed)
       e.messages = r.value;
   });
   await ctx.session.hook("prompt", async (e) => {
@@ -299,7 +322,7 @@ async function setup(ctx, deps) {
     if (!scrub)
       return;
     const r = scrubValue(e.prompt, scrub);
-    if (r.names.length)
+    if (r.changed)
       e.prompt = r.value;
   });
 }

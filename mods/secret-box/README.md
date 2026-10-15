@@ -93,6 +93,11 @@ Install steps are in [INSTALL.md](../../INSTALL.md); what differs from Claude Co
   or `on`). An unreadable file counts as `on`. Nothing is read from a repository.
 - The helper holds back the last few bytes of each stream until more output arrives or the command
   ends, so a value split across two reads is still caught; output can trail the command slightly.
+- Output a background process writes after the command's shell has exited is dropped, so a
+  command that starts a server returns instead of waiting for it. Signals sent to the helper are
+  forwarded to the command.
+- On OpenCode, when the keyring cannot be read, results, messages and the prompt pass through
+  unscrubbed (the load is retried every 30 seconds); a placeholder command still fails closed.
 - There is no `/secret-box` command on these hosts; run `secret-box names` in a terminal.
 - A Codex hook that cannot start lets the command through with its placeholder unfilled (it holds
   no secret), so this hook does not use the fail-closed wrapper that `guard-rules` does.

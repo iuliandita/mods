@@ -219,9 +219,9 @@ def generate(root: Path, *, check: bool = False, include_local: bool = False, bu
         changed.append(path)
         if not check:
             path.unlink()
-    modes = {dest: src.stat().st_mode & 0o111 for m in load_all(root, include_local=include_local) for dest, src in host_copies(m).items()}
+    modes = {dest: bool(src.stat().st_mode & 0o111) for m in load_all(root, include_local=include_local) for dest, src in host_copies(m).items()}
     for path, text in targets(root, include_local=include_local, bundles=with_bundles).items():
-        stale = not path.is_file() or path.read_text() != text or (path in modes and path.stat().st_mode & 0o111 != modes[path])
+        stale = not path.is_file() or path.read_text() != text or (path in modes and bool(path.stat().st_mode & 0o111) != modes[path])
         if stale:
             changed.append(path)
             if not check:

@@ -53,12 +53,15 @@ export async function setup(ctx: Context, deps: Deps): Promise<void> {
     if (reload.delete(e.id)) await box.load()
     const scrub = await box.scrubber()
     if (!scrub) return
-    const key = e.status === 'completed' ? 'result' : 'error'
-    try {
-      const r = scrubValue(e[key], scrub)
-      if (r.names.length) e[key] = r.value
-    } catch {
-      e[key] = scrubValue(e[key], () => ({ text: WITHHELD, names: ['x'] })).value
+    // A failed or aborted call can carry partial output in `result` next to its `error`.
+    for (const key of ['result', 'error'] as const) {
+      if (e[key] === undefined) continue
+      try {
+        const r = scrubValue(e[key], scrub)
+        if (r.changed) e[key] = r.value
+      } catch {
+        e[key] = WITHHELD
+      }
     }
   })
 
@@ -68,14 +71,14 @@ export async function setup(ctx: Context, deps: Deps): Promise<void> {
     const scrub = await box.scrubber()
     if (!scrub) return
     const r = scrubValue(e.messages, scrub)
-    if (r.names.length) e.messages = r.value
+    if (r.changed) e.messages = r.value
   })
   await ctx.session.hook('prompt', async (e) => {
     if (mode() !== 'on') return
     const scrub = await box.scrubber()
     if (!scrub) return
     const r = scrubValue(e.prompt, scrub)
-    if (r.names.length) e.prompt = r.value
+    if (r.changed) e.prompt = r.value
   })
 }
 

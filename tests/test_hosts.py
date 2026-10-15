@@ -103,3 +103,12 @@ def test_invalid_host_files_are_rejected(tmp_path: Path, files: list[str], match
     add_hosts(write_mod(tmp_path, "alpha", hosts=["codex"], host_files=files), "codex")
     with pytest.raises(CatalogError, match=match):
         load_mods(tmp_path)
+
+
+def test_host_files_cannot_overwrite_a_host_package_file(tmp_path: Path) -> None:
+    mod = write_mod(tmp_path, "alpha", hosts=["codex"], host_files=["hooks/hooks.json"])
+    add_hosts(mod, "codex")
+    (mod / "claude" / "hooks").mkdir(exist_ok=True)
+    (mod / "claude" / "hooks" / "hooks.json").write_text("{}")
+    with pytest.raises(CatalogError, match="would overwrite"):
+        load_mods(tmp_path)

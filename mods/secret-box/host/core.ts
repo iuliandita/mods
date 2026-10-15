@@ -42,26 +42,45 @@ export const rewrite = (helper: string, command: string): string => rewriteComma
 const WITHHELD = '[secret-box: this content was withheld because scrubbing failed]'
 const MAX_DEPTH = 24
 
-// Every string under a value, copied; a subtree deeper than MAX_DEPTH or looping back is replaced by a notice.
-export function scrubValue<T>(value: T, scrub: Scrubber): { value: T; names: string[] } {
+// Every string and object key under a value, copied (a class instance keeps its prototype; a value with no
+// own enumerable fields, like a Date, is left as it is). A subtree deeper than MAX_DEPTH or looping back is
+// replaced by a notice and counts as a change, so a caller never keeps the original. A key that then collides
+// with another gets a `#2`, `#3`... suffix.
+export function scrubValue<T>(value: T, scrub: Scrubber): { value: T; names: string[]; changed: boolean } {
   const names = new Set<string>()
+  let changed = false
+  const text = (s: string): string => {
+    const r = scrub(s)
+    r.names.forEach((n) => names.add(n))
+    if (r.names.length) changed = true
+    return r.text
+  }
   const walk = (v: unknown, depth: number, path: Set<object>): unknown => {
-    if (typeof v === 'string') {
-      const r = scrub(v)
-      r.names.forEach((n) => names.add(n))
-      return r.text
-    }
+    if (typeof v === 'string') return text(v)
     if (v === null || typeof v !== 'object') return v
-    if (depth > MAX_DEPTH || path.has(v)) return WITHHELD
+    if (depth > MAX_DEPTH || path.has(v)) {
+      changed = true
+      return WITHHELD
+    }
     path.add(v)
     try {
-      return Array.isArray(v) ? v.map((x) => walk(x, depth + 1, path)) : Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x, depth + 1, path)]))
+      if (Array.isArray(v)) return v.map((x) => walk(x, depth + 1, path))
+      const entries = Object.entries(v)
+      if (entries.length === 0) return v
+      const out = Object.create(Object.getPrototypeOf(v)) as Record<string, unknown>
+      for (const [k, x] of entries) {
+        const base = text(k)
+        let key = base
+        for (let n = 2; key in out; n++) key = `${base}#${n}`
+        out[key] = walk(x, depth + 1, path)
+      }
+      return out
     } finally {
       path.delete(v)
     }
   }
   const out = walk(value, 0, new Set()) as T
-  return { value: out, names: [...names] }
+  return { value: out, names: [...names], changed }
 }
 
 // Values and their scrubber, loaded on first use and again after a placeholder command; after a failed load it

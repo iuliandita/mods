@@ -202,6 +202,10 @@ def _problems(path: Path, data: object, shared: Path) -> list[str]:
             errs.append(f"{where}: host_files not found under claude/: {', '.join(missing)}")
         if copies and not data.get("hosts"):
             errs.append(f"{where}: host_files needs hosts")
+        owned = {"hooks/hooks.json", "package.json", "server.js", f"bin/{where}.mjs"}
+        clash = sorted(set(copies) & owned)
+        if clash:
+            errs.append(f"{where}: host_files would overwrite a host package file: {', '.join(clash)}")
     return errs
 
 

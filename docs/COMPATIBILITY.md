@@ -75,11 +75,12 @@ Why the differences:
 
 What was run on the real hosts, with a throwaway file-backed store: on Codex 0.162.1 a placeholder
 command ran through the helper and printed the placeholder, not the value, and the sandbox still
-blocked a write in a read-only session after the hook answered `allow`. On OpenCode 2.0.29 a
+blocked a write in a read-only session after the hook answered `allow`; in the interactive UI an
+escalated command asked for approval with and without a placeholder, so `allow` does not skip it.
+On OpenCode 2.0.29 a
 `printf '%s' <placeholder> | wc -c` printed the length of the value, and the single-quote check
 refused a quoted placeholder. The Linux keyring backend (`secret-tool`) was not run through these
-two hosts; the file backend is test-only. Whether `allow` skips the approval prompt of a command
-that asks for escalation was not tested (Codex `exec` forbids escalation).
+two hosts; the file backend is test-only.
 
 Why the differences:
 
