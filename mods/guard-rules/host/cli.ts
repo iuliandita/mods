@@ -1,8 +1,12 @@
+import { userInfo } from 'node:os'
 import { resolve } from 'node:path'
 
 import { applyGuardCommand, parseGuardCommand } from '../claude/hooks/context'
-import { checkCommand, type Check } from './check'
+import { checkCommand, checkTool, type Check } from './check'
 import { killAll, loadClasses, loadConfig, nodeEnv, saveClasses } from './env'
+
+// Codex names its patch tool apply_patch and also matches it as Edit and Write.
+const FILE_TOOLS = new Set(['apply_patch', 'Edit', 'Write'])
 
 const USAGE = 'usage: guard-rules hook (a Codex hook, JSON on stdin) | guard-rules context list | <name> protected|relaxed | forget <name>'
 
@@ -28,7 +32,15 @@ async function withDeadline(work: Promise<Check>, ms: number): Promise<Check> {
   }
 }
 
-// Codex PreToolUse. Only a Bash call is judged. A deny is the documented JSON decision; a hook that cannot answer
+function emit(io: Io, result: Check): void {
+  if (result.deny) {
+    io.out(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: result.deny } }))
+  } else if (result.notice) {
+    io.out(JSON.stringify({ systemMessage: result.notice }))
+  }
+}
+
+// Codex PreToolUse. A Bash call is judged by the rules; a file-editing call only for the guard's own files. A deny is the documented JSON decision; a hook that cannot answer
 // at all exits 2, which Codex also treats as a block (any other failing exit lets the call through).
 async function hook(io: Io): Promise<number> {
   let input: { hook_event_name?: unknown; tool_name?: unknown; tool_input?: unknown; cwd?: unknown }
@@ -38,7 +50,16 @@ async function hook(io: Io): Promise<number> {
     io.err('guard-rules: the hook input was not JSON, so the call was blocked (fail closed).')
     return 2
   }
-  if (input.hook_event_name !== 'PreToolUse' || input.tool_name !== 'Bash') return 0
+  if (input.hook_event_name !== 'PreToolUse') return 0
+  if (typeof input.tool_name === 'string' && FILE_TOOLS.has(input.tool_name)) {
+    if (typeof input.cwd !== 'string') {
+      io.err('guard-rules: a file edit without a directory cannot be checked, so it was blocked (fail closed).')
+      return 2
+    }
+    emit(io, checkTool(input.tool_input, input.cwd, process.env.HOME || userInfo().homedir))
+    return 0
+  }
+  if (input.tool_name !== 'Bash') return 0
   const toolInput = input.tool_input as { command?: unknown; workdir?: unknown } | null
   if (typeof toolInput?.command !== 'string' || typeof input.cwd !== 'string') {
     io.err('guard-rules: a Bash call without a command or a directory cannot be checked, so it was blocked (fail closed).')
@@ -46,11 +67,7 @@ async function hook(io: Io): Promise<number> {
   }
   const cwd = typeof toolInput.workdir === 'string' && toolInput.workdir !== '' ? resolve(input.cwd, toolInput.workdir) : input.cwd
   const result = await withDeadline(checkCommand(toolInput.command, loadConfig(io.config), nodeEnv(cwd, () => loadClasses(io.store))), io.deadlineMs ?? DEADLINE_MS)
-  if (result.deny) {
-    io.out(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: result.deny } }))
-  } else if (result.notice) {
-    io.out(JSON.stringify({ systemMessage: result.notice }))
-  }
+  emit(io, result)
   return 0
 }
 

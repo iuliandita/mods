@@ -1,6 +1,7 @@
+import { userInfo } from 'node:os'
 import { resolve } from 'node:path'
 
-import { checkCommand } from './check'
+import { checkCommand, checkTool } from './check'
 import { loadConfig, nodeEnv } from './env'
 
 // The parts of the OpenCode v2 plugin context this adapter uses, so the bundle needs no host package.
@@ -16,7 +17,12 @@ const SHELL_TOOLS = new Set(['shell', 'bash'])
 // can declare plugin options, and it must not be able to loosen what guards it.
 export async function setup(ctx: Context, options = { config: undefined as string | undefined }): Promise<void> {
   await ctx.tool.hook('execute.before', async (event) => {
-    if (!SHELL_TOOLS.has(event.tool.toLowerCase())) return
+    if (!SHELL_TOOLS.has(event.tool.toLowerCase())) {
+      // Any other tool (edit, write, patch, read) is only kept from the guard's own files.
+      const result = checkTool(event.input, ctx.location.directory, process.env.HOME || userInfo().homedir)
+      if (result.deny) throw new Error(result.deny)
+      return
+    }
     const input = event.input as { command?: unknown; workdir?: unknown } | null
     if (typeof input?.command !== 'string') throw new Error('guard-rules: a shell call without a command cannot be checked, so it was blocked (fail closed).')
     const cwd = typeof input.workdir === 'string' && input.workdir !== '' ? resolve(ctx.location.directory, input.workdir) : ctx.location.directory

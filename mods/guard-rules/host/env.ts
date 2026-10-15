@@ -39,6 +39,11 @@ export function configPath(): string {
   return join(home(), '.config', 'iuliandita-mods', 'guard-rules.json')
 }
 
+// The directories holding the options file and the class store.
+export function guardDirs(): string[] {
+  return [join(home(), '.config', 'iuliandita-mods'), join(home(), '.local', 'share', 'iuliandita-mods')]
+}
+
 export function storePath(): string {
   return join(home(), '.local', 'share', 'iuliandita-mods', 'guard-rules', 'contexts.json')
 }
