@@ -172,12 +172,10 @@ function flashCandidates(models, preferProvider) {
   });
 }
 function openCodeComplete(ctx, option) {
-  let candidates;
-  const bad = new Set;
-  let good;
-  const list = () => candidates ??= (async () => {
+  let selected;
+  const list = async (value) => {
     try {
-      const explicit = parseRef(option());
+      const explicit = parseRef(value);
       if (explicit)
         return [explicit];
       const [models, def] = await Promise.all([ctx.model.list(), ctx.model.default().catch(() => ({ data: undefined }))]);
@@ -185,25 +183,30 @@ function openCodeComplete(ctx, option) {
     } catch {
       return [];
     }
-  })();
+  };
   const attempt = async (req) => {
+    const value = option();
+    if (!selected || selected.option !== value) {
+      selected = { option: value, state: { candidates: list(value), bad: new Set } };
+    }
+    const state = selected.state;
     const prompt = `${req.system}
 
 ${promptText(req.prompt)}`;
-    const tries = good ? [good] : (await list()).filter((m) => !bad.has(key(m))).slice(0, TRIES);
+    const tries = state.good ? [state.good] : (await state.candidates).filter((m) => !state.bad.has(key(m))).slice(0, TRIES);
     let last;
     for (const model of tries.length ? tries : [undefined]) {
       try {
         const r = await ctx.generate.text({ prompt, ...model ? { model } : {} });
         if (model)
-          good = model;
+          state.good = model;
         return { isAnswered: r.text !== "", text: r.text };
       } catch (e) {
         last = e;
         if (model) {
-          bad.add(key(model));
-          if (good && key(good) === key(model))
-            good = undefined;
+          state.bad.add(key(model));
+          if (state.good && key(state.good) === key(model))
+            state.good = undefined;
         }
       }
     }

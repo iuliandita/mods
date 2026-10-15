@@ -320,6 +320,33 @@ test('opencode: DeepSeek Flash at low effort is chosen, a failing provider is sk
   await expect(openCodeComplete(ctx, () => '')(req)).rejects.toThrow('funds')
 })
 
+test('opencode: model changes replace cached selection even while an earlier call is in flight', async () => {
+  let option = 'first/one'
+  const sent: string[] = []
+  let finish: (() => void) | undefined
+  const ctx = {
+    generate: { text: async (i: { model?: { providerID: string; id: string } }) => {
+      sent.push(`${i.model?.providerID}/${i.model?.id}`)
+      if (sent.length === 1) await new Promise<void>((resolve) => { finish = resolve })
+      return { text: 'ok' }
+    } },
+    model: { list: async () => ({ data: [] }), default: async () => ({ data: undefined }) },
+  }
+  const complete = openCodeComplete(ctx, () => option)
+  const req = { model: 'haiku', prompt: 'p', system: 's', maxTokens: 1, timeoutMs: 1 }
+  const first = complete(req)
+  await Promise.resolve()
+  option = 'second/two'
+  await complete(req)
+  finish!()
+  await first
+  await complete(req)
+  expect(sent).toEqual(['first/one', 'second/two', 'second/two'])
+  option = 'third/three'
+  await complete(req)
+  expect(sent.at(-1)).toBe('third/three')
+})
+
 // The committed Codex bundle under plain node. Marked as a nested session so that it never starts a real judging call;
 // it must still start, answer and exit on its own.
 test('the built Codex bundle runs under node and exits after answering', () => {
