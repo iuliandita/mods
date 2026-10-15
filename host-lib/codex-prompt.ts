@@ -1,4 +1,4 @@
-import { anthropicComplete, createEngine, fileStore, storeFile, type Complete, type NodeEngine } from './engine'
+import { codexComplete, createEngine, fileStore, NESTED_ENV, pathLimited, storeFile, type Complete, type NodeEngine } from './engine'
 import { loadOptions } from './options'
 import { parsePrompt, promptOutput, spawnMeasure, withDeadline, type GateResult, type PromptInput } from './prompt'
 
@@ -22,6 +22,8 @@ export type Spec<C extends { mode: string }> = {
   config: (options: Record<string, unknown>) => C
   // True when the prompt needs no judging (too short, a command...).
   skip: (input: PromptInput, c: C) => boolean
+  // The comma-separated folders (the mods' `jevPaths`) outside which no prompt is sent to a model.
+  paths: (c: C) => string
   // The notice to show once when this config may send the prompt to a third party; null when it cannot.
   notice: (c: C) => string | null
   // One prompt through the mod's shared logic. `ctl.expired` turns true when the hook gave up on the answer.
@@ -42,7 +44,7 @@ export function makePromptCli<C extends { mode: string }>(spec: (io: Io) => Spec
 
   async function judge(io: Io, sp: Spec<C>, input: PromptInput, c: C, ctl = { expired: false }): Promise<{ result: GateResult; notices: string[] }> {
     const notices: string[] = []
-    const complete = io.complete ?? anthropicComplete(() => process.env.ANTHROPIC_API_KEY)
+    const complete = pathLimited(io.complete ?? codexComplete(), sp.paths(c), input.cwd)
     const engine = createEngine({ mod: sp.mod, cwd: input.cwd, complete, notify: (t) => notices.push(t), store: io.store })
     const result = await sp.run(engine, c, input, ctl)
     // Notices are fire and forget in the shared code; give them a moment to land.
@@ -54,7 +56,7 @@ export function makePromptCli<C extends { mode: string }>(spec: (io: Io) => Spec
   async function firstNotices(io: Io, sp: Spec<C>, c: C): Promise<string[]> {
     const store = fileStore(io.store ?? storeFile(sp.mod))
     const wanted: [string, string | null][] = [
-      ['anthropicNotice', process.env.ANTHROPIC_API_KEY ? `${sp.mod}: prompts are sent to api.anthropic.com with ANTHROPIC_API_KEY to be judged. Set mode=off in ~/.config/iuliandita-mods/${sp.mod}.json to stop.` : null],
+      ['modelNotice', `${sp.mod}: each prompt is judged by a nested Codex session (gpt-6-luna, low effort, about 18k tokens on your plan). Set mode to off in ~/.config/iuliandita-mods/${sp.mod}.json to stop.`],
       ['jevNotice', sp.notice(c)],
     ]
     const out: string[] = []
@@ -70,6 +72,8 @@ export function makePromptCli<C extends { mode: string }>(spec: (io: Io) => Spec
   // Advisory: any failure lets the prompt through. In dry mode the prompt goes on at once and a process of its own
   // measures it afterwards.
   async function hook(io: Io): Promise<number> {
+    // The nested judging session runs with hooks off, but if one ever runs, it must not judge its own prompt.
+    if (process.env[NESTED_ENV] === '1') return 0
     const input = parsePrompt(await io.stdin())
     if (!input) return 0
     try {
@@ -77,8 +81,6 @@ export function makePromptCli<C extends { mode: string }>(spec: (io: Io) => Spec
       const c = config(io, sp)
       if (c.mode === 'off' || sp.skip(input, c)) return 0
       if (c.mode === 'dry') {
-        // Nothing can be judged without a key, and a process per prompt that only logs an error is not worth it.
-        if (!io.measure && !process.env.ANTHROPIC_API_KEY && !process.env.TYPESAFE_API_KEY) return 0
         // The measuring process cannot show anything, so the notices are shown here, once per install.
         const notices = await firstNotices(io, sp, c)
         ;(io.measure ?? ((p) => spawnMeasure(io.bundle, p)))(input)
@@ -99,6 +101,7 @@ export function makePromptCli<C extends { mode: string }>(spec: (io: Io) => Spec
 
   // The detached half of dry mode: the same logic, then the log write it schedules, which keeps this process alive.
   async function measure(io: Io): Promise<number> {
+    if (process.env[NESTED_ENV] === '1') return 0
     try {
       const raw = JSON.parse(await io.stdin()) as Partial<PromptInput>
       if (typeof raw.prompt !== 'string' || typeof raw.cwd !== 'string') return 0

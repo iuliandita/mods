@@ -3,9 +3,46 @@
 import { fileURLToPath } from "node:url";
 
 // host-lib/engine.ts
-import { mkdirSync, readFileSync as readFileSync2, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync as readFileSync2, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { open, realpath } from "node:fs/promises";
 import { dirname, join as join2, resolve, sep } from "node:path";
+
+// shared/paths.ts
+function normalize(p) {
+  if (!p.startsWith("/"))
+    return null;
+  const out = [];
+  for (const seg of p.split("/")) {
+    if (!seg || seg === ".")
+      continue;
+    if (seg === "..")
+      out.pop();
+    else
+      out.push(seg);
+  }
+  return `/${out.join("/")}`;
+}
+function pathAllowed(cwd, paths, home) {
+  if (!paths.trim())
+    return true;
+  const dir = normalize(cwd);
+  if (dir === null)
+    return false;
+  return paths.split(",").some((raw) => {
+    let p = raw.trim();
+    if (p === "~" || p.startsWith("~/")) {
+      if (!home)
+        return false;
+      p = home + p.slice(1);
+    }
+    const prefix = normalize(p);
+    if (prefix === null)
+      return false;
+    return dir === prefix || dir.startsWith(prefix === "/" ? "/" : `${prefix}/`);
+  });
+}
 
 // host-lib/options.ts
 import { readFileSync } from "node:fs";
@@ -35,6 +72,9 @@ function loadOptions(mod, path = optionsPath(mod)) {
 }
 
 // host-lib/engine.ts
+var promptText = (p) => typeof p === "string" ? p : p.map((b) => b.text).join(`
+
+`);
 var READ_MAX = 64 * 1024;
 var FETCH_MS = 1e4;
 async function readUnder(cwd, name) {
@@ -116,40 +156,46 @@ function createEngine(o) {
     }
   };
 }
-function baseUrl(v) {
-  const fallback = "https://api.anthropic.com";
-  if (!v)
-    return fallback;
-  try {
-    const u = new URL(v);
-    const loopback = ["127.0.0.1", "localhost", "[::1]"].includes(u.hostname);
-    return u.protocol === "https:" || u.protocol === "http:" && loopback ? v.replace(/\/+$/, "") : fallback;
-  } catch {
-    return fallback;
-  }
+var CODEX_MODEL = "gpt-6-luna";
+var NESTED_ENV = "IULIANDITA_MODS_NESTED";
+var CODEX_MS = 20000;
+function spawnCodex(args, input, timeoutMs) {
+  return new Promise((done) => {
+    const child = spawn("codex", args, { stdio: ["pipe", "ignore", "ignore"], env: { ...process.env, [NESTED_ENV]: "1" }, windowsHide: true });
+    const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
+    child.on("error", () => (clearTimeout(timer), done(false)));
+    child.on("close", (code) => (clearTimeout(timer), done(code === 0)));
+    child.stdin.on("error", () => {});
+    child.stdin.end(input);
+  });
 }
-var ALIASES = { haiku: "claude-haiku-5-5", sonnet: "claude-sonnet-5-5", opus: "claude-opus-5-5" };
-function anthropicComplete(key, doFetch = fetch) {
+function codexComplete(run = spawnCodex) {
   return async (req) => {
-    const apiKey = key();
-    if (!apiKey)
+    const dir = mkdtempSync(join2(tmpdir(), "mods-judge-"));
+    try {
+      const out = join2(dir, "answer.txt");
+      const model = req.model.startsWith("gpt-") ? req.model : CODEX_MODEL;
+      const args = ["exec", "-m", model, "-c", 'model_reasoning_effort="low"', "--disable", "hooks", "--ephemeral", "--skip-git-repo-check", "-s", "read-only", "-C", dir, "-o", out, "-"];
+      const ok = await run(args, `${req.system}
+
+${promptText(req.prompt)}`, Math.max(req.timeoutMs, CODEX_MS));
+      if (!ok)
+        return { isAnswered: false, text: "" };
+      const text = readFileSync2(out, "utf8").trim();
+      return { isAnswered: text !== "", text };
+    } catch {
       return { isAnswered: false, text: "" };
-    const r = await doFetch(`${baseUrl(process.env.ANTHROPIC_BASE_URL)}/v1/messages`, {
-      method: "POST",
-      headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model: ALIASES[req.model] ?? req.model, max_tokens: req.maxTokens, system: req.system, messages: [{ role: "user", content: typeof req.prompt === "string" ? req.prompt : req.prompt.map((b) => ({ type: "text", text: b.text, ...b.cache ? { cache_control: { type: "ephemeral" } } : {} })) }] }),
-      signal: AbortSignal.timeout(req.timeoutMs)
-    });
-    if (!r.ok)
-      return { isAnswered: false, text: "" };
-    const body = await r.json();
-    const text = (body.content ?? []).map((b) => b.type === "text" && typeof b.text === "string" ? b.text : "").join("");
-    return { isAnswered: text !== "", text, usage: body.usage };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   };
+}
+function pathLimited(complete, paths, cwd) {
+  return async (req) => pathAllowed(cwd, paths, home()) ? complete(req) : { isAnswered: false, text: "" };
 }
 
 // host-lib/prompt.ts
-import { spawn } from "node:child_process";
+import { spawn as spawn2 } from "node:child_process";
 function parsePrompt(stdin) {
   try {
     const i = JSON.parse(stdin);
@@ -171,7 +217,7 @@ function promptOutput(r, notices) {
   return notices.length ? JSON.stringify(systemMessage) : null;
 }
 function spawnMeasure(bundle, payload) {
-  const child = spawn(process.execPath, [bundle, "measure"], { detached: true, stdio: ["pipe", "ignore", "ignore"], windowsHide: true });
+  const child = spawn2(process.execPath, [bundle, "measure"], { detached: true, stdio: ["pipe", "ignore", "ignore"], windowsHide: true });
   child.on("error", () => {});
   child.stdin.on("error", () => {});
   child.stdin.end(JSON.stringify(payload));
@@ -193,7 +239,7 @@ function makePromptCli(spec) {
   };
   async function judge(io, sp, input, c, ctl = { expired: false }) {
     const notices = [];
-    const complete = io.complete ?? anthropicComplete(() => process.env.ANTHROPIC_API_KEY);
+    const complete = pathLimited(io.complete ?? codexComplete(), sp.paths(c), input.cwd);
     const engine = createEngine({ mod: sp.mod, cwd: input.cwd, complete, notify: (t) => notices.push(t), store: io.store });
     const result = await sp.run(engine, c, input, ctl);
     if (process.env.TYPESAFE_API_KEY)
@@ -203,7 +249,7 @@ function makePromptCli(spec) {
   async function firstNotices(io, sp, c) {
     const store = fileStore(io.store ?? storeFile(sp.mod));
     const wanted = [
-      ["anthropicNotice", process.env.ANTHROPIC_API_KEY ? `${sp.mod}: prompts are sent to api.anthropic.com with ANTHROPIC_API_KEY to be judged. Set mode=off in ~/.config/iuliandita-mods/${sp.mod}.json to stop.` : null],
+      ["modelNotice", `${sp.mod}: each prompt is judged by a nested Codex session (gpt-6-luna, low effort, about 18k tokens on your plan). Set mode to off in ~/.config/iuliandita-mods/${sp.mod}.json to stop.`],
       ["jevNotice", sp.notice(c)]
     ];
     const out = [];
@@ -216,6 +262,8 @@ function makePromptCli(spec) {
     return out;
   }
   async function hook(io) {
+    if (process.env[NESTED_ENV] === "1")
+      return 0;
     const input = parsePrompt(await io.stdin());
     if (!input)
       return 0;
@@ -225,8 +273,6 @@ function makePromptCli(spec) {
       if (c.mode === "off" || sp.skip(input, c))
         return 0;
       if (c.mode === "dry") {
-        if (!io.measure && !process.env.ANTHROPIC_API_KEY && !process.env.TYPESAFE_API_KEY)
-          return 0;
         const notices = await firstNotices(io, sp, c);
         (io.measure ?? ((p) => spawnMeasure(io.bundle, p)))(input);
         const out = promptOutput({}, notices);
@@ -245,6 +291,8 @@ function makePromptCli(spec) {
     return 0;
   }
   async function measure(io) {
+    if (process.env[NESTED_ENV] === "1")
+      return 0;
     try {
       const raw = JSON.parse(await io.stdin());
       if (typeof raw.prompt !== "string" || typeof raw.cwd !== "string")
@@ -666,7 +714,7 @@ function lastRecords(log) {
 var USAGE = "skill-pick: usage is /skill-pick, /skill-pick last or /skill-pick clear.";
 
 // mods/skill-pick/claude/hooks/shared/paths.ts
-function normalize(p) {
+function normalize2(p) {
   if (!p.startsWith("/"))
     return null;
   const out = [];
@@ -680,10 +728,10 @@ function normalize(p) {
   }
   return `/${out.join("/")}`;
 }
-function pathAllowed(cwd, paths, home) {
+function pathAllowed2(cwd, paths, home) {
   if (!paths.trim())
     return true;
-  const dir = normalize(cwd);
+  const dir = normalize2(cwd);
   if (dir === null)
     return false;
   return paths.split(",").some((raw) => {
@@ -693,7 +741,7 @@ function pathAllowed(cwd, paths, home) {
         return false;
       p = home + p.slice(1);
     }
-    const prefix = normalize(p);
+    const prefix = normalize2(p);
     if (prefix === null)
       return false;
     return dir === prefix || dir.startsWith(prefix === "/" ? "/" : `${prefix}/`);
@@ -743,7 +791,7 @@ async function jevKey($, s) {
   try {
     if (s.jevPaths.trim()) {
       const home = await $.env.get("HOME");
-      if (!pathAllowed(await $.session.cwd(), s.jevPaths, home))
+      if (!pathAllowed2(await $.session.cwd(), s.jevPaths, home))
         return;
     }
   } catch {
@@ -950,6 +998,7 @@ var cli = makePromptCli((io) => ({
   mod: "skill-pick",
   config: parseConfig,
   skip: (input, c) => skipReason({ text: input.prompt, wait: false, origin: { kind: "composer" } }, c) !== null,
+  paths: (c) => c.jevPaths,
   notice: (c) => process.env.TYPESAFE_API_KEY && c.picker !== "haiku" ? `skill-pick: prompts and skill descriptions are sent to api.typesafe.ai (Jev) from ${c.jevPaths.trim() || "every directory"}. Restrict with the jevPaths option, or set picker=haiku. See the README Privacy section.` : null,
   run: async (engine, c, input) => {
     const s = { ...c, listings: [], last: [], pending: null };

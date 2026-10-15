@@ -120,7 +120,7 @@ test('codex: with no skills installed the model is not called', async () => {
 test('codex: dry mode releases the prompt at once; the detached measurement logs a record', async () => {
   setOptions({ mode: 'dry' })
   const r = await hook(ASK)
-  expect(r.out).toBeNull()
+  expect(r.out.systemMessage).toContain('nested Codex session')
   expect(r.measured).toEqual([{ prompt: ASK, cwd: root }])
   expect(prompts).toEqual([])
   await main(['measure'], io(JSON.stringify({ prompt: ASK, cwd: root })))
@@ -154,6 +154,7 @@ test('opencode: the host skill list becomes the catalog and the pick is appended
   await setup(
     {
       location: { directory: root },
+      model: { list: async () => ({ data: [] }), default: async () => ({ data: undefined }) },
       generate: {
         text: async ({ prompt }) => {
           prompts.push(prompt)
@@ -194,7 +195,7 @@ test('skill folders: user and system ones win over the repository, the repositor
 
 test('the built Codex bundle runs under node and exits after answering', () => {
   const bundle = join(import.meta.dir, '..', 'codex', 'bin', 'skill-pick.mjs')
-  const r = spawnSync('node', [bundle, 'hook'], { input: submit(ASK), encoding: 'utf8', env: { PATH: process.env.PATH ?? '' }, timeout: 20_000 })
+  const r = spawnSync('node', [bundle, 'hook'], { input: submit(ASK), encoding: 'utf8', env: { PATH: process.env.PATH ?? '', IULIANDITA_MODS_NESTED: '1' }, timeout: 20_000 })
   expect(r.status).toBe(0)
   expect(r.signal).toBeNull()
 })

@@ -4,7 +4,8 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { baseUrl, readUnder, type Complete } from '../../../host-lib/engine'
+import { CODEX_MODEL, codexComplete, NESTED_ENV, pathLimited, readUnder, type Complete } from '../../../host-lib/engine'
+import { openCodeComplete, parseRef, pickFlash } from '../../../host-lib/opencode-model'
 import type { PromptInput } from '../../../host-lib/prompt'
 import { main, type Io } from './cli'
 import { setup } from './opencode'
@@ -105,9 +106,10 @@ test('codex: off, short prompts and commands do nothing; a failing model lets th
 test('codex: dry mode releases the prompt at once and hands it to the detached measurement', async () => {
   setOptions({ mode: 'dry' })
   const r = await hook(VAGUE)
-  expect(r.out).toBeNull()
+  expect(r.out.systemMessage).toContain('nested Codex session')
   expect(r.measured).toEqual([{ prompt: VAGUE, cwd: root }])
   expect(calls).toBe(0)
+  expect((await hook(VAGUE)).out).toBeNull()
   expect((await hook('fix it')).measured).toEqual([])
 })
 
@@ -135,7 +137,7 @@ test('codex: with a Jev key the first dry-mode prompt carries the privacy notice
     expect((await hook(VAGUE)).out).toBeNull()
     setOptions({ mode: 'dry', classifier: 'haiku' })
     store = join(root, `store-${counter++}.json`)
-    expect((await hook(VAGUE)).out).toBeNull()
+    expect((await hook(VAGUE)).out.systemMessage).not.toContain('typesafe')
   } finally {
     delete process.env.TYPESAFE_API_KEY
   }
@@ -143,15 +145,22 @@ test('codex: with a Jev key the first dry-mode prompt carries the privacy notice
 
 type Hook = (e: { prompt: { text: string } }) => Promise<void> | void
 
+const models: unknown[] = []
+
 async function plugin(): Promise<{ run: Hook; generated: string[] }> {
   const generated: string[] = []
   let run: Hook = () => {}
   await setup(
     {
       location: { directory: root },
+      model: {
+        list: async () => ({ data: [{ id: 'gpt-x', providerID: 'other' }, { id: 'deepseek-v4.1-flash', providerID: 'go', variants: [{ id: 'high' }, { id: 'low' }] }] }),
+        default: async () => ({ data: { id: 'deepseek-v4.1-flash', providerID: 'go' } }),
+      },
       generate: {
-        text: async ({ prompt }) => {
+        text: async ({ prompt, model }) => {
           generated.push(prompt)
+          models.push(model)
           if (reply === 'throw') throw new Error('boom')
           return { text: reply }
         },
@@ -171,6 +180,7 @@ test('opencode: mode on runs as flag and appends the question; dry and a clear v
   expect(e.prompt.text.startsWith(VAGUE)).toBe(true)
   expect(e.prompt.text).toContain('Which file?')
   expect(on.generated[0]).toContain('<prompt>')
+  expect(models.at(-1)).toEqual({ id: 'deepseek-v4.1-flash', providerID: 'go', variant: 'low' })
 
   setOptions({ mode: 'dry' })
   const dry = await plugin()
@@ -222,19 +232,100 @@ test('a file read for the vocabulary stays under the working directory, is a reg
   expect((await readUnder(dir, 'CLAUDE.md')).length).toBe(64 * 1024)
 })
 
-test('the Anthropic base URL must be https, or a loopback address', () => {
-  expect(baseUrl(undefined)).toBe('https://api.anthropic.com')
-  expect(baseUrl('https://proxy.example.com/')).toBe('https://proxy.example.com')
-  expect(baseUrl('http://127.0.0.1:8080')).toBe('http://127.0.0.1:8080')
-  expect(baseUrl('http://attacker.example.com')).toBe('https://api.anthropic.com')
-  expect(baseUrl('not a url')).toBe('https://api.anthropic.com')
+test('codex: the judging call is a nested read-only codex exec on the small model, prompt on stdin, answer from a file', async () => {
+  let seen: { args: string[]; input: string } | undefined
+  const complete = codexComplete(async (args, input) => {
+    seen = { args, input }
+    writeFileSync(args[args.indexOf('-o') + 1] as string, ' {"verdict":"clear"} \n')
+    return true
+  })
+  const r = await complete({ model: 'haiku', prompt: [{ text: 'A', cache: true }, { text: 'B' }], system: 'SYS', maxTokens: 200, timeoutMs: 8000 })
+  expect(r).toEqual({ isAnswered: true, text: '{"verdict":"clear"}' })
+  const a = seen!.args
+  expect(a.slice(0, 3)).toEqual(['exec', '-m', CODEX_MODEL])
+  expect(a).toContain('model_reasoning_effort="low"')
+  expect(a.join(' ')).toContain('--disable hooks --ephemeral')
+  expect(a.join(' ')).toContain('-s read-only')
+  expect(a.at(-1)).toBe('-')
+  expect(a.join(' ')).not.toContain('SYS')
+  expect(seen!.input).toBe('SYS\n\nA\n\nB')
+  await complete({ model: 'gpt-6-sol', prompt: 'x', system: 's', maxTokens: 1, timeoutMs: 1 })
+  expect(seen!.args[2]).toBe('gpt-6-sol')
+  const failed = await codexComplete(async () => false)({ model: 'haiku', prompt: 'x', system: 's', maxTokens: 1, timeoutMs: 1 })
+  expect(failed.isAnswered).toBe(false)
 })
 
-// The committed Codex bundle under plain node, with no keys: it must answer and exit on its own.
+test('the model call is made only inside jevPaths', async () => {
+  let n = 0
+  const base: Complete = async () => (n++, { isAnswered: true, text: 'x' })
+  const req = { model: 'm', prompt: 'p', system: 's', maxTokens: 1, timeoutMs: 1 }
+  expect((await pathLimited(base, '', root)(req)).isAnswered).toBe(true)
+  expect((await pathLimited(base, root, join(root, 'sub'))(req)).isAnswered).toBe(true)
+  expect((await pathLimited(base, join(root, 'elsewhere'), root)(req)).isAnswered).toBe(false)
+  expect(n).toBe(2)
+})
+
+test('a nested judging session does nothing when a hook runs inside it', async () => {
+  setOptions({ mode: 'on' })
+  process.env[NESTED_ENV] = '1'
+  try {
+    expect(await hook(VAGUE)).toEqual({ code: 0, out: null, measured: [] })
+    expect(calls).toBe(0)
+  } finally {
+    delete process.env[NESTED_ENV]
+  }
+})
+
+test('opencode: DeepSeek Flash at low effort is chosen, a failing provider is skipped, provider/model is taken as given', async () => {
+  const models = [
+    { id: 'deepseek-v4.1-flash-free', providerID: 'opencode' },
+    { id: '~deepseek/deepseek-flash-latest', providerID: 'openrouter' },
+    { id: 'deepseek-v4.1-flash', providerID: 'go', variants: [{ id: 'high' }, { id: 'low' }] },
+    { id: 'deepseek-v4.1-flash', providerID: 'zen', variants: [{ id: 'low' }] },
+    { id: 'deepseek-v4.1-pro', providerID: 'go' },
+  ]
+  expect(pickFlash(models, 'zen')).toEqual({ id: 'deepseek-v4.1-flash', providerID: 'zen', variant: 'low' })
+  expect(pickFlash(models)).toEqual({ id: 'deepseek-v4.1-flash', providerID: 'go', variant: 'low' })
+  expect(pickFlash([{ id: 'gpt-x', providerID: 'a' }])).toBeUndefined()
+  expect(parseRef('go/deepseek-v4.1-flash')).toEqual({ providerID: 'go', id: 'deepseek-v4.1-flash' })
+  expect(parseRef('haiku')).toBeUndefined()
+
+  const sent: (string | undefined)[] = []
+  const broke = new Set(['zen'])
+  const ctx = {
+    generate: {
+      text: async (i: { prompt: string; model?: { providerID: string } }) => {
+        sent.push(i.model?.providerID)
+        if (i.model && broke.has(i.model.providerID)) throw new Error('Insufficient account funds')
+        return { text: 'ok' }
+      },
+    },
+    model: { list: async () => ({ data: models }), default: async () => ({ data: { id: 'x', providerID: 'zen' } }) },
+  }
+  const req = { model: 'haiku', prompt: 'p', system: 's', maxTokens: 1, timeoutMs: 1 }
+  const complete = openCodeComplete(ctx, () => 'haiku')
+  expect((await complete(req)).text).toBe('ok')
+  await complete(req)
+  expect(sent).toEqual(['zen', 'go', 'go'])
+
+  sent.length = 0
+  await openCodeComplete(ctx, () => 'x/y')(req)
+  expect(sent).toEqual(['x'])
+  const none = { ...ctx, model: { list: async (): Promise<{ data: typeof models }> => { throw new Error('no') }, default: async () => ({ data: undefined }) } }
+  sent.length = 0
+  await openCodeComplete(none, () => '')(req)
+  expect(sent).toEqual([undefined])
+  broke.add('go')
+  broke.add('opencode')
+  await expect(openCodeComplete(ctx, () => '')(req)).rejects.toThrow('funds')
+})
+
+// The committed Codex bundle under plain node. Marked as a nested session so that it never starts a real judging call;
+// it must still start, answer and exit on its own.
 test('the built Codex bundle runs under node and exits after answering', () => {
   const bundle = join(import.meta.dir, '..', 'codex', 'bin', 'prompt-gate.mjs')
-  const r = spawnSync('node', [bundle, 'hook'], { input: submit(VAGUE), encoding: 'utf8', env: { PATH: process.env.PATH ?? '' }, timeout: 20_000 })
+  const r = spawnSync('node', [bundle, 'hook'], { input: submit(VAGUE), encoding: 'utf8', env: { PATH: process.env.PATH ?? '', IULIANDITA_MODS_NESTED: '1' }, timeout: 20_000 })
   expect(r.status).toBe(0)
   expect(r.signal).toBeNull()
-  expect(spawnSync('node', [bundle, 'hook'], { input: 'not json', encoding: 'utf8', env: { PATH: process.env.PATH ?? '' }, timeout: 20_000 }).status).toBe(0)
+  expect(spawnSync('node', [bundle, 'hook'], { input: 'not json', encoding: 'utf8', env: { PATH: process.env.PATH ?? '', IULIANDITA_MODS_NESTED: '1' }, timeout: 20_000 }).status).toBe(0)
 })

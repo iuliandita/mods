@@ -61,8 +61,8 @@
   against the TypeScript one); OpenCode also scrubs tool results, the conversation and the prompt.
   New `host_files` field in `mod.json` copies a plugin file into each host package.
 - `prompt-gate` and `skill-pick` also run on Codex (a `UserPromptSubmit` hook with a detached
-  dry-run measurement, the small model through `ANTHROPIC_API_KEY`) and OpenCode 2.x (the host's
-  model call and skill list). `scripts/typecheck --hosts` checks them against a stand-in for the
+  dry-run measurement, a nested low-effort luna session as the small model) and OpenCode 2.x (a low-effort DeepSeek Flash
+  model call and the host's skill list). `scripts/typecheck --hosts` checks them against a stand-in for the
   engine types.
 - `prompt-gate` and `skill-pick` dry mode releases the prompt first and measures from a clock
   timer afterwards; `delegation-board` resets on `/clear` and prints a text table when its pane

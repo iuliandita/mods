@@ -17,6 +17,7 @@ const cli = makePromptCli<Config>(() => ({
   mod: 'prompt-gate',
   config: parseConfig,
   skip: (input, c) => skip({ text: input.prompt, wait: false, origin: { kind: 'composer' } } as never, c) !== null,
+  paths: (c) => c.jevPaths,
   notice: (c) =>
     process.env.TYPESAFE_API_KEY && c.classifier !== 'haiku'
       ? `prompt-gate: prompts are sent to api.typesafe.ai (Jev) from ${c.jevPaths.trim() || 'every directory'}. Restrict with the jevPaths option, or set classifier=haiku. See the README Privacy section.`

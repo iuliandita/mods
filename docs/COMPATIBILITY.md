@@ -13,8 +13,8 @@ Versions checked: Claude Code 2.1.296, Codex CLI 0.162.1, OpenCode 2.0.29.
 | --- | --- | --- | --- |
 | `guard-rules` | **works** (terminal verified) | **works** | **works** |
 | `secret-box` | **works** (terminal verified) | **works**, partly: placeholders and the command's own output, see below | **works** |
-| `prompt-gate` | works, untested | **works**, needs `ANTHROPIC_API_KEY` for the small model | **works**; `on` runs as `flag` |
-| `skill-pick` | works, untested | **works**, needs `ANTHROPIC_API_KEY`; no use records | **works**; no use records |
+| `prompt-gate` | works, untested | **works**, judged by a nested Codex session (luna, low effort) | **works**, judged by a low-effort DeepSeek Flash; `on` runs as `flag` |
+| `skill-pick` | works, untested | **works**, judged by a nested Codex session (luna, low effort); no use records | **works**; no use records |
 | `delegation-board` | works, untested | **not possible**: hooks cannot draw anything | **not ported**; its UI plugin entry is not evaluated yet |
 | `statusline` | works, untested | **not possible**: the status line only takes built-in items | **not ported**; its UI plugin entry is not evaluated yet |
 
@@ -103,7 +103,7 @@ the only one so far.
 | | Claude Code | Codex | OpenCode |
 | --- | --- | --- | --- |
 | Hook | `prompt.submit` | `UserPromptSubmit` command hook | `session.prompt` hook |
-| Small model | the engine's model call | the Anthropic Messages API with `ANTHROPIC_API_KEY` (`ANTHROPIC_BASE_URL` is honored when it is https or a loopback address); no key means "error" and the prompt goes through | the host's `generate.text` with its own default model (the mod's `model` option is ignored) |
+| Small model | the engine's model call | a nested `codex exec` session on `gpt-6-luna` at low effort (read-only, hooks off, throwaway directory), about 18k tokens of your plan per prompt; a failure means "error" and the prompt goes through. The mod's `model` option counts only when it names a `gpt-*` model | the host's `generate.text` with a low-effort DeepSeek Flash model picked from the host's model list (up to three candidates are tried, then the host's default model); the `model` option counts only as `provider/model` |
 | Stop a vague prompt (`on`) | drops it with the question | `decision: block` with the question; sending it again unchanged runs it | **runs as `flag`**: a throw stops the prompt but shows only a generic error, and the terminal UI sends it again |
 | Add a note (`flag`, skill-pick `on`) | adds context | `additionalContext` | appends the note to the prompt text |
 | Dry mode | measures from a timer after the prompt went on | the hook returns at once and starts a detached process that measures | measures from a timer in the host process |
@@ -113,28 +113,30 @@ the only one so far.
 | Stats | `/prompt-gate`, `/skill-pick` | `node .../<mod>.mjs summary\|last\|clear` | the same bundle |
 | Privacy notice for Jev | toast | `systemMessage` on the first prompt | host log |
 
-What was run on the real hosts, with a local stand-in for the Anthropic API (no real key was used):
+What was run on the real hosts, with a stand-in model call for most checks and one real nested luna call on Codex:
 on Codex 0.162.1 a vague prompt was blocked with its question and the same prompt went through
 when sent again, `flag` put the note in the model's context, `dry` measured from the detached
 process and logged a record, and skill-pick put a skill name from the real skill folders in the
 model's context. On OpenCode 2.0.29 the note reached the model for both mods and `skill.list`
-supplied the catalog. The host's own model call failed in this environment (the provider refused
-the request for its default token limit), so the real OpenCode classification was not run; the
-adapter treats that as an error and lets the prompt through.
+supplied the catalog. The real OpenCode classification ran through the fallback list of DeepSeek Flash candidates
+(18 s on a fresh process, so the call has a 20 s deadline); a failure is an error and the prompt
+goes through.
 
 Why the differences:
 
-- **A Codex hook has no model.** The small model call needs your Anthropic key, so the prompt goes
-  to Anthropic in addition to OpenAI. With `TYPESAFE_API_KEY` set it also goes to Jev, as in the
-  Claude plugin; set `classifier` / `picker` to `haiku` or use `jevPaths` to limit that.
+- **A Codex hook has no model.** The hook starts a nested `codex exec` session on luna, which uses
+  your Codex plan (about 18k tokens per prompt) and sends the prompt to OpenAI only. With
+  `TYPESAFE_API_KEY` set it also goes to Jev, as in the Claude plugin. `jevPaths` limits every model
+  call on the hosts, not only Jev: outside those folders no prompt is judged. The default `haiku`
+  value of `classifier` / `picker` is ignored on Codex and OpenCode.
 - **Dry mode on Codex needs a second process.** A hook must answer before the model sees the
   prompt, and the hook process ends with its answer, so a detached `measure` process does the work.
   It stops itself after 60 seconds.
 - **Bounced prompts are remembered in a file on Codex** (the hook is a new process each time), in
   the mod's store under `~/.local/share/iuliandita-mods`, per working directory.
-- **Where a prompt goes is announced once.** With `ANTHROPIC_API_KEY` set, the first dry-mode prompt
-  carries a notice that prompts are sent to api.anthropic.com; with a Jev key, one for Jev. Dry mode
-  does nothing (no process is started) while neither key is set.
+- **Where a prompt goes is announced once.** The first dry-mode prompt on Codex carries a
+  notice that each prompt is judged by a nested Codex session and costs plan tokens; with a Jev key,
+  one for Jev. Dry mode spawns a nested judgement per prompt until the mode is set to `off`.
 - **The vocabulary file is confined.** `AGENTS.md` or `CLAUDE.md` is read only when it resolves to a
   regular file under the working directory, up to 64 KiB; skill files are read for their front
   matter only, at most 300 folders per directory and 100 repository skills, and the user's and
