@@ -15,7 +15,7 @@ Versions checked: Claude Code 2.1.296, Codex CLI 0.162.1, OpenCode 2.0.29.
 | `secret-box` | **works** (terminal verified) | **works**, partly: placeholders and the command's own output, see below | **works** |
 | `prompt-gate` | works, untested | **works**, judged by a nested Codex session (luna, low effort) | **works**, judged by a low-effort DeepSeek Flash; `on` runs as `flag` |
 | `skill-pick` | works, untested | **works**, judged by a nested Codex session (luna, low effort); no use records | **works**; no use records |
-| `delegation-board` | works, untested | **not possible**: hooks cannot draw anything | **works**: a panel of child sessions, opened from the command palette |
+| `delegation-board` | works, untested | **not possible**: hooks cannot draw anything | **works**: a panel of child sessions, opened with `/board` |
 | `statusline` | works, untested | **not possible**: the status line only takes built-in items | **works**, reduced: one line, no rate-limit bars |
 
 ## guard-rules
@@ -152,7 +152,7 @@ Why the differences:
 | Draw anything | `ui.render` in the band above the prompt, a pane | **not possible**: hooks draw nothing, and `tui.status_line` takes only built-in item names | a terminal UI plugin (`ui.slot`, `ui.panel`) |
 | statusline | two rows: model and effort, worktree and branch counts, lines changed, kube context, PR and issue counts, context, 5h and 7d limits, cache, cost, time | **not possible** | one line above the prompt: model, folder, branch, context tokens, cost, elapsed time, a running mark |
 | delegation-board | a live pane of subagents and teammates, effort and prices | **not possible** | a panel of the session's child sessions: state, agent, time, tokens, cost, title |
-| Open the board | `/board` | | **Delegation board** in the command palette (`ctrl+p`); a slash command is registered too, but only the palette entry was seen working |
+| Open the board | `/board` | | `/board`, or **Delegation board** in the command palette (`ctrl+p`) |
 | Setup | plugin install | | `plugins` in `~/.config/opencode/cli.json` (the global file; there is no project-level terminal config) |
 
 What was run on the real host (OpenCode 2.0.29): the statusline line drew above the prompt in and
