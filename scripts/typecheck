@@ -4,12 +4,36 @@
 # or hot-reload has loaded some mod from this clone; the types are the same for every mod.
 #
 #   scripts/typecheck [mod ...]        all mods when none given
+#   scripts/typecheck --hosts [mod ...]   only the Codex and OpenCode host code (mods/<name>/host)
 #
 # Needs a TypeScript 5.4+ compiler: tsc on PATH, node_modules/.bin/tsc, or bunx / npx as a fallback.
+# --hosts needs bun and the network: it installs typescript and the node and bun types into a
+# temporary directory, and does not need the engine-laid types.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
+
+if [ "${1:-}" = "--hosts" ]; then
+  shift
+  command -v bun >/dev/null 2>&1 || { echo "typecheck: --hosts needs bun" >&2; exit 2; }
+  if [ "$#" -gt 0 ]; then hmods=("$@"); else hmods=(); for d in mods/*/host; do [ -d "$d" ] && hmods+=("$(basename "$(dirname "$d")")"); done; fi
+  htmp="$(mktemp -d)"
+  trap 'rm -rf "$htmp"' EXIT
+  printf '{"name":"hostcheck","private":true}\n' > "$htmp/package.json"
+  (cd "$htmp" && bun add -d typescript@~5.8 @types/node@^24 @types/bun@^1 >/dev/null) || { echo "typecheck: could not install the type packages" >&2; exit 2; }
+  hfail=0
+  for m in "${hmods[@]}"; do
+    cat > "$htmp/tsconfig.json" <<JSON
+{ "compilerOptions": { "target": "es2023", "lib": ["es2023"], "module": "esnext", "moduleResolution": "bundler",
+  "strict": true, "noUncheckedIndexedAccess": true, "noEmit": true, "skipLibCheck": true,
+  "types": ["node", "bun"], "typeRoots": ["$htmp/node_modules/@types"] },
+  "include": ["$root/mods/$m/host"] }
+JSON
+    if "$htmp/node_modules/.bin/tsc" -p "$htmp/tsconfig.json"; then echo "typecheck: $m host ok"; else echo "typecheck: $m host FAILED" >&2; hfail=1; fi
+  done
+  exit "$hfail"
+fi
 
 types=""
 for d in mods/*/claude/.claude-plugin/types local/mods/*/claude/.claude-plugin/types; do

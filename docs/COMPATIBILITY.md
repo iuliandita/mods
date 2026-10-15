@@ -29,7 +29,8 @@ Versions checked: Claude Code 2.1.296, Codex CLI 0.162.1, OpenCode 2.0.29.
 | Classify an environment | `/guard-context` | `node .../guard-rules.mjs context` in your terminal | the same bundle |
 | Dry mode | toast | `systemMessage` (not checked how Codex shows it) | written to the host log |
 | If the guard itself fails | denies | denies; the hook command turns any failure into exit 2 | denies |
-| Not checked | | text typed into a running terminal session (`write_stdin`) | other tools than `shell` |
+| Not checked | | text typed into a running terminal session (`write_stdin`); file tools other than `apply_patch`, `Edit`, `Write` | |
+| Own files fenced off | n/a | `apply_patch`, `Edit`, `Write`, shell text | every non-shell tool, shell text |
 
 What was run on the real hosts: a commit on `main` is blocked and the model sees the reason, and
 the same commit goes through once the repository is listed in `unprotectedRepos`. The other rules
@@ -53,8 +54,11 @@ Why the differences:
 - **Codex does not hook `write_stdin`.** Its docs say input written to a running terminal session
   does not run `PreToolUse` again, so a shell started in one call and fed commands in later calls
   is not checked.
-- **The options and class files are not protected from a model that can write files.** The same
-  holds for the Claude plugin's settings. The guard is for accidents, not a security boundary.
+- **The options and class files are only fenced off best effort.** The hook refuses shell
+  commands that name their directories and file-edit tool calls aimed at them, by reading text and
+  paths, so a path built at run time gets past it. A model that can run arbitrary code can still
+  change them, as it can the Claude plugin's settings. The guard is for accidents, not a security
+  boundary.
 - **OpenCode: v2 plugin API only.** The older `@opencode-ai/plugin` API (OpenCode 1.x) is not
   covered. A plugin is added by path in `plugins` in `opencode.json`; there is no marketplace.
 

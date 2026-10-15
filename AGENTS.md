@@ -108,7 +108,7 @@ a terminal install at user scope loads in Desktop sessions too.
 - Security mods fail closed: a guard mod must report at least one gating hook, and every
   gating hook needs `.catch`.
 - Run before pushing: `python3 -m pytest -q -m "not integration"`, `bun test mods/*/host`,
-  `scripts/mods validate`, and `scripts/mods generate --check`. Integration tests need the claude CLI and use a throwaway
+  `scripts/typecheck --hosts`, `scripts/mods validate`, and `scripts/mods generate --check`. Integration tests need the claude CLI and use a throwaway
   config dir; run them with `python3 -m pytest -q -m integration`.
 - After changing a mod's TypeScript, run `scripts/typecheck [mod]` and `claude plugin test
   mods/<name>/claude`. The type check needs the API types the engine lays beside a mod it has

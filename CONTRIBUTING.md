@@ -16,7 +16,8 @@ Mods run unsandboxed with user permissions. Review egress and source changes exp
 ## Checks and documentation
 
 Run `python3 -m pytest -q -m "not integration"`, `bun test mods/*/host`,
-`scripts/mods validate --no-claude`, and `scripts/mods generate --check`. With the pinned Claude CLI, also run
+`scripts/typecheck --hosts`, `scripts/mods validate --no-claude`, and
+`scripts/mods generate --check`. With the pinned Claude CLI, also run
 `scripts/mods validate` and `python3 -m pytest -q -m integration` using a temporary config root.
 After TypeScript changes, run `scripts/typecheck <mod>` and
 `claude plugin test mods/<mod>/claude`. Typechecking requires API types from an authenticated

@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { checkCommand } from './check'
+import { checkCommand, checkTool } from './check'
 import { main, type Io } from './cli'
 import { configPath, loadClasses, loadConfig, nodeEnv } from './env'
 import { setup } from './opencode'
@@ -154,6 +154,33 @@ test('context: a store that exists but cannot be read denies instead of reading 
   expect((await checkCommand('kubectl delete pod x --context dev-box', loadConfig(configFile), env)).deny).toBeUndefined()
 })
 
+test('self-protection: edit tools and shell commands aimed at the guard\'s own files are refused, other work passes', async () => {
+  const patch = (path: string) => `*** Begin Patch\n*** Update File: ${path}\n@@\n-a\n+b\n*** End Patch`
+  const dirs = [join(root, 'home', '.config', 'iuliandita-mods'), join(root, 'home', '.local', 'share', 'iuliandita-mods')]
+  const home = join(root, 'home')
+  for (const input of [
+    { command: patch('~/.config/iuliandita-mods/guard-rules.json') },
+    { command: patch(`${home}/.local/share/iuliandita-mods/guard-rules/contexts.json`) },
+    { file_path: join(dirs[0]!, 'guard-rules.json'), content: '{}' },
+    { filePath: 'iuliandita-mods/guard-rules.json', content: '{}' },
+  ]) {
+    expect(checkTool(input, join(root, 'home', '.config'), home, dirs).deny, JSON.stringify(input)).toContain('for the user to change')
+  }
+  expect(checkTool({ command: patch('src/app.ts') }, repo, home, dirs)).toEqual({})
+  expect(checkTool({ filePath: 'iuliandita-mods/notes.md' }, repo, home, dirs)).toEqual({})
+  const env = nodeEnv(repo, () => ({}))
+  for (const command of ['echo {} > ~/.config/iuliandita-mods/guard-rules.json', 'sed -i s/on/off/ "$HOME/.config/iuliandita-mods/guard-rules.json"', "cat '/h/.local/share/iuliandita-mods/guard-rules/contexts.json'"]) {
+    expect((await checkCommand(command, loadConfig(configFile), env)).deny, command).toContain('for the user to change')
+  }
+  expect((await checkCommand('ls ~/.codex/plugins/cache/iuliandita-mods/guard-rules/0.1.1', loadConfig(configFile), env)).deny).toBeUndefined()
+  const viaHook = io(JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'apply_patch', tool_input: { command: patch('~/.config/iuliandita-mods/guard-rules.json') }, cwd: repo }))
+  expect(await main(['hook'], viaHook)).toBe(0)
+  expect(JSON.parse(viaHook.stdout).hookSpecificOutput.permissionDecision).toBe('deny')
+  const fine = io(JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: 'a.txt', content: 'x' }, cwd: repo }))
+  expect(await main(['hook'], fine)).toBe(0)
+  expect(fine.stdout).toBe('')
+})
+
 test('opencode: the shell tool is judged, a relative workdir is resolved from the project, other tools pass', async () => {
   writeConfig('{}')
   let hook: (e: { tool: string; input: unknown }) => Promise<void> | void = () => {}
@@ -162,6 +189,7 @@ test('opencode: the shell tool is judged, a relative workdir is resolved from th
   await expect(Promise.resolve(hook({ tool: 'shell', input: { command: 'git commit -m x', workdir: '../vault-old' } }))).rejects.toThrow('protected branch "main"')
   await expect(Promise.resolve(hook({ tool: 'shell', input: {} }))).rejects.toThrow('fail closed')
   await hook({ tool: 'read', input: { filePath: 'x' } })
+  await expect(Promise.resolve(hook({ tool: 'edit', input: { filePath: '~/.config/iuliandita-mods/guard-rules.json', newString: '{}' } }))).rejects.toThrow('for the user to change')
   await hook({ tool: 'shell', input: { command: 'git status' } })
   writeConfig(JSON.stringify({ unprotectedRepos: other }))
   await hook({ tool: 'shell', input: { command: 'git commit -m x', workdir: '../vault-old' } })

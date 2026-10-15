@@ -113,8 +113,11 @@ why is in [docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md).
   seconds. Trust the hook once with `/hooks`, or Codex skips it.
 - Codex does not run its hook for text typed into an already-running terminal session
   (`write_stdin`), so a shell started first and fed commands later is not checked.
-- Nothing protects the options and class files from a model that can write files; the same is
-  true of the Claude plugin's settings. Keep the guard for accidents.
+- The hook also refuses shell commands that name `~/.config/iuliandita-mods` or
+  `~/.local/share/iuliandita-mods`, and edit, write and patch tool calls aimed at them (Codex
+  `apply_patch`, `Edit`, `Write`; every OpenCode tool other than the shell). It reads text and
+  paths, so a path built at run time gets past it; nothing stops a model that can run arbitrary
+  code from changing those files, as with the Claude plugin's settings. Keep the guard for accidents.
 - OpenCode needs the v2 plugin API; dry-mode findings go to the host log.
 
 ## When a rule is wrong for you
