@@ -159,9 +159,12 @@ def validate(root: Path, *, run_claude: bool = True) -> list[str]:
         mods = load_all(root, include_local=True)
     except CatalogError as exc:
         return [str(exc)]
+    try:
+        stale = generate(root, check=True)
+    except CatalogError as exc:
+        return [str(exc)]
     problems = [
-        f"generated file is stale: {p.relative_to(root)} (run scripts/mods generate)"
-        for p in generate(root, check=True)
+        f"generated file is stale: {p.relative_to(root)} (run scripts/mods generate)" for p in stale
     ]
     problems += scan_private(root)
     if run_claude:

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 KINDS = ("guard", "band", "pane", "rewrite", "statusline")
+HOSTS = ("codex", "opencode")
 MODES = ("off", "dry", "flag", "on")
 SURFACES = ("terminal", "desktop", "vscode", "headless")
 SURFACE_STATES = ("verified", "untested", "unsupported")
@@ -15,7 +16,7 @@ REQUIRED = (
     "name", "summary", "kind", "egress", "modes", "default_mode",
     "requires", "surfaces", "verified_on",
 )
-OPTIONAL = ("shared", "inject")
+OPTIONAL = ("shared", "inject", "hosts")
 SHARED_RE = re.compile(r"^[a-z][a-z0-9-]*\.ts$")
 INJECT_RE = re.compile(r"^([a-z][a-z0-9-]*)\.inject\.ts$")
 
@@ -60,10 +61,14 @@ class Mod:
     is_local: bool
     shared: tuple[str, ...] = ()
     inject: tuple[str, ...] = ()
+    hosts: tuple[str, ...] = ()
 
     @property
     def plugin_dir(self) -> Path:
         return self.path / "claude"
+
+    def host_dir(self, host: str) -> Path:
+        return self.path / host
 
     def as_dict(self) -> dict:
         return {
@@ -76,6 +81,7 @@ class Mod:
             "requires": list(self.requires),
             "surfaces": dict(self.surfaces),
             "verified_on": self.verified_on,
+            **({"hosts": list(self.hosts)} if self.hosts else {}),
         }
 
 
@@ -172,6 +178,50 @@ def _problems(path: Path, data: object, shared: Path) -> list[str]:
                 f"{where}: claude/hooks/register.ts lacks one ordered begin/end marker pair for: "
                 + ", ".join(unmarked)
             )
+    hosts = data.get("hosts", [])
+    if not (
+        isinstance(hosts, list)
+        and all(h in HOSTS for h in hosts)
+        and len(set(hosts)) == len(hosts)
+    ):
+        errs.append(f"{where}: hosts must list distinct names from {', '.join(HOSTS)}")
+    else:
+        errs += _host_problems(path, hosts)
+    return errs
+
+
+# Files each host package must ship, and the manifest whose version must match the Claude plugin's.
+HOST_FILES = {
+    "codex": ("host/bin.ts", "codex/.codex-plugin/plugin.json", "codex/hooks/hooks.json"),
+    "opencode": ("host/opencode.ts", "opencode/package.json"),
+}
+HOST_VERSION_FILE = {"codex": "codex/.codex-plugin/plugin.json", "opencode": "opencode/package.json"}
+
+
+def _field(manifest: Path, key: str) -> object:
+    try:
+        data = json.loads(manifest.read_text())
+    except (OSError, ValueError):
+        return None
+    return data.get(key) if isinstance(data, dict) else None
+
+
+def _host_problems(path: Path, hosts: list[str]) -> list[str]:
+    errs: list[str] = []
+    claude_version = _field(path / "claude" / ".claude-plugin" / "plugin.json", "version")
+    for host in hosts:
+        missing = [f for f in HOST_FILES[host] if not (path / f).is_file()]
+        if missing:
+            errs.append(f"{path.name}: host {host} lacks {', '.join(missing)}")
+            continue
+        manifest = path / HOST_VERSION_FILE[host]
+        if _field(manifest, "name") != path.name:
+            errs.append(f"{path.name}: {HOST_VERSION_FILE[host]} name must be '{path.name}'")
+        if host == "codex" and f"bin/{path.name}.mjs" not in (path / "codex" / "hooks" / "hooks.json").read_text():
+            errs.append(f"{path.name}: codex/hooks/hooks.json must run bin/{path.name}.mjs")
+        version = _field(manifest, "version")
+        if version != claude_version:
+            errs.append(f"{path.name}: {HOST_VERSION_FILE[host]} version {version!r} must equal the Claude plugin's {claude_version!r}")
     return errs
 
 
@@ -216,6 +266,7 @@ def parse_mod(path: Path, *, is_local: bool, shared: Path) -> Mod:
         is_local=is_local,
         shared=tuple(data.get("shared", [])),
         inject=tuple(data.get("inject", [])),
+        hosts=tuple(data.get("hosts", [])),
     )
 
 

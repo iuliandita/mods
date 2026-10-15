@@ -1,6 +1,7 @@
 # mods
 
-Claude Code mods you can install one at a time.
+Claude Code mods you can install one at a time. `guard-rules` also runs on Codex and OpenCode;
+[what works on which host, and why](docs/COMPATIBILITY.md).
 
 Mods are plugins built on the hooks-module API. They run with your permissions and are not
 sandboxed: read a mod before installing it. Each mod lists what leaves your machine (`egress`)
@@ -15,6 +16,8 @@ Run it in a terminal. It works for Claude Code and loads in Claude Desktop sessi
 
 These calls install from the GitHub marketplace. From a clone, `scripts/mods install <mod>`
 registers that clone as the marketplace instead (or `--source <owner/repo>`).
+
+For Codex and OpenCode, see the mod's README and [INSTALL.md](INSTALL.md).
 
 ## Catalog
 

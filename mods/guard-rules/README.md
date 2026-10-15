@@ -39,10 +39,12 @@ Egress: none (no network, no model calls).
 
 - Claude Code: verified on 2.1.296 in the terminal.
 - Desktop, VS Code and headless: untested.
+- Codex CLI 0.162.1 and OpenCode 2.0.29: a protected-branch block and the `unprotectedRepos`
+  exemption were run on each; see [Codex and OpenCode](#codex-and-opencode).
 - Mode: `on` by default; available modes are `off`, `dry` and `on`.
 - Egress: none. Requirements: `git`.
 
-These facts match `mod.json`. See [installation and recovery](../../INSTALL.md) and
+The Claude Code lines match `mod.json`. See [installation and recovery](../../INSTALL.md) and
 [contributor checks](../../CONTRIBUTING.md) for scope and validation limits.
 
 ## Install
@@ -89,6 +91,31 @@ wins over the patterns. The command acts only when you typed it (or sent it from
 a run started by the model or another plugin is refused, so the model cannot classify an
 environment for itself. Names are lower-cased and limited to 200 characters without whitespace or
 control characters.
+
+## Codex and OpenCode
+
+The same rules run on Codex (a `PreToolUse` hook on `Bash`) and OpenCode 2.x (a plugin hook on its
+shell tool). Install steps are in [INSTALL.md](../../INSTALL.md); what differs from Claude Code and
+why is in [docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md).
+
+- Options are the same names and values as above, in a JSON file with string values:
+  `~/.config/iuliandita-mods/guard-rules.json`. The path is fixed under your account's home
+  (not `$HOME` or `$XDG_CONFIG_HOME`, which a repository can set through a `.env` file). A file
+  that is not a JSON object is a config error and denies git and forge writes until fixed. A
+  repository's own config is never read.
+- `/guard-context` becomes `node <clone>/mods/guard-rules/codex/bin/guard-rules.mjs context list |
+  <name> protected|relaxed | forget <name>`, run in your own terminal. Classes are stored in
+  `~/.local/share/iuliandita-mods/guard-rules/contexts.json`; a store that exists but cannot be
+  read denies instead of reading as empty. The hook refuses to run that command for the model,
+  as a best-effort filter, not a boundary.
+- Codex lets a failing hook through unless it exits 2. The plugin's hook command turns any other
+  failure (no `node`, a missing bundle, a crash) into a block, and the guard answers within 15
+  seconds. Trust the hook once with `/hooks`, or Codex skips it.
+- Codex does not run its hook for text typed into an already-running terminal session
+  (`write_stdin`), so a shell started first and fed commands later is not checked.
+- Nothing protects the options and class files from a model that can write files; the same is
+  true of the Claude plugin's settings. Keep the guard for accidents.
+- OpenCode needs the v2 plugin API; dry-mode findings go to the host log.
 
 ## When a rule is wrong for you
 

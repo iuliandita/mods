@@ -75,13 +75,44 @@ only the remaining names. To undo a completed installation, uninstall its record
 scope. Recover a known earlier version from a preserved checkout/source and explicitly reinstall
 it; preserve settings and avoid blindly resetting Claude configuration.
 
+## Codex and OpenCode
+
+Only mods with `hosts` in `mods.json` run there; see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
+Both hosts run the mod with your permissions, like Claude.
+
+Codex:
+
+```bash
+codex plugin marketplace add iuliandita/mods
+codex plugin add guard-rules@iuliandita-mods
+```
+
+Codex skips a plugin hook until you trust it once with `/hooks` in the Codex terminal UI.
+Remove with `codex plugin remove guard-rules@iuliandita-mods`.
+
+OpenCode 2.x has no marketplace: clone this repository and add the package to `opencode.json`
+(`~/.config/opencode/opencode.json` for all projects):
+
+```json
+{ "plugins": [{ "package": "/path/to/clone/mods/guard-rules/opencode" }] }
+```
+
+Options for both hosts live in `~/.config/iuliandita-mods/<mod>.json` (see the mod's README),
+never in a repository. After a Codex install the hook command is
+`node <plugin>/bin/guard-rules.mjs`; the same file in a clone (`mods/guard-rules/codex/bin/`) is
+the command line tool for OpenCode users too.
+
 ## Contributor checks
 
 ```bash
 python3 -m pytest -q -m "not integration"
+bun test mods/*/host
 scripts/mods validate --no-claude
 scripts/mods generate --check
 ```
+
+`generate` builds the Codex and OpenCode bundles with the Bun version in `.bun-version`
+and refuses another version, so the committed files are reproducible.
 
 `validate --no-claude` excludes engine validation and hook tests. Full validation needs the pinned
 Claude CLI. Typechecking additionally needs API types laid down by an authenticated local session;
