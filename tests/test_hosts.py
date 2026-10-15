@@ -77,3 +77,38 @@ def test_only_mods_with_a_codex_host_reach_the_codex_marketplace_and_the_catalog
     assert "codex plugin add alpha@iuliandita-mods" in by_name["alpha"]["hosts"]["codex"]["install"]
     assert "opencode" in by_name["alpha"]["hosts"]
     assert "hosts" not in by_name["beta"]
+
+
+def test_host_files_are_copied_with_their_mode_and_checked(tmp_path: Path) -> None:
+    mod = write_mod(tmp_path, "alpha", hosts=["codex", "opencode"], host_files=["bin/tool"])
+    add_hosts(mod, "codex", "opencode")
+    source = mod / "claude" / "bin" / "tool"
+    source.parent.mkdir()
+    source.write_text("#!/bin/sh\necho hi\n")
+    source.chmod(0o755)
+    generate(tmp_path, bundles=False)
+    for host in ("codex", "opencode"):
+        copy = mod / host / "bin" / "tool"
+        assert copy.read_text() == source.read_text()
+        assert copy.stat().st_mode & 0o111
+    assert generate(tmp_path, check=True, bundles=False) == []
+    (mod / "codex" / "bin" / "tool").chmod(0o644)
+    assert generate(tmp_path, check=True, bundles=False) == [mod / "codex" / "bin" / "tool"]
+    source.write_text("changed\n")
+    assert len(generate(tmp_path, check=True, bundles=False)) == 2
+
+
+@pytest.mark.parametrize(("files", "match"), [(["bin/none"], "not found under claude/"), (["../x/y"], "host_files must list"), (["tool"], "host_files must list")])
+def test_invalid_host_files_are_rejected(tmp_path: Path, files: list[str], match: str) -> None:
+    add_hosts(write_mod(tmp_path, "alpha", hosts=["codex"], host_files=files), "codex")
+    with pytest.raises(CatalogError, match=match):
+        load_mods(tmp_path)
+
+
+def test_host_files_cannot_overwrite_a_host_package_file(tmp_path: Path) -> None:
+    mod = write_mod(tmp_path, "alpha", hosts=["codex"], host_files=["hooks/hooks.json"])
+    add_hosts(mod, "codex")
+    (mod / "claude" / "hooks").mkdir(exist_ok=True)
+    (mod / "claude" / "hooks" / "hooks.json").write_text("{}")
+    with pytest.raises(CatalogError, match="would overwrite"):
+        load_mods(tmp_path)

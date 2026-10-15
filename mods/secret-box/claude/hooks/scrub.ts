@@ -17,8 +17,9 @@ export function quote(s: string): string {
   return `'${s.replaceAll("'", "'\\''")}'`
 }
 
-export function rewriteCommand(wrapper: string, command: string): string {
-  return `${quote(wrapper)} exec -- ${quote(command)}`
+// `scrub` asks the helper to filter known values out of the command's own output, for hosts whose hooks cannot.
+export function rewriteCommand(wrapper: string, command: string, scrub = false): string {
+  return `${quote(wrapper)} exec ${scrub ? '--scrub ' : ''}-- ${quote(command)}`
 }
 
 function utf8(s: string): number[] {
@@ -66,7 +67,8 @@ function base64Forms(base: string): string[] {
 const lowerHex = (s: string) => s.replace(/%[0-9A-F]{2}/g, (m) => m.toLowerCase())
 const strictUrl = (s: string) => s.replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
 
-function forms(value: string): string[] {
+// Exported so the Python helper's port of this list can be checked against it.
+export function forms(value: string): string[] {
   const out = new Set<string>()
   for (const base of new Set([value, value.trim()])) {
     if (base.length < MIN_LEN) continue

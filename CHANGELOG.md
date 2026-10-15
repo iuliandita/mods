@@ -56,6 +56,10 @@
   from the same rules code. New `hosts` field in `mod.json`, bundles built by `scripts/mods
   generate` with the Bun version in `.bun-version`, a generated `.agents/plugins/marketplace.json`,
   and `docs/COMPATIBILITY.md` with what works on each host for every mod, and why.
+- `secret-box` also runs on Codex and OpenCode 2.x. The helper's `exec --scrub` fills placeholders in
+  and filters known values out of the command's own output (a Python port of the scrubber, checked
+  against the TypeScript one); OpenCode also scrubs tool results, the conversation and the prompt.
+  New `host_files` field in `mod.json` copies a plugin file into each host package.
 - `prompt-gate` and `skill-pick` dry mode releases the prompt first and measures from a clock
   timer afterwards; `delegation-board` resets on `/clear` and prints a text table when its pane
   is not placed (Claude Desktop).

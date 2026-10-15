@@ -12,5 +12,7 @@
     "vscode": "untested",
     "headless": "untested"
   },
-  "verified_on": "2.1.296"
+  "verified_on": "2.1.296",
+  "hosts": ["codex", "opencode"],
+  "host_files": ["bin/secret-box"]
 }

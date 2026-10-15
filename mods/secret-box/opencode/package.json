@@ -1,0 +1,13 @@
+{
+  "name": "secret-box",
+  "version": "0.1.1",
+  "description": "Keeps secret values out of the chat: write {{secret:NAME}} in a Bash command and the value is filled in at execution time from the OS keyring, and any known value that still reaches the conversation is replaced with its placeholder.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "author": "iuliandita",
+  "repository": "https://github.com/iuliandita/mods",
+  "exports": {
+    "./server": "./server.js"
+  }
+}

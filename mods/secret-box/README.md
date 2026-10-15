@@ -76,6 +76,32 @@ The status shows names only, never values. Known values are also reloaded after 
 hook rewrites; the values that command ran with are still scrubbed from its own output if the reload
 no longer has them.
 
+## Codex and OpenCode
+
+Install steps are in [INSTALL.md](../../INSTALL.md); what differs from Claude Code and why is in
+[docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md). Only the Linux keyring backend exists.
+
+- Codex: a `PreToolUse` hook on `Bash` replaces a placeholder command with the helper running it
+  (`secret-box exec --scrub -- '...'`). The helper fills the values in and filters known values out
+  of the command's own output. Codex hooks cannot rewrite results or the conversation, so nothing
+  else is scrubbed: a value that reaches the chat by another route (a file the model reads, a prompt
+  you typed) stays. The hook answers `allow`; the sandbox still applies to the rewritten command.
+  Trust the hook once with `/hooks`.
+- OpenCode 2.x: the same rewrite in `execute.before`, plus scrubbing of every tool result, of the
+  messages the model sees again, and of the prompt as typed.
+- The mode is read from `~/.config/iuliandita-mods/secret-box.json` (`{"mode": "on"}`; `off`, `dry`
+  or `on`). An unreadable file counts as `on`. Nothing is read from a repository.
+- The helper holds back the last few bytes of each stream until more output arrives or the command
+  ends, so a value split across two reads is still caught; output can trail the command slightly.
+- Output a background process writes after the command's shell has exited is dropped, so a
+  command that starts a server returns instead of waiting for it. Signals sent to the helper are
+  forwarded to the command.
+- On OpenCode, when the keyring cannot be read, results, messages and the prompt pass through
+  unscrubbed (the load is retried every 30 seconds); a placeholder command still fails closed.
+- There is no `/secret-box` command on these hosts; run `secret-box names` in a terminal.
+- A Codex hook that cannot start lets the command through with its placeholder unfilled (it holds
+  no secret), so this hook does not use the fail-closed wrapper that `guard-rules` does.
+
 ## Options
 
 Set it in the plugin's config menu or in `pluginConfigs` in your settings.

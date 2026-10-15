@@ -12,7 +12,7 @@ Versions checked: Claude Code 2.1.296, Codex CLI 0.162.1, OpenCode 2.0.29.
 | Mod | Claude Code | Codex | OpenCode |
 | --- | --- | --- | --- |
 | `guard-rules` | **works** (terminal verified) | **works** | **works** |
-| `secret-box` | **works** (terminal verified) | **not ported**; placeholders only, see below | **not ported**; the host can do nearly all of it |
+| `secret-box` | **works** (terminal verified) | **works**, partly: placeholders and the command's own output, see below | **works** |
 | `prompt-gate` | works, untested | **not ported**; needs its own model client and key | **not ported**; the host offers a model call |
 | `skill-pick` | works, untested | **not ported**; needs its own model client and key | **not ported**; the host lists skills and offers a model call |
 | `delegation-board` | works, untested | **not possible**: hooks cannot draw anything | **not ported**; its UI plugin entry is not evaluated yet |
@@ -66,13 +66,37 @@ Why the differences:
 
 | | Claude Code | Codex | OpenCode |
 | --- | --- | --- | --- |
-| Fill a placeholder in a command | rewrites the Bash command | possible: `PreToolUse` can replace the command | possible: `execute.before` can change the input |
-| Scrub a value from command output | rewrites the tool result | **not possible** in a hook: `PostToolUse` cannot redact output (the helper could scrub its own output) | possible: `execute.after` can change the result |
-| Scrub every conversation row | `session.append` and `session.send` | **not possible**: no hook changes the conversation | possible: the v2 session `context` hook can change all messages |
-| `/secret-box` status command | yes | no documented way | possible: v2 plugins can add commands |
+| Fill a placeholder in a command | rewrites the Bash command | `PreToolUse` replaces the command with `secret-box exec --scrub -- '...'` | `execute.before` changes the shell input the same way |
+| Scrub the command's own output | rewrites the tool result | the helper filters its own stdout and stderr | `execute.after` rewrites the result, and the helper filters too |
+| Scrub a tool result that is not a placeholder command | rewrites the tool result | **not possible**: `PostToolUse` cannot redact output | `execute.after` rewrites every shell result |
+| Scrub every conversation row and the prompt | `session.append` and `session.send` | **not possible**: no hook changes the conversation or the prompt | session `context` and `prompt` hooks |
+| `/secret-box` status command | yes | no documented way | not ported; use `secret-box names` |
+| If the mod fails | denies a placeholder command | denies when the hook runs and fails inside its own code; a hook that cannot start lets the command through with the placeholder unfilled | denies a placeholder command |
 
-The helper that reads the keyring (`bin/secret-box`) is a plain script and already works on any host.
-The Linux keyring backend is the only one so far.
+What was run on the real hosts, with a throwaway file-backed store: on Codex 0.162.1 a placeholder
+command ran through the helper and printed the placeholder, not the value, and the sandbox still
+blocked a write in a read-only session after the hook answered `allow`; in the interactive UI an
+escalated command asked for approval with and without a placeholder, so `allow` does not skip it.
+On OpenCode 2.0.29 a
+`printf '%s' <placeholder> | wc -c` printed the length of the value, and the single-quote check
+refused a quoted placeholder. The Linux keyring backend (`secret-tool`) was not run through these
+two hosts; the file backend is test-only.
+
+Why the differences:
+
+- **Codex cannot change what the model reads, only what runs.** So the helper does the filtering
+  inside the command. A value that arrives through another tool (a file read, a web page, your
+  own prompt) is not scrubbed on Codex.
+- **The helper delays output.** To catch a value split across two reads it holds back the last few
+  bytes of each stream until more arrives or the command exits.
+- **The helper's scrubber is a port.** `bin/secret-box` carries a Python copy of the TypeScript
+  scrubber's list of forms; `tests/test_secret_box_scrub.py` compares them and fails when they
+  drift. One known gap: a lone UTF-16 surrogate has no JSON-escaped form in Python.
+- **Codex hooks run as `allow`** so the replaced command is used. The documented rule is that
+  `updatedInput` is accepted only with `allow`.
+
+The helper that reads the keyring (`bin/secret-box`) is a plain script. The Linux keyring backend is
+the only one so far.
 
 ## prompt-gate and skill-pick
 
