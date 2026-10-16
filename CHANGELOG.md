@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Recorded Claude Code 2.1.301 terminal smoke checks for `prompt-gate`, `skill-pick`,
+  `delegation-board` and `statusline` in the compatibility docs and generated catalog.
+  Other Claude surfaces remain unverified.
+- CI still uses a fixed CLI version; individual mods can record runtime verification on
+  different versions without rewriting older evidence.
+
 ## v0.1.0 - 2026-10-15
 
 First collection prerelease. Individual plugin versions remain independent of this tag.

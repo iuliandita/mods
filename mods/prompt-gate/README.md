@@ -3,6 +3,10 @@
 Before the main model spends a turn on a vague prompt, a small model says so and asks one short
 question. The default mode only measures, so you can see how useful it is before turning it on.
 
+Terminal checks on Claude Code 2.1.301 verified `on` mode with `classifier=haiku`, including
+blocking, resend and clear-prompt behavior. See [verification scope](../../docs/COMPATIBILITY.md#claude-terminal-verification)
+for the checked paths and remaining limits.
+
 ## Privacy
 
 With `TYPESAFE_API_KEY` set, the prompt text (and, with `projectTerms` on, the start of the project's `AGENTS.md` or `CLAUDE.md`) is sent to api.typesafe.ai (Jev) to be judged.

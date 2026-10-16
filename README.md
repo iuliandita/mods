@@ -32,6 +32,8 @@ and privacy limits before installing them.
 - `statusline`: a two-row status line above the prompt in the terminal and Claude Desktop: model and effort, git state, context against your auto-compact window, 5h and 7d limits with pace, cache, cost and time. In a git repo with a GitHub or GitLab remote it runs `gh` or `glab` for PR and issue counts; `forge=off` turns that off.
 
 `mods.json` has the full catalog: egress, modes, requirements, and the install command per mod.
+All six mods have recorded Claude terminal checks; the compatibility page lists the tested
+behavior and versions. Other Claude surfaces remain unverified.
 
 ## Private mods
 
