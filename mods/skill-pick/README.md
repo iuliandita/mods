@@ -4,6 +4,10 @@ For each prompt, a small model (and, when a TypeSafe key is set, Jev scoring eac
 that fit it, as many as the ask needs, so the main model can be pointed at them. The default mode only measures, including how often the main model then
 loads one of the picked skills, so the usefulness is known before it is switched on.
 
+Terminal checks on Claude Code 2.1.301 verified `on` mode with `picker=haiku`: a skill was picked
+from the engine's listing and loaded by the main model. See [verification scope](../../docs/COMPATIBILITY.md#claude-terminal-verification)
+for the checked paths and remaining limits.
+
 ## Privacy
 
 With `TYPESAFE_API_KEY` set, the prompt text and the names and descriptions of your installed skills are sent to

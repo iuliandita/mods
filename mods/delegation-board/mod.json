@@ -7,11 +7,11 @@
   "default_mode": "on",
   "requires": [],
   "surfaces": {
-    "terminal": "untested",
+    "terminal": "verified",
     "desktop": "untested",
     "vscode": "untested",
     "headless": "untested"
   },
-  "verified_on": null,
+  "verified_on": "2.1.301",
   "hosts": ["opencode"]
 }

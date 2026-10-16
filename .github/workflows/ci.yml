@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  # mods/*/mod.json verified_on records this same version (tests/test_ci_pin.py checks it)
+  # Fixed CI baseline; mod.json verified_on records each mod's manual runtime check separately.
   CLAUDE_CODE_VERSION: "2.1.296"
 
 concurrency:
@@ -61,7 +61,7 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
-      # pinned to the version the mods record as verified_on
+      # Pinned independently of the per-mod manual runtime verification versions.
       - run: npm install -g --ignore-scripts @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
       # install.cjs is run by hand: --ignore-scripts skips the install script and the native binary
       # needs it; integrity relies on the registry's per-version signature, not a lockfile

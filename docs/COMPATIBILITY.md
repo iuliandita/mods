@@ -9,16 +9,41 @@ Labels: **works** (the behavior described below was run on the real host), **unt
 **not possible** (the checked host API cannot provide it). Verification of one behavior does
 not verify every rule, mode or surface. Claude surface declarations remain in each `mod.json`.
 
-Versions checked: Claude Code 2.1.296, Codex CLI 0.162.1, OpenCode 2.0.29.
+Versions checked: Claude Code 2.1.296 (`guard-rules`, `secret-box`) and 2.1.301
+(the other four mods), Codex CLI 0.162.1, OpenCode 2.0.29.
 
 | Mod | Claude Code | Codex | OpenCode |
 | --- | --- | --- | --- |
 | `guard-rules` | **works** (terminal verified) | **works** | **works** |
 | `secret-box` | **works** (terminal verified) | **works**, partly: placeholders and the command's own output, see below | **works** |
-| `prompt-gate` | **untested** | **works**, judged by a nested Codex session (luna, low effort) | **works**, judged by DeepSeek Flash; `on` runs as `flag` |
-| `skill-pick` | **untested** | **works**, judged by a nested Codex session (luna, low effort); no use records | **works**; no use records |
-| `delegation-board` | **untested** | **not possible**: hooks cannot draw anything | **works**: a panel of child sessions, opened with `/board` |
-| `statusline` | **untested** | **not possible**: the status line only takes built-in items | **works**, reduced: one line, no rate-limit bars |
+| `prompt-gate` | **works** (terminal verified) | **works**, judged by a nested Codex session (luna, low effort) | **works**, judged by DeepSeek Flash; `on` runs as `flag` |
+| `skill-pick` | **works** (terminal verified) | **works**, judged by a nested Codex session (luna, low effort); no use records | **works**; no use records |
+| `delegation-board` | **works** (terminal verified) | **not possible**: hooks cannot draw anything | **works**: a panel of child sessions, opened with `/board` |
+| `statusline` | **works** (terminal verified) | **not possible**: the status line only takes built-in items | **works**, reduced: one line, no rate-limit bars |
+
+## Claude terminal verification
+
+On 2026-10-16, authenticated terminal sessions on Claude Code 2.1.301 checked:
+
+- `prompt-gate` 0.1.0: `on` mode with `classifier=haiku` dropped a vague prompt with a question,
+  accepted its identical resend without another classifier call, and passed a concrete prompt.
+  `/prompt-gate` reported the configured mode and stored summary.
+- `skill-pick` 0.1.0: `on` mode with `picker=haiku` picked a synthetic arithmetic skill from
+  the engine's listing; the main model loaded it with `Skill` and answered the arithmetic prompt.
+  The first turn recorded the documented `no-listing` result; the next turn picked the skill.
+  `/skill-pick` and `/skill-pick last` reported the results.
+- `delegation-board` 0.1.0: the pane opened on a real subagent spawn, showed running and completed
+  parent/child rows and token totals, and matched `/board status`. `/board` closed and reopened
+  it; `/board clear` removed finished rows.
+- `statusline` 0.2.7: the band drew alongside the board, with live model, context, rate-limit,
+  cache, cost and elapsed-time figures after real turns.
+
+The adviser calls used real Haiku 5.5 responses. These were terminal smoke checks, not checks of
+every mode or segment. They did not verify Jev runtime paths, provider-outage behavior, board
+failure/wait states, optional pricing or statusline resume. Desktop, VS Code and headless remain
+unverified. Automated hook tests cover more branches with mocked engine interfaces; passing them
+alone does not change a surface's status. CI's fixed CLI version is independent of each mod's
+recorded runtime verification version.
 
 ## guard-rules
 

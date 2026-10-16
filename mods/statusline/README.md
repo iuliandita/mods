@@ -5,6 +5,10 @@ It is a port of a `statusLine` script into a mod: the same segments, symbols, pa
 width-dropping order, drawn by the engine instead of by a command. In a git repository with a
 GitHub or GitLab remote it runs `gh` or `glab` for PR and issue counts (see Egress).
 
+Terminal checks on Claude Code 2.1.301 verified live usage figures and drawing alongside the
+delegation board. See [verification scope](../../docs/COMPATIBILITY.md#claude-terminal-verification)
+for the checked segments and remaining limits.
+
 Install:
 
     claude plugin marketplace add iuliandita/mods

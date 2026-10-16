@@ -82,7 +82,8 @@ first-spawn flag are dropped at `session.end`, since `session.start` does not fi
   reported.
 - A teammate in a terminal pane of its own runs no loop here, so its tokens are not counted.
 - Tokens are what the turns reported; the board does not know prices unless told.
-- Terminal first; the other surfaces are untested.
+- Terminal smoke checks on Claude Code 2.1.301 verified live and completed agent rows, token
+  totals and pane commands; the other surfaces are untested. See [verification scope](../../docs/COMPATIBILITY.md#claude-terminal-verification).
 - The Desktop band shows only live agents and no cost, children indent or totals; use `/board status`
   for those. Its elapsed time moves while a subagent is live (the board redraws once a second) and
   freezes when the last one finishes, when the band disappears.

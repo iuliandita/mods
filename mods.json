@@ -17,12 +17,12 @@
       "default_mode": "on",
       "requires": [],
       "surfaces": {
-        "terminal": "untested",
+        "terminal": "verified",
         "desktop": "untested",
         "vscode": "untested",
         "headless": "untested"
       },
-      "verified_on": null,
+      "verified_on": "2.1.301",
       "install": "claude plugin marketplace add iuliandita/mods && claude plugin install delegation-board@iuliandita-mods",
       "hosts": {
         "opencode": {
@@ -82,12 +82,12 @@
       "default_mode": "dry",
       "requires": [],
       "surfaces": {
-        "terminal": "untested",
+        "terminal": "verified",
         "desktop": "untested",
         "vscode": "untested",
         "headless": "untested"
       },
-      "verified_on": null,
+      "verified_on": "2.1.301",
       "install": "claude plugin marketplace add iuliandita/mods && claude plugin install prompt-gate@iuliandita-mods",
       "hosts": {
         "codex": {
@@ -151,12 +151,12 @@
       "default_mode": "dry",
       "requires": [],
       "surfaces": {
-        "terminal": "untested",
+        "terminal": "verified",
         "desktop": "untested",
         "vscode": "untested",
         "headless": "untested"
       },
-      "verified_on": null,
+      "verified_on": "2.1.301",
       "install": "claude plugin marketplace add iuliandita/mods && claude plugin install skill-pick@iuliandita-mods",
       "hosts": {
         "codex": {
@@ -184,12 +184,12 @@
         "git"
       ],
       "surfaces": {
-        "terminal": "untested",
+        "terminal": "verified",
         "desktop": "untested",
         "vscode": "untested",
         "headless": "untested"
       },
-      "verified_on": null,
+      "verified_on": "2.1.301",
       "install": "claude plugin marketplace add iuliandita/mods && claude plugin install statusline@iuliandita-mods",
       "hosts": {
         "opencode": {
