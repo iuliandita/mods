@@ -467,12 +467,19 @@ test('sudo -D and --chdir move the directory of the wrapped command, and a non-l
 })
 
 test('a non-literal cd makes the directory unknown, so writes that depend on it fail closed', async () => {
-  for (const command of ['cd "$D" && git commit -m x', 'cd $(mktemp -d) && git push origin x', 'cd /w/envs/dev && cd "$D" && terraform apply']) {
-    expect((await evaluate(command, cfg(), fakeEnv({ workspace: 'default' }))).enforced, command).toHaveLength(1)
+  for (const modeUnparsed of ['on', 'dry', 'off']) {
+    for (const command of ['cd "$D" && git commit -m x', 'cd $(mktemp -d) && git push origin x']) {
+      expect((await evaluate(command, cfg({ modeUnparsed }), fakeEnv())).enforced.map((v) => v.rule), command).toEqual(['lookup'])
+    }
   }
+  expect((await evaluate('cd /w/envs/dev && cd "$D" && terraform apply', cfg(), fakeEnv({ workspace: 'default' }))).enforced).toHaveLength(1)
   for (const command of ['cd "$D" && git status', 'cd "$D" && cd /h/personal/repo && git commit -m x']) {
     expect((await evaluate(command, cfg(), fakeEnv())).enforced, command).toEqual([])
   }
+  const dry = await evaluate('cd "$D" && git push', cfg({ modeAttribution: 'off', modeProtectedBranch: 'dry', modeUnparsed: 'off' }), fakeEnv())
+  expect(dry.enforced).toEqual([])
+  expect(dry.dry.map((v) => v.rule)).toEqual(['lookup'])
+  expect((await evaluate('cd "$D" && git push', cfg({ modeAttribution: 'off', modeProtectedBranch: 'off', modeUnparsed: 'off' }), fakeEnv())).enforced).toEqual([])
 })
 
 test('git global options the guard cannot follow make a write unparsed', async () => {

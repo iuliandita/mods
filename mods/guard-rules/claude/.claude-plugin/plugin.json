@@ -58,7 +58,7 @@
     "modeUnparsed": {
       "type": "string",
       "title": "Unparsed-command rule mode",
-      "description": "on keeps the active rules' modes, dry reports instead of denying unparsed commands, and off disables only unparsed findings. Parsed checks still apply. Ask is not supported.",
+      "description": "on keeps the active rules' modes, dry reports instead of denying unparsed commands, and off disables only unparsed findings. Parsed checks still apply, including git writes after unresolved directory changes. Ask is not supported.",
       "options": ["off", "dry", "on"],
       "default": "on"
     },

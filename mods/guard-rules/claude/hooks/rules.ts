@@ -239,6 +239,7 @@ export async function evaluate(command: string, cfg: Config, rawEnv: Env): Promi
     }
   }
   const follow = createFollower(env)
+  const directoryMode = strictest(cfg.identityRules.length ? [cfg.attribution, cfg.protectedBranch, cfg.identity] : [cfg.attribution, cfg.protectedBranch])
   let created = false
   let taint: ConfigTaint = { config: false, upstream: false }
   const switched = newContextState()
@@ -250,6 +251,13 @@ export async function evaluate(command: string, cfg: Config, rawEnv: Env): Promi
       continue
     }
     if (call.kind !== 'git') continue
+    if (call.unresolvedDir && isGuarded(call, cfg)) {
+      all.push({
+        rule: 'lookup',
+        mode: directoryMode,
+        message: `lookup: the directory for git ${call.sub} cannot be resolved, so its repository cannot be checked. Use a literal directory or run the directory change on its own first.`,
+      })
+    }
     follow.step(call.flow.chain)
     if (cfg.protectedBranch !== 'off') all.push(...(await protectedBranchViolations(call, cfg, env, follow, taint)))
     if (cfg.identity !== 'off') all.push(...(await identityViolations(call, cfg, env, created, taint.config)))

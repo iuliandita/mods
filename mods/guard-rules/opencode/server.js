@@ -1672,6 +1672,7 @@ var OPAQUE_TOOLS = new Set(["git", "gh", "glab", "tea", "fj", "kubectl", "helm",
 var TEXT_HEADS = new Set(["echo", "printf", "man", "which", "type", "grep", "rg", "cat"]);
 var DATA_HEADS = new Set(["ls", "mkdir", "rmdir", "touch", "cp", "mv", "rm", "head", "tail", "wc", "tee", "curl", "basename", "dirname", "realpath", "readlink", "file", "stat", "du", "df", "cut", "uniq", "diff", "cmp"]);
 var FILE_CODE_HEADS = new Set(["sed", "vi", "vim", "nvim", "nano", "less", "more"]);
+var SED_FLAGS = new Set(["-n", "--quiet", "--silent", "-E", "-r", "--regexp-extended"]);
 var STRUCTURES = {
   case: "a case statement",
   select: "a select loop",
@@ -1795,9 +1796,11 @@ function emitToolCalls(w, s) {
     const at = here ?? w.st.startDir;
     if (name === "git") {
       const r = parseGit(simple, argv, s.dyn, at, w.st.home, flow, slot);
-      const why = !r.ok ? "a git option or repository the guard cannot follow" : here === null ? "a directory the guard cannot tell" : unknown ? "a variable the guard cannot tell" : undefined;
+      const why = !r.ok ? "a git option or repository the guard cannot follow" : unknown ? "a variable the guard cannot tell" : undefined;
       if (r.call && why)
         r.call.opaque = why;
+      if (r.call && here === null)
+        r.call.unresolvedDir = true;
       if (r.call)
         w.calls.push(r.call);
     } else if (name === "gh" || name === "glab" || name === "tea" || name === "fj") {
@@ -1884,16 +1887,45 @@ function markSwitch(w, s) {
     return;
   w.kube = true;
 }
+function sedFileSlots(s) {
+  const files = new Set;
+  const scripts = [];
+  let options = true;
+  for (let i = 1;i < s.argv.length; i++) {
+    const a = s.argv[i];
+    if (s.dyn[i])
+      return new Set;
+    if (options && a === "--")
+      options = false;
+    else if (options && SED_FLAGS.has(a))
+      continue;
+    else if (options && (a === "-e" || a === "--expression")) {
+      const script = s.argv[++i];
+      if (script === undefined || s.dyn[i])
+        return new Set;
+      scripts.push(script);
+    } else if (options && a.startsWith("-"))
+      return new Set;
+    else if (!scripts.length)
+      scripts.push(a);
+    else
+      files.add(i);
+  }
+  return scripts.some((script) => script.includes("e")) ? new Set : files;
+}
 function markOpaque(w, s) {
-  if (FLOW_HEADS.has(s.name) || TEXT_HEADS.has(s.name) && !(s.name === "rg" && s.argv.some((a) => a === "--pre" || a.startsWith("--pre="))))
+  const bare = s.argv[0] === s.name;
+  if (bare && (FLOW_HEADS.has(s.name) || TEXT_HEADS.has(s.name) && !(s.name === "rg" && s.argv.some((a) => a === "--pre" || a.startsWith("--pre=")))))
     return;
-  if (DATA_HEADS.has(s.name) || s.name === "brew" && s.argv[1] === "install")
+  if (bare && (DATA_HEADS.has(s.name) || s.name === "brew" && s.argv[1] === "install"))
     return;
+  const sedFiles = s.name === "sed" ? sedFileSlots(s) : new Set;
   const words = s.argv.slice(1).map((a, i) => {
     if (s.dyn[i + 1])
       return a.replace(SUBST_TEXT, " ");
-    const code = a.startsWith("-") || a.startsWith("+") || s.argv[i] === "-c" || s.argv[i] === "--cmd" || s.name === "sed" && (s.argv[i] === "-e" || !s.argv.slice(1, i + 1).some((w) => !w.startsWith("-")));
-    return FILE_CODE_HEADS.has(s.name) && !code && isDataWord(a) ? "" : a;
+    const code = a.startsWith("-") || a.startsWith("+") || /^[+-]/.test(s.argv[i]);
+    const file = s.name === "sed" ? sedFiles.has(i + 1) : !code;
+    return bare && FILE_CODE_HEADS.has(s.name) && file && isDataWord(a) ? "" : a;
   });
   if (!PLAIN_WORD.test(s.argv[0]))
     words.push(s.argv[0]);
@@ -2870,6 +2902,7 @@ async function evaluate(command, cfg, rawEnv) {
     }
   }
   const follow = createFollower(env);
+  const directoryMode = strictest(cfg.identityRules.length ? [cfg.attribution, cfg.protectedBranch, cfg.identity] : [cfg.attribution, cfg.protectedBranch]);
   let created = false;
   let taint = { config: false, upstream: false };
   const switched = newContextState();
@@ -2882,6 +2915,13 @@ async function evaluate(command, cfg, rawEnv) {
     }
     if (call.kind !== "git")
       continue;
+    if (call.unresolvedDir && isGuarded(call, cfg)) {
+      all.push({
+        rule: "lookup",
+        mode: directoryMode,
+        message: `lookup: the directory for git ${call.sub} cannot be resolved, so its repository cannot be checked. Use a literal directory or run the directory change on its own first.`
+      });
+    }
     follow.step(call.flow.chain);
     if (cfg.protectedBranch !== "off")
       all.push(...await protectedBranchViolations(call, cfg, env, follow, taint));

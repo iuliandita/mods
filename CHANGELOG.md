@@ -20,6 +20,8 @@
 
 ### Fixed
 
+- `guard-rules` narrows data exemptions for scripts, path-qualified commands and editor options, and checks git writes after unresolved directory changes independently of `modeUnparsed`.
+
 - `secret-box` denies model shell calls to its internal `values` command on all three hosts.
 
 - `guard-rules` treats file arguments and known data commands as data while keeping command runners guarded.

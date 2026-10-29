@@ -19,6 +19,7 @@ const TEXT_HEADS = new Set(['echo', 'printf', 'man', 'which', 'type', 'grep', 'r
 const DATA_HEADS = new Set(['ls', 'mkdir', 'rmdir', 'touch', 'cp', 'mv', 'rm', 'head', 'tail', 'wc', 'tee', 'curl', 'basename', 'dirname', 'realpath', 'readlink', 'file', 'stat', 'du', 'df', 'cut', 'uniq', 'diff', 'cmp'])
 // These can execute code, so only plain filename/path words are data; their scripts still name tools.
 const FILE_CODE_HEADS = new Set(['sed', 'vi', 'vim', 'nvim', 'nano', 'less', 'more'])
+const SED_FLAGS = new Set(['-n', '--quiet', '--silent', '-E', '-r', '--regexp-extended'])
 // Shell constructs the guard does not follow: code defined here and run later, or a branch it does not model.
 const STRUCTURES: Record<string, string> = {
   case: 'a case statement',
@@ -180,8 +181,9 @@ function emitToolCalls(w: Walk, s: Step): void {
     const at = here ?? w.st.startDir
     if (name === 'git') {
       const r = parseGit(simple, argv, s.dyn, at, w.st.home, flow, slot)
-      const why = !r.ok ? 'a git option or repository the guard cannot follow' : here === null ? 'a directory the guard cannot tell' : unknown ? 'a variable the guard cannot tell' : undefined
+      const why = !r.ok ? 'a git option or repository the guard cannot follow' : unknown ? 'a variable the guard cannot tell' : undefined
       if (r.call && why) r.call.opaque = why
+      if (r.call && here === null) r.call.unresolvedDir = true
       if (r.call) w.calls.push(r.call)
     } else if (name === 'gh' || name === 'glab' || name === 'tea' || name === 'fj') {
       const call = parseGh(argv, s.dyn, name, at, flow, slot)
@@ -267,17 +269,41 @@ function markSwitch(w: Walk, s: Step): void {
   w.kube = true
 }
 
+// Only known sed options can separate scripts from files. Any `e` in a script keeps all words visible:
+// this deliberately includes harmless occurrences rather than trying to parse sed's execution syntax.
+function sedFileSlots(s: Step): Set<number> {
+  const files = new Set<number>()
+  const scripts: string[] = []
+  let options = true
+  for (let i = 1; i < s.argv.length; i++) {
+    const a = s.argv[i]!
+    if (s.dyn[i]) return new Set()
+    if (options && a === '--') options = false
+    else if (options && SED_FLAGS.has(a)) continue
+    else if (options && (a === '-e' || a === '--expression')) {
+      const script = s.argv[++i]
+      if (script === undefined || s.dyn[i]) return new Set()
+      scripts.push(script)
+    } else if (options && a.startsWith('-')) return new Set()
+    else if (!scripts.length) scripts.push(a)
+    else files.add(i)
+  }
+  return scripts.some((script) => script.includes('e')) ? new Set() : files
+}
+
 function markOpaque(w: Walk, s: Step): void {
-  if (FLOW_HEADS.has(s.name) || (TEXT_HEADS.has(s.name) && !(s.name === 'rg' && s.argv.some((a) => a === '--pre' || a.startsWith('--pre='))))) return
-  if (DATA_HEADS.has(s.name) || (s.name === 'brew' && s.argv[1] === 'install')) return
+  const bare = s.argv[0] === s.name
+  if (bare && (FLOW_HEADS.has(s.name) || (TEXT_HEADS.has(s.name) && !(s.name === 'rg' && s.argv.some((a) => a === '--pre' || a.startsWith('--pre=')))))) return
+  if (bare && (DATA_HEADS.has(s.name) || (s.name === 'brew' && s.argv[1] === 'install'))) return
+  const sedFiles = s.name === 'sed' ? sedFileSlots(s) : new Set<number>()
   // Substitutions are followed as calls of their own, so their text is not this command's words. A command word
   // that is not a plain name or path (`"git push" origin main`) counts among them.
   const words = s.argv.slice(1).map((a, i) => {
     if (s.dyn[i + 1]) return a.replace(SUBST_TEXT, ' ')
-    // Option operands such as `vim -c /usr/bin/git` are code, even when they resemble paths.
-    const code = a.startsWith('-') || a.startsWith('+') || s.argv[i] === '-c' || s.argv[i] === '--cmd'
-      || (s.name === 'sed' && (s.argv[i] === '-e' || !s.argv.slice(1, i + 1).some((w) => !w.startsWith('-'))))
-    return FILE_CODE_HEADS.has(s.name) && !code && isDataWord(a) ? '' : a
+    // Every editor option operand stays code; no file-taking option is specially trusted here.
+    const code = a.startsWith('-') || a.startsWith('+') || /^[+-]/.test(s.argv[i]!)
+    const file = s.name === 'sed' ? sedFiles.has(i + 1) : !code
+    return bare && FILE_CODE_HEADS.has(s.name) && file && isDataWord(a) ? '' : a
   })
   if (!PLAIN_WORD.test(s.argv[0]!)) words.push(s.argv[0]!)
   const tools = toolWords([...words, ...(s.cmd.input ?? [])].join(' '), { shells: true })
