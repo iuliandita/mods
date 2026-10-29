@@ -1,0 +1,57 @@
+{
+  "repo": "mods",
+  "required_jobs": [
+    "lint",
+    "test",
+    "integration",
+    "secrets",
+    "zizmor"
+  ],
+  "installers": [
+    {
+      "argv": ["scripts/mods", "--help"],
+      "flags": ["--root", "--json"]
+    },
+    {
+      "argv": ["scripts/mods", "generate", "--help"],
+      "flags": ["--root", "--json", "--check", "--local"]
+    },
+    {
+      "argv": ["scripts/mods", "list", "--help"],
+      "flags": ["--root", "--json", "--scope"]
+    },
+    {
+      "argv": ["scripts/mods", "install", "--help"],
+      "flags": ["--root", "--json", "--scope", "--local", "--source"]
+    },
+    {
+      "argv": ["scripts/mods", "uninstall", "--help"],
+      "flags": ["--root", "--json", "--scope"]
+    },
+    {
+      "argv": ["scripts/mods", "doctor", "--help"],
+      "flags": ["--root", "--json"]
+    },
+    {
+      "argv": ["scripts/mods", "validate", "--help"],
+      "flags": ["--root", "--json", "--no-claude"]
+    }
+  ],
+  "error_scan": {
+    "paths": ["scripts"],
+    "exclude": []
+  },
+  "allow": [
+    {
+      "check": "workflow-jobs",
+      "path": ".github/workflows/ci.yml",
+      "match": "job \"test\"",
+      "reason": "The test matrix runs Python 3.10 and 3.12, and the branch ruleset requires the check names test (3.10) and test (3.12)."
+    },
+    {
+      "check": "ascii-markdown",
+      "path": "mods/statusline/README.md",
+      "reason": "The statusline mod draws these glyphs, and its README documents the literal symbols a user sees."
+    }
+  ]
+}

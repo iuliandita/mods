@@ -49,6 +49,7 @@ jobs:
       - run: scripts/mods generate --check
       - run: scripts/typecheck --hosts
       - run: scripts/mods validate --no-claude
+      - run: python3 .github/stack/stack-check.py
 
   test:
     name: test (${{ matrix.python-version }})
