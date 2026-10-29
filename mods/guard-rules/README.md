@@ -68,6 +68,7 @@ settings, never in a repository.
 | `modeProtectedBranch` | `on` | same |
 | `modeIdentity` | `on` | same; does nothing until `identityRules` is set |
 | `modeContext` | `on` | same; covers `kubectl`, `helm`, `terraform` and `tofu` |
+| `modeUnparsed` | `on` | `on` keeps inherited modes, `dry` reports instead of denying unparsed commands, `off` disables only parser findings; no `ask` support |
 
 Invalid options deny git and GitHub writes until fixed, so a typo cannot silently turn a rule off.
 
@@ -134,12 +135,15 @@ Identity does nothing until `identityRules` is set. Change options in your user 
 | `modeIdentity` | `on`, `dry`, `off` | Controls identity checks once configured |
 | `identityRules` | JSON array, or empty | Sets path/email pairs; empty disables identity checks |
 | `modeContext` | `on`, `dry`, `off` | Controls mutations on protected or unknown infra environments |
+| `modeUnparsed` | `on`, `dry`, `off` | Caps unparsed findings without changing parsed rule checks |
 | `protectedContexts`, `relaxedContexts` | Comma-separated names or globs | Changes environment matching; protected matches win |
 | `/guard-context <name> protected\|relaxed` | One classification | Records a machine-local classification that overrides patterns |
 | `/guard-context forget <name>` | One name | Removes its stored classification |
 
-Unparsed commands currently inherit the strictest active git-side mode, or `modeContext` for infra.
-Turning down a mode also reduces the corresponding protection. There is no approval prompt.
+With `modeUnparsed=on`, unparsed commands inherit the strictest active git-side mode, or `modeContext`
+for infra. `dry` reports findings that would deny; `off` suppresses parser findings. Both can let
+commands run that the guard cannot inspect. Parsed rule checks still apply. There is no approval prompt;
+`ask` is rejected as an invalid option on every host.
 
 The model cannot approve its own exception. Type the command yourself with the `!` prefix in Claude
 Code, or run it in your own terminal. On Codex and OpenCode, use the context CLI described above.

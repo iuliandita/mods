@@ -15,6 +15,7 @@ export type Config = {
   protectedBranch: Mode
   identity: Mode
   context: Mode
+  unparsed: Mode
   protectedBranches: string[]
   unprotectedRepos: string[]
   identityRules: IdentityRule[]
@@ -118,6 +119,7 @@ export function parseConfig(options: Readonly<Record<string, unknown>>): Config 
     protectedBranch: parseMode(options.modeProtectedBranch, 'modeProtectedBranch', errors),
     identity: parseMode(options.modeIdentity, 'modeIdentity', errors),
     context: parseMode(options.modeContext, 'modeContext', errors),
+    unparsed: parseMode(options.modeUnparsed, 'modeUnparsed', errors),
     protectedBranches: branches,
     unprotectedRepos: parseList(options.unprotectedRepos, ''),
     identityRules,
@@ -175,6 +177,8 @@ function strictest(modes: Mode[]): Mode {
 // cannot follow, is unparsed by itself. Git and forge tools take the strictest git-side mode, infra tools the
 // context mode, and a shell name both.
 function unparsedViolations(command: string, parsed: Parsed, guarded: Call[], cfg: Config): Violation[] {
+  if (cfg.unparsed === 'off') return []
+  const cap = (mode: Mode): Mode => cfg.unparsed === 'dry' && mode === 'on' ? 'dry' : mode
   const tools = new Map<string, string>()
   // `${G:-git}` names git through a default-value operator.
   const plain = command.replace(/["'\\]/g, '').replace(/\$\{\w*:?[-=+?]/g, ' ')
@@ -190,12 +194,12 @@ function unparsedViolations(command: string, parsed: Parsed, guarded: Call[], cf
   if (gitWhy !== undefined) {
     out.push({
       rule: 'unparsed',
-      mode: strictest(cfg.identityRules.length ? [cfg.attribution, cfg.protectedBranch, cfg.identity] : [cfg.attribution, cfg.protectedBranch]),
+      mode: cap(strictest(cfg.identityRules.length ? [cfg.attribution, cfg.protectedBranch, cfg.identity] : [cfg.attribution, cfg.protectedBranch])),
       message: `unparsed: this command uses ${gitWhy}, which the guard cannot follow, and it names git or a forge CLI. ${hint}`,
     })
   }
   if (infraWhy !== undefined) {
-    out.push({ rule: 'unparsed', mode: cfg.context, message: `unparsed: this command uses ${infraWhy}, which the guard cannot follow, and it names kubectl, helm or terraform. ${hint}` })
+    out.push({ rule: 'unparsed', mode: cap(cfg.context), message: `unparsed: this command uses ${infraWhy}, which the guard cannot follow, and it names kubectl, helm or terraform. ${hint}` })
   }
   return out
 }
