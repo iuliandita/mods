@@ -1,5 +1,5 @@
-import { deliver, opencodeNotice, wanted, type Runner } from '../claude/hooks/notify'
-import { nodeRunner, readConfig } from './run'
+import { deliver, opencodeNotice, wanted, withContext, type Fs, type Runner } from '../claude/hooks/notify'
+import { home, nodeFs, nodeRunner, readConfig } from './run'
 
 // The parts of the OpenCode v2 plugin context this adapter uses, so the bundle needs no host package.
 type Event = { type: string; data?: { sessionID?: string; parentID?: string; form?: { sessionID?: string }; status?: { type?: string } } }
@@ -8,7 +8,7 @@ type Context = {
   event: { subscribe(options?: { signal?: AbortSignal }): AsyncIterable<Event> }
 }
 
-export type Deps = { run?: Runner; platform?: string; options?: string; warn?: (s: string) => void }
+export type Deps = { run?: Runner; platform?: string; options?: string; fs?: Fs; home?: string | null; warn?: (s: string) => void }
 
 // Reads the event stream until the plugin is cleaned up. Subagent sessions are those created with a parent; a
 // session that already existed when the plugin loaded is not known, so its subagents are not told apart.
@@ -43,17 +43,18 @@ export async function setup(ctx: Context, deps: Deps = {}): Promise<() => void> 
       return
     }
     if (session && children.has(session)) return
-    const notice = opencodeNotice(e.type, ctx.location.directory)
-    if (!notice) return
+    const pending = opencodeNotice(e.type, ctx.location.directory)
+    if (!pending) return
     // Both completion names can describe the same turn; a new execution resets it.
-    if (notice.kind === 'finish') {
+    if (pending.kind === 'finish') {
       if (!session || finished.has(session)) return
       finished.add(session)
     }
     // Read per event, so a change to the options file needs no restart.
     const { config, warning } = readConfig(deps.options)
     if (warning) say(warning)
-    if (!wanted(config, notice)) return
+    if (!wanted(config, pending)) return
+    const notice = await withContext(pending, deps.home === undefined ? home() : deps.home, deps.fs ?? nodeFs)
     const result = await deliver(run, platform, notice, config.sound)
     if (!result.ok) say(result.warning)
   }

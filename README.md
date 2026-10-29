@@ -37,7 +37,7 @@ installed with `scripts/mods list`, and check the environment with `scripts/mods
 - `secret-box`: fills named placeholders from Linux Secret Service or macOS Keychain at execution time, with optional directory scopes. The helper scrubs text without a plaintext export command. Tool and directory coverage depend on the host; see [what it does not protect](mods/secret-box/README.md#what-it-does-not-protect). The mod makes no network or model calls; commands it runs may still send values.
 - `delegation-board`: a live pane of the session's subagents and teammates: type, model, effort, state, elapsed time and tokens; in Claude Desktop, a compact band above the prompt.
 - `statusline`: a two-row status line above the prompt in the terminal and Claude Desktop: model and effort, git state, context against your auto-compact window, 5h and 7d limits with pace, cache, cost and time. In a git repo with a GitHub or GitLab remote it runs `gh` or `glab` for PR and issue counts; `forge=off` turns that off.
-- `notify`: a desktop notification when the agent finishes or waits on a permission prompt or other input, titled with the project folder, with an optional sound. It starts `notify-send` on Linux or `osascript` on macOS and makes no network or model calls.
+- `notify`: a desktop notification when the agent finishes or waits on a permission prompt or other input, titled with the repo and harness, with the branch in the text and an optional sound. It starts `notify-send` on Linux or `osascript` on macOS and makes no network or model calls.
 
 `mods.json` has the full catalog: egress, modes, requirements, and the install command per mod.
 `guard-rules`, `secret-box`, `delegation-board` and `statusline` have recorded Claude terminal

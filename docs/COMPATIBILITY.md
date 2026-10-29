@@ -214,7 +214,7 @@ Codex's `Stop` hook is synchronous with a one-second hook timeout so `codex exec
 end in `exit 0`. Both Codex entry paths give the notifier a 250 ms process timeout; a slow notifier
 may show nothing, and Codex cancels unfinished background permission hooks when the session ends. The legacy
 `notify` setting waits up to that timeout. Notifications show the
-project folder name and a fixed reason only, never message text or commands.
+repo folder name, the harness, the branch name and a fixed reason only, never message text or commands.
 
 ## How a mod gets a host
 

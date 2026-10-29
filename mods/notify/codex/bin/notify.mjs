@@ -14,10 +14,57 @@ function parseConfig(raw) {
 function clean(s, max) {
   return [...s.replace(/[\p{Cc}\p{Cf}]/gu, " ").replace(/\s+/g, " ").trim()].slice(0, max).join("");
 }
-function projectName(cwd) {
+var folderName = (path) => path.replace(/[\\/]+$/, "").split(/[\\/]/).at(-1) ?? "";
+var MAX_DEPTH = 64;
+var trimSlash = (p) => p.length > 1 ? p.replace(/\/+$/, "") : p;
+function normalize(path) {
+  const out = [];
+  for (const part of path.split("/")) {
+    if (part === "..")
+      out.pop();
+    else if (part !== "" && part !== ".")
+      out.push(part);
+  }
+  return "/" + out.join("/");
+}
+function branchFromHead(text) {
+  const head = (text ?? "").trim();
+  const ref = /^ref:\s*refs\/heads\/(.+)$/.exec(head);
+  if (ref)
+    return clean(ref[1], 60) || null;
+  return /^[0-9a-f]{40}([0-9a-f]{24})?$/i.test(head) ? head.slice(0, 7) : null;
+}
+async function branchOf(fs, dir) {
+  let head = await fs.read(`${dir}/.git/HEAD`);
+  if (head === null) {
+    const link = /^gitdir:\s*(.+)$/m.exec(await fs.read(`${dir}/.git`) ?? "");
+    if (link) {
+      const target = link[1].trim();
+      head = await fs.read(`${normalize(target.startsWith("/") ? target : `${dir}/${target}`)}/HEAD`);
+    }
+  }
+  return branchFromHead(head);
+}
+async function resolvePlace(cwd, home, fs) {
   if (typeof cwd !== "string")
-    return "agent";
-  return clean(cwd.replace(/[\\/]+$/, "").split(/[\\/]/).at(-1) ?? "", 60) || "agent";
+    return { place: "agent", branch: null };
+  const start = trimSlash(cwd);
+  const homeDir = home === null || home === "" ? null : trimSlash(home);
+  if (homeDir !== null && start === homeDir)
+    return { place: "~", branch: null };
+  try {
+    let dir = start;
+    for (let i = 0;i < MAX_DEPTH && dir.startsWith("/") && dir !== "/" && dir !== homeDir; i++) {
+      if (await fs.exists(`${dir}/.git`))
+        return { place: clean(folderName(dir), 60) || "agent", branch: await branchOf(fs, dir).catch(() => null) };
+      dir = dir.slice(0, dir.lastIndexOf("/")) || "/";
+    }
+  } catch {}
+  return { place: clean(folderName(start), 60) || "agent", branch: null };
+}
+async function withContext(p, home, fs) {
+  const { place, branch } = await resolvePlace(p.cwd, home, fs);
+  return { kind: p.kind, title: `${place} (${p.harness})`, body: branch ? `${p.reason} on ${branch}` : p.reason };
 }
 var REASON = {
   finish: "Finished",
@@ -30,14 +77,14 @@ var NOTIFICATION_TYPES = new Map([
   ["idle_prompt", REASON.idle],
   ["elicitation_dialog", REASON.question]
 ]);
-var make = (kind, cwd, body) => ({ kind, title: projectName(cwd), body });
+var make = (kind, harness, cwd, reason) => ({ kind, harness, cwd, reason });
 function codexNotice(input) {
   if (input.agent_id)
     return null;
   if (input.hook_event_name === "Stop" || input.type === "agent-turn-complete")
-    return make("finish", input.cwd, REASON.finish);
+    return make("finish", "Codex", input.cwd, REASON.finish);
   if (input.hook_event_name === "PermissionRequest")
-    return make("input", input.cwd, REASON.permission);
+    return make("input", "Codex", input.cwd, REASON.permission);
   return null;
 }
 var wanted = (cfg, n) => n !== null && cfg.mode === "on" && cfg.events.has(n.kind);
@@ -67,6 +114,8 @@ async function deliver(run, platform, n, sound) {
 
 // mods/notify/host/run.ts
 import { execFile } from "node:child_process";
+import { closeSync, existsSync, openSync, readSync } from "node:fs";
+import { homedir } from "node:os";
 
 // host-lib/options.ts
 import { readFileSync } from "node:fs";
@@ -116,6 +165,31 @@ function readConfig(path) {
     ...loaded.error ? { warning: `notify: warning: options ignored: ${loaded.error}; fix notify.json` } : {}
   };
 }
+var nodeFs = {
+  async read(path) {
+    let fd = null;
+    try {
+      fd = openSync(path, "r");
+      const buf = Buffer.alloc(4096);
+      return buf.toString("utf8", 0, readSync(fd, buf, 0, buf.length, 0));
+    } catch {
+      return null;
+    } finally {
+      if (fd !== null)
+        closeSync(fd);
+    }
+  },
+  async exists(path) {
+    return existsSync(path);
+  }
+};
+var home2 = () => {
+  try {
+    return homedir() || null;
+  } catch {
+    return null;
+  }
+};
 
 // mods/notify/host/cli.ts
 var USAGE = 'notify: error: unknown command: expected hook or notify; run "notify hook" from a Codex hook or "notify notify <json>" from the notify setting';
@@ -139,9 +213,10 @@ async function main(argv, io) {
   if (warning)
     io.err(warning);
   const input = parse(command === "hook" ? await io.stdin() : rest.at(-1) ?? "");
-  const notice = input ? codexNotice(input) : null;
-  if (!wanted(config, notice))
+  const pending = input ? codexNotice(input) : null;
+  if (!wanted(config, pending))
     return 0;
+  const notice = await withContext(pending, io.home === undefined ? home2() : io.home, io.fs ?? nodeFs);
   const result = await deliver(io.run, io.platform, notice, config.sound);
   if (!result.ok)
     io.err(result.warning);
