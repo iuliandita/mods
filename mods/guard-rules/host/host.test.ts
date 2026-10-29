@@ -125,6 +125,27 @@ test('dry mode reports through systemMessage and does not deny', async () => {
   writeConfig('{}')
 })
 
+test('unparsed modes report or disable parser findings on both host adapters', async () => {
+  let hook: (e: { tool: string; input: unknown }) => Promise<void> | void = () => {}
+  await setup({ location: { directory: repo }, tool: { hook: async (_name, cb) => void (hook = cb) } }, { config: configFile })
+  for (const mode of ['on', 'dry', 'off']) {
+    writeConfig(JSON.stringify({ modeUnparsed: mode }))
+    const o = io(call('xargs git push'))
+    await main(['hook'], o)
+    if (mode === 'on') {
+      expect(JSON.parse(o.stdout).hookSpecificOutput.permissionDecision).toBe('deny')
+      await expect(Promise.resolve(hook({ tool: 'shell', input: { command: 'xargs git push' } }))).rejects.toThrow('unparsed')
+    } else {
+      expect(o.stdout.includes('dry run')).toBe(mode === 'dry')
+      await hook({ tool: 'shell', input: { command: 'xargs git push' } })
+    }
+    const parsed = io(call('git commit -m x'))
+    await main(['hook'], parsed)
+    expect(JSON.parse(parsed.stdout).hookSpecificOutput.permissionDecision).toBe('deny')
+  }
+  writeConfig('{}')
+})
+
 test('secret-box wrappers preserve allowed and denied commands on both hosts', async () => {
   writeConfig('{}')
   let hook: (e: { tool: string; input: unknown }) => Promise<void> | void = () => {}

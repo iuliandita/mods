@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- `guard-rules` option `modeUnparsed` (`on`, `dry`, `off`) controls parser findings separately; `on` preserves existing behavior and `ask` remains unsupported.
+
 ### Changed
 
 - `guard-rules` documents rule controls and common false positives in its README, with parser details on a linked page.

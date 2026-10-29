@@ -70,6 +70,10 @@ function fakeEnv(w: World = {}): Env & { probes: (Record<string, string> | undef
 const heredoc = (msg: string) => `git commit -m "$(cat <<'EOF'\n${msg}\nEOF\n)"`
 
 export const ROWS: Row[] = [
+  ['xargs git push', 'A', { options: { modeUnparsed: 'off' } }],
+  ['xargs git push', 'A', { options: { modeUnparsed: 'dry' } }],
+  ['git push origin main', 'D:protected-branch', { options: { modeUnparsed: 'off' } }],
+  ['kubectl --context prod-eu delete ns x', 'D:context', { options: { modeUnparsed: 'off' } }],
   ['ls terraform', 'A'],
   ['vim terraform/main.tf', 'A'],
   ['mkdir -p docs/git', 'A'],

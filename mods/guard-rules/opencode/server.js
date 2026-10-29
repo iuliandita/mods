@@ -2746,6 +2746,7 @@ function parseConfig(options) {
     protectedBranch: parseMode(options.modeProtectedBranch, "modeProtectedBranch", errors),
     identity: parseMode(options.modeIdentity, "modeIdentity", errors),
     context: parseMode(options.modeContext, "modeContext", errors),
+    unparsed: parseMode(options.modeUnparsed, "modeUnparsed", errors),
     protectedBranches: branches,
     unprotectedRepos: parseList(options.unprotectedRepos, ""),
     identityRules,
@@ -2799,6 +2800,9 @@ function strictest(modes) {
   return modes.includes("on") ? "on" : modes.includes("dry") ? "dry" : "off";
 }
 function unparsedViolations(command, parsed, guarded, cfg) {
+  if (cfg.unparsed === "off")
+    return [];
+  const cap = (mode) => cfg.unparsed === "dry" && mode === "on" ? "dry" : mode;
   const tools = new Map;
   const plain = command.replace(/["'\\]/g, "").replace(/\$\{\w*:?[-=+?]/g, " ");
   if (parsed.opaque.length)
@@ -2819,12 +2823,12 @@ function unparsedViolations(command, parsed, guarded, cfg) {
   if (gitWhy !== undefined) {
     out.push({
       rule: "unparsed",
-      mode: strictest(cfg.identityRules.length ? [cfg.attribution, cfg.protectedBranch, cfg.identity] : [cfg.attribution, cfg.protectedBranch]),
+      mode: cap(strictest(cfg.identityRules.length ? [cfg.attribution, cfg.protectedBranch, cfg.identity] : [cfg.attribution, cfg.protectedBranch])),
       message: `unparsed: this command uses ${gitWhy}, which the guard cannot follow, and it names git or a forge CLI. ${hint}`
     });
   }
   if (infraWhy !== undefined) {
-    out.push({ rule: "unparsed", mode: cfg.context, message: `unparsed: this command uses ${infraWhy}, which the guard cannot follow, and it names kubectl, helm or terraform. ${hint}` });
+    out.push({ rule: "unparsed", mode: cap(cfg.context), message: `unparsed: this command uses ${infraWhy}, which the guard cannot follow, and it names kubectl, helm or terraform. ${hint}` });
   }
   return out;
 }

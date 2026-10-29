@@ -65,7 +65,10 @@ These are unparsed on their own, without another tool word:
   read differently such as `-C/path` or `-cname=value`, a `cd` to a dynamic path, a variable the guard cannot tell).
 
 Git and forge tools use the strictest of the attribution and protected-branch modes (and identity, once rules are
-set); kubectl, helm and terraform use the context mode; a shell name uses both. Known false positives: a dynamic
+set); kubectl, helm and terraform use the context mode; a shell name uses both. `modeUnparsed=on` keeps
+those inherited modes, `dry` caps denial at reporting, and `off` removes only unparsed findings. Parsed
+checks, lookup failures and invalid configuration still apply. No host supports `ask` in this adapter.
+Known false positives: a dynamic
 command word next to a tool word (`$EDITOR notes.md && git status`) and an unmodeled command that names a tool as
 data (`custom-reader docs/git`). Run those parts separately, or use literal command words.
 
