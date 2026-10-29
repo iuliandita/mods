@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [Unreleased]
 
 - Recorded Claude Code 2.1.301 terminal smoke checks for `prompt-gate`, `skill-pick`,
   `delegation-board` and `statusline` in the compatibility docs and generated catalog.
@@ -8,7 +8,7 @@
 - CI still uses a fixed CLI version; individual mods can record runtime verification on
   different versions without rewriting older evidence.
 
-## v0.1.0 - 2026-10-15
+## [0.1.0] - 2026-10-15
 
 First collection prerelease. Individual plugin versions remain independent of this tag.
 
@@ -86,3 +86,6 @@ First collection prerelease. Individual plugin versions remain independent of th
 - `prompt-gate` and `skill-pick` dry mode releases the prompt first and measures from a clock
   timer afterwards; `delegation-board` resets on `/clear` and prints a text table when its pane
   is not placed (Claude Desktop).
+
+[Unreleased]: https://github.com/iuliandita/mods/compare/v0.1.0...develop
+[0.1.0]: https://github.com/iuliandita/mods/releases/tag/v0.1.0
