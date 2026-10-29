@@ -80,7 +80,7 @@ def test_list_and_doctor_survive_a_claude_that_cannot_run(
     code, payload = list_mods(root)
     assert code == 0 and payload["claude"] == {"found": False, "version": None}
     code, payload = doctor(root)
-    assert code == 1 and payload["claude"]["found"] is False
+    assert code == 3 and payload["claude"]["found"] is False
 
 
 def test_uninstall_public_mod_ignores_a_broken_local_mod(fake_claude: Path, tmp_path: Path) -> None:

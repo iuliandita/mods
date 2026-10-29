@@ -73,7 +73,8 @@ Do not remove unrelated marketplaces or assume removal restores an earlier plugi
 
 ## Partial failures and recovery
 
-JSON commands emit one object with `ok` and `errors`; failure exits 1. `install` adds `installed`
+JSON commands emit one object with `ok` and `errors`. Exit codes: 0 done, 1 failed, 2 usage error,
+3 a required tool (claude, or the pinned bun) is missing. `install` adds `installed`
 and `uninstall` adds `uninstalled`, including IDs completed before a later failure. These calls
 are sequential, not an atomic transaction: completed changes are not automatically rolled back.
 Inspect the error and completed IDs, check `claude plugin list --json`, fix the cause, and retry

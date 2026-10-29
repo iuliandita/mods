@@ -4,7 +4,7 @@ import shutil
 from pathlib import Path
 
 from modslib import claude
-from modslib.catalog import CatalogError, Mod, load_all, load_mods
+from modslib.catalog import CatalogError, Mod, ToolMissing, load_all, load_mods
 from modslib.generate import (
     GITHUB_SOURCE,
     LOCAL_MARKETPLACE_NAME,
@@ -24,8 +24,15 @@ def _marketplace(mod: Mod) -> str:
     return LOCAL_MARKETPLACE_NAME if mod.is_local else MARKETPLACE_NAME
 
 
-def _fail(*errors: str, done: list[str] | None = None, key: str = "installed") -> tuple[int, dict]:
-    return 1, {"ok": False, "errors": list(errors), key: list(done or [])}
+def exit_code(exc: Exception) -> int:
+    """3 when a required tool (claude, bun) is missing, otherwise 1."""
+    return 3 if isinstance(exc, (claude.ClaudeMissing, ToolMissing)) else 1
+
+
+def _fail(
+    *errors: str, done: list[str] | None = None, key: str = "installed", code: int = 1
+) -> tuple[int, dict]:
+    return code, {"ok": False, "errors": list(errors), key: list(done or [])}
 
 
 def _claude_status() -> dict:
@@ -66,7 +73,7 @@ def install_mods(
                 return _fail(f"{name}: {result.get('message', 'install failed')}", done=done)
             done.append(f"{name}@{market}")
     except (CatalogError, claude.ClaudeError, OSError) as exc:
-        return _fail(str(exc), done=done)
+        return _fail(str(exc), done=done, code=exit_code(exc))
     return 0, {"ok": True, "errors": [], "installed": done}
 
 
@@ -92,7 +99,7 @@ def uninstall_mods(root: Path, names: list[str], *, scope: str) -> tuple[int, di
                 )
             done.append(plugin_id)
     except (CatalogError, claude.ClaudeError, OSError) as exc:
-        return _fail(str(exc), done=done, key="uninstalled")
+        return _fail(str(exc), done=done, key="uninstalled", code=exit_code(exc))
     return 0, {"ok": True, "errors": [], "uninstalled": done}
 
 
@@ -144,7 +151,7 @@ def doctor(root: Path) -> tuple[int, dict]:
         }
         for m in mods
     ]
-    return (0 if not errors else 1), {
+    return (0 if not errors else (3 if not found["found"] else 1)), {
         "ok": not errors,
         "errors": errors,
         "claude": found,

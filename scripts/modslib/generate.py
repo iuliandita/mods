@@ -6,7 +6,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from modslib.catalog import CatalogError, Mod, inject_span, load_all, load_mods, shared_dir
+from modslib.catalog import CatalogError, Mod, ToolMissing, inject_span, load_all, load_mods, shared_dir
 
 MARKETPLACE_NAME = "iuliandita-mods"
 LOCAL_MARKETPLACE_NAME = "iuliandita-mods-local"
@@ -144,14 +144,14 @@ def pinned_bun(root: Path) -> str:
     return (root / ".bun-version").read_text().strip()
 
 
-def bun_problem(root: Path) -> str | None:
-    """Why the pinned bun is not usable here, or None when it is."""
+def bun_problem(root: Path) -> tuple[str, bool] | None:
+    """Why the pinned bun is not usable here and whether it is missing, or None when it is usable."""
     bun = shutil.which("bun")
     if bun is None:
-        return f"bun {pinned_bun(root)} is required to build the host bundles (not found)"
+        return f"bun {pinned_bun(root)} is required to build the host bundles (not found)", True
     have = subprocess.run([bun, "--version"], capture_output=True, text=True, check=False).stdout.strip()
     if have != pinned_bun(root):
-        return f"bun {pinned_bun(root)} is required to build the host bundles (found {have or 'none'})"
+        return f"bun {pinned_bun(root)} is required to build the host bundles (found {have or 'none'})", False
     return None
 
 
@@ -225,7 +225,7 @@ def generate(root: Path, *, check: bool = False, include_local: bool = False, bu
     if with_bundles:
         problem = bun_problem(root)
         if problem and required:
-            raise CatalogError(problem)
+            raise (ToolMissing if problem[1] else CatalogError)(problem[0])
         with_bundles = problem is None
     changed: list[Path] = []
     extras = extra_copies(root, include_local=include_local)

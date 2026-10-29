@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 
 from modslib import claude
-from modslib.catalog import CatalogError, Mod, load_all
+from modslib.catalog import CatalogError, Mod, ToolMissing, load_all
 from modslib.generate import generate
 
 BUILTIN_PATTERNS = (
@@ -161,6 +161,8 @@ def validate(root: Path, *, run_claude: bool = True) -> list[str]:
         return [str(exc)]
     try:
         stale = generate(root, check=True)
+    except ToolMissing:
+        raise
     except CatalogError as exc:
         return [str(exc)]
     problems = [
