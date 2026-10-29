@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-29
+
+Third collection prerelease, tagged on `develop`. Individual plugin versions are unchanged.
+
+### Breaking
+
+- `secret-box` removes the plaintext `values` command; hooks use batched `scrub` calls instead. Scripts that read values with `secret-box values` have no replacement by design; use `exec` to run a command with a placeholder. Directory and Bash-only placeholder limits are documented per host.
+- `secret-box exec` always scrubs its output. `--scrub` is still accepted and changes nothing, but scripts that relied on raw output from `exec` now get scrubbed text.
+- The `prompt-gate` and `skill-pick` mods are removed, with their shared helpers, the Jev client and the Codex and OpenCode adapters. Neither showed a measured benefit, and both made a model call per prompt. No prompt leaves the machine through mods now. To remove an existing install, run `scripts/mods uninstall prompt-gate skill-pick` at the scope you installed at; it also prints the Codex and OpenCode steps. `scripts/mods list` shows them as retired while installed.
+- `guard-rules` is stricter in ways a script or workflow can depend on. It removes editor and pager file exemptions (use a file-reading tool for tool-named editor paths), disables exemptions for PATH tokens and `env -P`/`--path`, narrows data exemptions for scripts, path-qualified commands and editor options, and checks git writes after unresolved directory changes independently of `modeUnparsed`. Commands that were allowed before can now be denied; adjust the command, or set the mod's `mode` to `dry` or `off`.
+
 ### Added
 
 - `notify` mod: a desktop notification when the agent finishes or waits on a permission prompt or other input, titled with the project folder, with an optional sound (off by default). Uses `notify-send` on Linux and `osascript` on macOS, warns once when none is available, and makes no network calls. Runs on Claude Code (hooks), Codex (hooks or its `notify` setting) and OpenCode (plugin events); untested on real hosts.
@@ -31,18 +42,12 @@
 - `scripts/mods uninstall` always prints the Codex and OpenCode steps for retired mods, treats "not installed" in Claude Code as a skip and a missing `claude` CLI as a note, and keeps the steps in the payload when the Claude uninstall really fails.
 - `guard-rules` checks literal pipeline producer words in command runners, executable `man` options and command-bearing environment values; computed pipeline output remains a documented limit.
 - `guard-rules` allowlists editor flags, disables data exemptions after command-resolution changes, and checks dynamic `git -C` directories even with `modeUnparsed=off`.
-- Breaking: `secret-box` removes the plaintext `values` command; hooks use batched `scrub` calls instead. Scripts that read values with `secret-box values` have no replacement by design; use `exec` to run a command with a placeholder. Directory and Bash-only placeholder limits are documented per host.
-- `guard-rules` narrows data exemptions for scripts, path-qualified commands and editor options, and checks git writes after unresolved directory changes independently of `modeUnparsed`.
 - `guard-rules` treats file arguments and known data commands as data while keeping command runners guarded.
 - `guard-rules` follows both plain and scrubbed `secret-box exec` wrappers when checking commands.
 
 ### Removed
 
-- Breaking: the `prompt-gate` and `skill-pick` mods, with their shared helpers, the Jev client and
-  the Codex and OpenCode adapters. Neither showed a measured benefit, and both made a model call
-  per prompt. No prompt leaves the machine through mods now. To remove an existing install, run
-  `scripts/mods uninstall prompt-gate skill-pick` at the scope you installed at; it also prints the
-  Codex and OpenCode steps. `scripts/mods list` shows them as retired while installed.
+- The `prompt-gate` and `skill-pick` mods (see Breaking).
 
 ## [0.2.0] - 2026-10-29
 
@@ -161,6 +166,7 @@ First collection prerelease. Individual plugin versions remain independent of th
   timer afterwards; `delegation-board` resets on `/clear` and prints a text table when its pane
   is not placed (Claude Desktop).
 
-[Unreleased]: https://github.com/iuliandita/mods/compare/v0.2.0...develop
+[Unreleased]: https://github.com/iuliandita/mods/compare/v0.3.0...develop
+[0.3.0]: https://github.com/iuliandita/mods/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/iuliandita/mods/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/iuliandita/mods/releases/tag/v0.1.0
