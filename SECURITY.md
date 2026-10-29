@@ -33,7 +33,10 @@ network destinations.
 Values under 6 characters and unsupported transformations are not scrubbed. A failed scrub
 withholds checked text on Claude Code and OpenCode; Claude Code refuses unchecked sent messages.
 OpenCode discards arbitrary keys and nested payloads on failure, keeping only allowlisted message
-roles and content-part fields; results and prompts become withholding notices.
+roles and content-part fields. Tool inputs become empty objects; boolean `providerExecuted`
+flags and replacement call/result pairs are preserved. Results keep notice `output` and text
+`content`, errors retain their Error prototype with a notice message, and prompts keep notice
+`text` with empty attachment arrays. Unchecked own fields are discarded.
 Each scrub reads current values; removed or rotated values are unknown to later scrubs. A
 wrapped command retains its initial values while filtering its own stdout and stderr. Claude Code
 may leave large or inaccessible saved outputs unchanged, Codex filters only a wrapped command's own

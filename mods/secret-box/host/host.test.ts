@@ -125,11 +125,66 @@ test('opencode fallback allowlists message structure and withholds nested discri
     const after = { tool: 'read', id: 'failed', status: 'error', result: { [field]: SECRET }, error: { [SECRET]: { type: 'text', role: SECRET } } }
     await h.after!(after)
     expect(JSON.stringify([after.result, after.error])).not.toContain(SECRET)
-    expect(typeof after.result).toBe('string')
+    expect<unknown>(after.result).toEqual({ output: expect.stringContaining('withheld'), content: [{ type: 'text', text: expect.stringContaining('withheld') }] })
+    expect(after.error).toBeInstanceOf(Error)
   }
   const prompt = { prompt: { [SECRET]: { type: SECRET, role: SECRET } } }
   await h.prompt!(prompt)
   expect(JSON.stringify(prompt)).not.toContain(SECRET)
+  expect<unknown>(prompt.prompt).toEqual({ text: expect.stringContaining('withheld'), files: [], agents: [], skills: [] })
+})
+
+test('opencode fallback keeps tool pairing and boolean provider execution without unchecked fields', async () => {
+  withMode()
+  const h = await plugin({ helper: join(root, 'missing') })
+  for (const providerExecuted of [true, false, SECRET, undefined]) {
+    const ctx = { messages: [
+      { role: 'assistant', content: [{ type: 'tool-call', id: SECRET, name: SECRET, input: SECRET, providerExecuted }] },
+      { role: 'tool', content: [{ type: 'tool-result', id: SECRET, name: SECRET, result: SECRET, providerExecuted }] },
+    ] }
+    await h.context!(ctx)
+    const call = ctx.messages[0]!.content[0]!
+    const result = ctx.messages[1]!.content[0]!
+    expect(call).toHaveProperty('input', {})
+    expect(call.id).toBe(result.id)
+    for (const part of [call, result]) {
+      if (typeof providerExecuted === 'boolean') expect(part.providerExecuted).toBe(providerExecuted)
+      else expect(part).not.toHaveProperty('providerExecuted')
+    }
+    expect(JSON.stringify(ctx)).not.toContain(SECRET)
+  }
+})
+
+test('opencode fallback replaces error fields and prompt attachments with usable notices', async () => {
+  withMode()
+  const h = await plugin({ helper: join(root, 'missing') })
+  class ToolError extends Error {}
+  const failed = { tool: 'shell', id: 'failed', status: 'error',
+    result: { output: SECRET, content: [{ type: 'text', text: SECRET }], [SECRET]: SECRET },
+    error: new ToolError(SECRET, { cause: SECRET }),
+  }
+  await h.after!(failed)
+  expect(failed.error).toBeInstanceOf(ToolError)
+  expect(failed.error.message).toContain('withheld')
+  expect(failed.error.stack).not.toContain(SECRET)
+  expect(failed.error).not.toHaveProperty('cause')
+  expect(failed.error).not.toHaveProperty('metadata')
+  expect<unknown>(failed.result).toEqual({ output: expect.stringContaining('withheld'), content: [{ type: 'text', text: expect.stringContaining('withheld') }] })
+  const prompt = { prompt: { text: SECRET, files: [{ uri: SECRET }], agents: [{ name: SECRET }], skills: [{ id: SECRET }], [SECRET]: SECRET } }
+  await h.prompt!(prompt)
+  expect<unknown>(prompt.prompt).toEqual({ text: expect.stringContaining('withheld'), files: [], agents: [], skills: [] })
+  expect(JSON.stringify([failed, prompt])).not.toContain(SECRET)
+})
+
+test('opencode scrubs non-enumerable Error messages, stacks and causes when the helper works', async () => {
+  withMode()
+  const h = await plugin()
+  const failed = { tool: 'shell', id: 'error', status: 'error', error: new Error(SECRET, { cause: SECRET }) }
+  await h.after!(failed)
+  expect(failed.error).toBeInstanceOf(Error)
+  expect(failed.error.message).toBe('{{secret:API_KEY}}')
+  expect(failed.error.stack).not.toContain(SECRET)
+  expect(failed.error.cause).toBe('{{secret:API_KEY}}')
 })
 
 test('the helper reply stays near the text size for non-ASCII text, so a large file still fits the 4 MiB cap', async () => {
