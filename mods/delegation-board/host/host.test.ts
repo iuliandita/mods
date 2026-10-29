@@ -1,7 +1,10 @@
 import { expect, test } from 'bun:test'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import type { Data, SessionInfo } from '../../../host-lib/tui'
-import { rows, setup, table } from './tui'
+import { OFF_TEXT, rows, setup, table } from './tui'
 
 const info = (id: string, over: Partial<SessionInfo> = {}): SessionInfo => ({
   id,
@@ -97,4 +100,34 @@ test('setup claims the panel slot, draws only its own panel, and adds the /board
   expect(calls).toEqual(['open iuliandita.delegation-board', 'close'])
   cleanup()
   expect(calls.at(-1)).toBe('release')
+})
+
+test('mode off in the user options file draws a notice and does not read the sessions; anything else stays on', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'delegation-board-'))
+  const file = join(dir, 'delegation-board.json')
+  try {
+    const panel = async () => {
+      const claims: { render: (i: { name: string; sessionID: string }) => { content: string } }[] = []
+      let family = 0
+      const d = data([info('a', { outcome: 'succeeded' })])
+      d.session.family = () => (family++, ['root', 'a'])
+      await setup(
+        { renderer: {}, data: d, keymap: { layer: () => {} }, ui: { panel: { open: () => true, close: () => {}, current: () => undefined }, slot: (c) => (claims.push(c as never), () => {}) } },
+        (content) => ({ content }),
+        file,
+      )
+      const out = claims[0]!.render({ name: 'iuliandita.delegation-board', sessionID: 'root' }).content
+      return { out, family }
+    }
+    for (const body of [undefined, '{}', '{"mode":"on"}', '{"mode":"nope"}', '{ broken']) {
+      if (body !== undefined) writeFileSync(file, body)
+      expect((await panel()).out).toContain('1 subagent')
+    }
+    writeFileSync(file, '{"mode":"off"}')
+    const off = await panel()
+    expect(off.out).toBe(OFF_TEXT)
+    expect(off.family).toBe(0)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
