@@ -98,7 +98,7 @@ export function tokenize(src: string, depth = 0): { cmds: Simple[]; ok: boolean;
         const e = skipSubst(body, j + 1)
         if (e === -1) break
         if (body[j + 2] === '(' && arithEnd(body, j + 1) === e) {
-          if (arithOpaque(body.slice(j + 3, e - 2))) opaque.push('arithmetic with a substitution or subscript')
+          if (arithOpaque(body.slice(j + 3, e - 2))) opaque.push('arithmetic with a substitution, subscript or PATH reference')
         } else {
           sub(body.slice(j + 2, e - 1))
         }
@@ -172,7 +172,7 @@ export function tokenize(src: string, depth = 0): { cmds: Simple[]; ok: boolean;
       } else {
         cur += src.slice(i, end)
         if (src[i + 2] === '(' && arithEnd(src, i + 1) === end) {
-          if (arithOpaque(src.slice(i + 3, end - 2))) opaque.push('arithmetic with a substitution or subscript')
+          if (arithOpaque(src.slice(i + 3, end - 2))) opaque.push('arithmetic with a substitution, subscript or PATH reference')
         } else {
           sub(src.slice(i + 2, end - 1))
         }
@@ -270,7 +270,7 @@ export function tokenize(src: string, depth = 0): { cmds: Simple[]; ok: boolean;
       i += 2
     } else if (c === '(' && src[i + 1] === '(' && !inWord && !words.length && arithEnd(src, i) !== -1) {
       const end = arithEnd(src, i)
-      if (arithOpaque(src.slice(i + 2, end - 2))) opaque.push('arithmetic with a substitution or subscript')
+      if (arithOpaque(src.slice(i + 2, end - 2))) opaque.push('arithmetic with a substitution, subscript or PATH reference')
       endCmd()
       i = end
     } else if (c === '>' || c === '<' || (c === '&' && src[i + 1] === '>')) {

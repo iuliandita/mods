@@ -29,13 +29,16 @@ const RUN_WORD = new RegExp(`(?<![\\w.-])(${[...TOOLS, ...SHELL_NAMES].join('|')
 
 // The tool names that appear as words of their own in `text`, matched on word boundaries rather than whitespace.
 // `anyCase` is for the whole command text, where `$GIT` names git too; `shells` adds the shell names.
-export function toolWords(text: string, opts: { anyCase?: boolean; shells?: boolean } = {}): string[] {
+// `commands` ignores directory segments and filename stems, retaining executable basenames such as /usr/bin/git.
+export function toolWords(text: string, opts: { anyCase?: boolean; shells?: boolean; commands?: boolean } = {}): string[] {
   const re = opts.shells ? RUN_WORD : TOOL_WORD
   const flags = opts.anyCase ? 'gi' : 'g'
   // A path segment with a dotted name (`/gh.example/`, `/terraform.tfstate`) is a name, not the tool; elsewhere
   // `git.cmd` (`import git.cmd`) still names it.
   const found = [...text.matchAll(new RegExp(re.source, flags))].filter(
-    (m) => !(text[m.index! - 1] === '/' && /^\.\w/.test(text.slice(m.index! + m[0].length))),
+    (m) => opts.commands
+      ? !/^[/.]/.test(text.slice(m.index! + m[0].length))
+      : !(text[m.index! - 1] === '/' && /^\.\w/.test(text.slice(m.index! + m[0].length))),
   )
   return [...new Set(found.map((m) => m[1]!.toLowerCase()))]
 }
