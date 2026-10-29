@@ -148,7 +148,7 @@ def _problems(path: Path, data: object, shared: Path) -> list[str]:
             for key, bins in platform_requires.items()
         )
     ):
-        errs.append(f"{where}: requires_by_platform must map linux or darwin to lists of binary names")
+        errs.append(f"{where}: invalid requires_by_platform: expected linux or darwin mapped to lists of binary names; fix mod.json")
     surfaces = data["surfaces"]
     if not (
         isinstance(surfaces, dict)
