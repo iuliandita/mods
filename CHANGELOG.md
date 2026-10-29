@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-29
+
+Patch prerelease, tagged on `develop`. All five current plugins are now at version 0.3.1.
+
+Codex users: updating changes the hook content, so trust the hooks again in `/hooks` after the update. `scripts/mods doctor` reports hooks that are still untrusted.
+
 ### Fixed
 
 - `notify` runs the Codex `Stop` hook synchronously with a one-second cap so `codex exec` waits for finish delivery. Permission hooks stay in the background, and notifier processes still have a 250 ms timeout.
@@ -173,7 +179,8 @@ First collection prerelease. Individual plugin versions remain independent of th
   timer afterwards; `delegation-board` resets on `/clear` and prints a text table when its pane
   is not placed (Claude Desktop).
 
-[Unreleased]: https://github.com/iuliandita/mods/compare/v0.3.0...develop
+[Unreleased]: https://github.com/iuliandita/mods/compare/v0.3.1...develop
+[0.3.1]: https://github.com/iuliandita/mods/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/iuliandita/mods/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/iuliandita/mods/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/iuliandita/mods/releases/tag/v0.1.0
