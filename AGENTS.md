@@ -106,8 +106,8 @@ a terminal install at user scope loads in Desktop sessions too.
 
 ## House rules
 
-- Branches: `develop` default, `main` release. Every change by branch and PR. Conventional
-  commits.
+- Branches: `develop` is the default and v0.x prerelease channel. `main` becomes the stable
+  release channel at v1.0.0. Every change by branch and PR. Conventional commits.
 - Never add AI attribution to commits, PRs, tags, or files.
 - Keep private hosts, domains, machine paths, and work context out of tracked files. The
   `scripts/mods validate` private-pattern scan enforces part of this.
