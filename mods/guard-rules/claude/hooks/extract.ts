@@ -204,9 +204,10 @@ function inlineScript(w: Walk, s: Step): void {
   let script: string | undefined
   let from = argv.length
   if (name === 'secret-box') {
-    // `secret-box exec -- SCRIPT` runs SCRIPT through a shell; an exec form without a script cannot be read.
+    // `secret-box exec [--scrub] -- SCRIPT` runs SCRIPT through a shell.
     if (argv[1] === 'exec') {
-      if (argv[2] === '--' && argv[3] !== undefined) script = argv.slice((from = 3)).join(' ')
+      const separator = argv[2] === '--scrub' ? 3 : 2
+      if (argv[separator] === '--' && argv[separator + 1] !== undefined) script = argv.slice((from = separator + 1)).join(' ')
       else mark(w, 'a secret-box exec without a script')
     }
   } else if (name === 'eval') {
