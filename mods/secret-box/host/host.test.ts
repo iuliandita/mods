@@ -6,8 +6,8 @@ import { join } from 'node:path'
 
 import { main, type Io } from './cli'
 import { setup } from './opencode'
-import { runsValues } from '../claude/hooks/commands'
-import { loadValues } from './core'
+import { request } from './core'
+import { parseReply, scrubBatch } from '../claude/hooks/remote'
 import { scopeDenied } from '../claude/hooks/scopes'
 
 const SECRET = 'tok_AbC123xyz-Qq9'
@@ -69,25 +69,34 @@ test('codex: commands without a placeholder, other tools and bad input are left 
   expect(await hook('not json')).toEqual({ code: 0, out: null })
 })
 
-test('all hosts: literal values calls and visible wrappers are denied, data and other subcommands are allowed', async () => {
+test('the helper returns scrubbed batches and names without exposing stored values', async () => {
+  const r = await request(helper, [SECRET, `key=${SECRET}`, 'unchanged'])
+  expect(r.results.map((x) => x.text)).toEqual(['{{secret:API_KEY}}', 'key={{secret:API_KEY}}', 'unchanged'])
+  expect(r.names).toEqual(['API_KEY'])
+  expect(JSON.stringify(r)).not.toContain(SECRET)
+})
+
+test('scrub batches deduplicate strings and reject malformed or incomplete replies', async () => {
+  let calls = 0
+  const r = await scrubBatch((scrub) => [SECRET, SECRET].map(scrub), async (texts) => {
+    calls++
+    expect(texts).toEqual([SECRET])
+    return request(helper, texts)
+  })
+  expect(calls).toBe(1)
+  expect(r.map((x) => x.text)).toEqual(['{{secret:API_KEY}}', '{{secret:API_KEY}}'])
+  for (const reply of ['null', '{}', '{"results":[],"names":[],"short":[]}', '{"results":[{"text":3,"names":[]}],"names":[],"short":[]}']) {
+    expect(() => parseReply(reply, 1)).toThrow()
+  }
+})
+
+test('opencode withholds unchecked strings when the scrub helper cannot start', async () => {
   withMode()
-  const h = await plugin()
-  for (const command of [
-    'secret-box values', '/opt/plugin/bin/secret-box values', '"/opt/plugin dir/secret-box" "values"',
-    'bash -c "/opt/plugin/secret-box values"', 'env X=1 command secret-box values | cat',
-    "secret-box exec -- 'secret-box values'", "secret-box exec --scrub -- 'bash -c \"secret-box values\"'",
-    'echo hi; secret-box val"ues"', '# comment\nsecret-box values',
-  ]) {
-    expect(runsValues(command)).toBe(true)
-    expect((await hook(bash(command))).out.hookSpecificOutput.permissionDecision).toBe('deny')
-    await expect(h.before!({ tool: 'shell', id: 'values', input: { command } })).rejects.toThrow('reserved for the hook')
-  }
-  for (const command of ['echo "secret-box values"', 'secret-box names', 'cat /tmp/secret-box-values', '# secret-box values\necho ok']) {
-    expect(runsValues(command)).toBe(false)
-    expect((await hook(bash(command))).out).toBeNull()
-    await h.before!({ tool: 'shell', id: 'data', input: { command } })
-  }
-  expect((await loadValues(helper))?.get('API_KEY')).toBe(SECRET)
+  const h = await plugin({ helper: join(root, 'missing') })
+  const after = { tool: 'read', id: 'failure', status: 'completed', result: { output: SECRET } }
+  await h.after!(after)
+  expect(JSON.stringify(after.result)).not.toContain(SECRET)
+  expect(JSON.stringify(after.result)).toContain('withheld')
 })
 
 test('codex: off leaves the command alone, dry only reports, an unreadable options file counts as on', async () => {

@@ -2,9 +2,8 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { loadOptions } from '../../../host-lib/options'
-import { runsValues, VALUES_DENIED } from '../claude/hooks/commands'
 import { scopeDenied } from '../claude/hooks/scopes'
-import { createBox, helperExists, helperMissing, parseMode, placeholderNames, rewrite, scrubValue, type Mode } from './core'
+import { helperExists, helperMissing, parseMode, placeholderNames, rewrite, scrubRemote, type Mode } from './core'
 
 // The parts of the OpenCode v2 plugin context this adapter uses, so the bundle needs no host package.
 type ToolBefore = { tool: string; id: string; input: unknown }
@@ -22,25 +21,21 @@ type Context = {
 }
 
 const SHELL_TOOLS = new Set(['shell', 'bash'])
-const WITHHELD = '[secret-box: this content was withheld because scrubbing failed]'
 
 export type Deps = { helper: string; options?: string }
 
 // Everything is read from the user-level options file per call, never from plugin options: a repository's own
 // opencode.json can declare plugin options, and it must not be able to switch the box off.
 export async function setup(ctx: Context, deps: Deps): Promise<void> {
-  const box = createBox(deps.helper)
   const mode = (): Mode => {
     const loaded = loadOptions('secret-box', deps.options)
     return loaded.error ? 'on' : parseMode(loaded.options.mode)
   }
-  const reload = new Set<string>()
 
   await ctx.tool.hook('execute.before', async (e) => {
     if (!SHELL_TOOLS.has(e.tool.toLowerCase()) || mode() === 'off') return
     const input = e.input as { command?: unknown; workdir?: unknown } | null
     if (typeof input?.command !== 'string') return
-    if (mode() === 'on' && runsValues(input.command)) throw new Error(VALUES_DENIED)
     const names = placeholderNames(input.command)
     if (names.length === 0) return
     const loaded = loadOptions('secret-box', deps.options)
@@ -55,40 +50,24 @@ export async function setup(ctx: Context, deps: Deps): Promise<void> {
     if (scope) throw new Error(scope)
     if (!helperExists(deps.helper)) throw new Error(helperMissing(deps.helper))
     input.command = rewrite(deps.helper, input.command)
-    reload.add(e.id)
   })
 
   await ctx.tool.hook('execute.after', async (e) => {
     if (mode() !== 'on') return
-    if (reload.delete(e.id)) await box.load()
-    const scrub = await box.scrubber()
-    if (!scrub) return
     // A failed or aborted call can carry partial output in `result` next to its `error`.
-    for (const key of ['result', 'error'] as const) {
-      if (e[key] === undefined) continue
-      try {
-        const r = scrubValue(e[key], scrub)
-        if (r.changed) e[key] = r.value
-      } catch {
-        e[key] = WITHHELD
-      }
-    }
+    const [result, error] = await scrubRemote(deps.helper, [e.result, e.error])
+    if (e.result !== undefined) e.result = result
+    if (e.error !== undefined) e.error = error
   })
 
   // Every row the model sees again, and the prompt as typed.
   await ctx.session.hook('context', async (e) => {
     if (mode() !== 'on') return
-    const scrub = await box.scrubber()
-    if (!scrub) return
-    const r = scrubValue(e.messages, scrub)
-    if (r.changed) e.messages = r.value
+    e.messages = await scrubRemote(deps.helper, e.messages)
   })
   await ctx.session.hook('prompt', async (e) => {
     if (mode() !== 'on') return
-    const scrub = await box.scrubber()
-    if (!scrub) return
-    const r = scrubValue(e.prompt, scrub)
-    if (r.changed) e.prompt = r.value
+    e.prompt = await scrubRemote(deps.helper, e.prompt)
   })
 }
 

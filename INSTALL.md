@@ -31,8 +31,9 @@ binaries appear in the mod's `requires` results; the JSON envelope and exit code
 Real macOS Keychain access and prompts remain unverified.
 
 Store values with `secret-box set NAME` in your own terminal, never in the chat. Run
-`secret-box names` to check backend access without printing values. In mode `on`, model shell
-calls to the internal `values` command are denied on all three hosts. Configure optional
+`secret-box names` to check backend access without printing values. The helper has no plaintext
+`values` command; hooks use batched `scrub` calls instead. Placeholder checks cover only
+Claude Code and Codex `Bash`, and OpenCode `shell`/`bash`; Codex `write_stdin` is not covered. Configure optional
 `secretScopes` directory globs in the Claude plugin options or the user-level
 `~/.config/iuliandita-mods/secret-box.json` file on Codex and OpenCode. Unlisted names remain
 unrestricted; malformed settings deny placeholder commands. See the mod's

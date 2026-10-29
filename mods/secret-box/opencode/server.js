@@ -29,79 +29,6 @@ function loadOptions(mod, path = optionsPath(mod)) {
   }
 }
 
-// mods/secret-box/claude/hooks/commands.ts
-var VALUES_DENIED = "secret-box: error: values is reserved for the hook: it exposes every stored secret; use secret-box names in a terminal";
-function runsValues(script, depth = 0) {
-  if (depth > 12)
-    return true;
-  const commands = [];
-  let words = [];
-  let word = "";
-  let started = false;
-  let quote = "";
-  const endWord = () => {
-    if (started)
-      words.push(word);
-    word = "";
-    started = false;
-  };
-  const endCommand = () => {
-    endWord();
-    if (words.length)
-      commands.push(words);
-    words = [];
-  };
-  for (let i = 0;i < script.length; i++) {
-    const c = script[i];
-    if (c === "\\" && quote !== "'") {
-      const next = script[++i] ?? "";
-      if (next !== `
-`) {
-        word += next;
-        started = true;
-      }
-    } else if (quote) {
-      if (c === quote)
-        quote = "";
-      else
-        word += c;
-    } else if (c === "'" || c === '"') {
-      quote = c;
-      started = true;
-    } else if (c === "#" && !started) {
-      const end = script.indexOf(`
-`, i);
-      i = end < 0 ? script.length : end - 1;
-    } else if (/[;&|()\n]/.test(c))
-      endCommand();
-    else if (/\s/.test(c))
-      endWord();
-    else {
-      word += c;
-      started = true;
-    }
-  }
-  endCommand();
-  return commands.some((argv) => {
-    while (argv[0] && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(argv[0]) || ["command", "builtin", "exec", "env", "--"].includes(argv[0])))
-      argv.shift();
-    const head = argv[0]?.split("/").pop();
-    if (head === "secret-box") {
-      if (argv[1] === "values")
-        return true;
-      if (argv[1] === "exec") {
-        const offset = argv[2] === "--scrub" ? 3 : 2;
-        return argv[offset] === "--" && argv[offset + 1] !== undefined && runsValues(argv[offset + 1], depth + 1);
-      }
-    }
-    if (head && ["bash", "sh", "zsh", "dash", "ksh"].includes(head)) {
-      const at = argv.findIndex((arg, i) => i > 0 && /^-[^-]*c/.test(arg));
-      return at > 0 && argv[at + 1] !== undefined && runsValues(argv[at + 1], depth + 1);
-    }
-    return false;
-  });
-}
-
 // mods/secret-box/claude/hooks/scopes.ts
 var INVALID = "secret-box: error: secretScopes is invalid: expected a JSON object mapping secret names to arrays of absolute path globs; fix secretScopes in the plugin options";
 function parseScopes(raw) {
@@ -165,30 +92,43 @@ function scopeDenied(raw, names, cwd) {
 
 // mods/secret-box/host/core.ts
 import { statSync } from "node:fs";
-
-// host-lib/proc.ts
 import { execFile } from "node:child_process";
-var TIMEOUT_MS = 5000;
-var MAX_BUFFER = 1 << 20;
-var running = new Set;
-function run(dir, argv, vars, timeoutMs = TIMEOUT_MS) {
-  return new Promise((resolve) => {
-    const [cmd, ...args] = argv;
-    if (cmd === undefined)
-      return resolve({ ok: false, out: "", failed: true });
-    const child = execFile(cmd, args, { cwd: dir, env: vars ? { ...process.env, ...vars } : process.env, timeout: timeoutMs, maxBuffer: MAX_BUFFER, encoding: "utf8" }, (err, stdout) => {
-      running.delete(child);
-      if (!err)
-        return resolve({ ok: true, out: stdout.trim() });
-      const e = err;
-      resolve(typeof e.code === "number" && !e.killed ? { ok: false, out: stdout.trim() } : { ok: false, out: "", failed: true });
-    });
-    running.add(child);
+
+// mods/secret-box/claude/hooks/remote.ts
+var strings = (v) => Array.isArray(v) && v.every((x) => typeof x === "string");
+function parseReply(stdout, count) {
+  const v = JSON.parse(stdout);
+  if (v === null || typeof v !== "object" || !("results" in v) || !Array.isArray(v.results) || !("names" in v) || !strings(v.names) || !("short" in v) || !strings(v.short))
+    throw new Error("invalid scrub reply");
+  const results = v.results.map((r) => {
+    if (r === null || typeof r !== "object" || !("text" in r) || typeof r.text !== "string" || !("names" in r) || !strings(r.names))
+      throw new Error("invalid scrub result");
+    return { text: r.text, names: r.names };
+  });
+  if (results.length !== count)
+    throw new Error("incomplete scrub reply");
+  return { results, names: v.names, short: v.short };
+}
+async function scrubBatch(walk, request) {
+  const texts = new Set;
+  walk((text) => {
+    texts.add(text);
+    return { text, names: [] };
+  });
+  const input = [...texts];
+  if (input.length === 0)
+    return walk((text) => ({ text, names: [] }));
+  const reply = await request(input);
+  const clean = new Map(input.map((text, i) => [text, reply.results[i]]));
+  return walk((text) => {
+    const result = clean.get(text);
+    if (!result)
+      throw new Error("uncollected scrub input");
+    return result;
   });
 }
 
 // mods/secret-box/claude/hooks/scrub.ts
-var MIN_LEN = 6;
 var PLACEHOLDER = /\{\{secret:([A-Za-z0-9._-]+)\}\}/g;
 function placeholderNames(command) {
   return [...new Set([...command.matchAll(PLACEHOLDER)].map((m) => m[1]))];
@@ -200,89 +140,6 @@ function quote(s) {
 }
 function rewriteCommand(wrapper, command, scrub = false) {
   return `${quote(wrapper)} exec ${scrub ? "--scrub " : ""}-- ${quote(command)}`;
-}
-function utf8(s) {
-  const out = [];
-  for (const ch of s) {
-    const c = ch.codePointAt(0);
-    if (c < 128)
-      out.push(c);
-    else if (c < 2048)
-      out.push(192 | c >> 6, 128 | c & 63);
-    else if (c < 65536)
-      out.push(224 | c >> 12, 128 | c >> 6 & 63, 128 | c & 63);
-    else
-      out.push(240 | c >> 18, 128 | c >> 12 & 63, 128 | c >> 6 & 63, 128 | c & 63);
-  }
-  return out;
-}
-var B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-function base64Bytes(b) {
-  let out = "";
-  for (let i = 0;i < b.length; i += 3) {
-    const n = b[i] << 16 | (b[i + 1] ?? 0) << 8 | (b[i + 2] ?? 0);
-    out += B64[n >> 18 & 63] + B64[n >> 12 & 63];
-    out += i + 1 < b.length ? B64[n >> 6 & 63] : "=";
-    out += i + 2 < b.length ? B64[n & 63] : "=";
-  }
-  return out;
-}
-function base64Forms(base) {
-  const bytes = utf8(base);
-  const whole = base64Bytes(bytes);
-  const out = [whole, whole.replace(/=+$/, "")];
-  for (const k of [0, 1, 2]) {
-    const raw = base64Bytes([...[0, 0].slice(0, k), ...bytes]).replace(/=+$/, "");
-    out.push(raw.slice([0, 2, 3][k], Math.floor((bytes.length + k) * 8 / 6)));
-  }
-  return [...out, ...out.map((f) => f.replaceAll("+", "-").replaceAll("/", "_"))];
-}
-var lowerHex = (s) => s.replace(/%[0-9A-F]{2}/g, (m) => m.toLowerCase());
-var strictUrl = (s) => s.replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
-function forms(value) {
-  const out = new Set;
-  for (const base of new Set([value, value.trim()])) {
-    if (base.length < MIN_LEN)
-      continue;
-    out.add(base);
-    const json = JSON.stringify(base).slice(1, -1);
-    out.add(json);
-    if (/[^\x00-\x7f]/.test(base)) {
-      for (const hex of [(n) => n.toString(16), (n) => n.toString(16).toUpperCase()]) {
-        out.add(json.replace(/[^\x00-\x7f]/g, (c) => `\\u${hex(c.charCodeAt(0)).padStart(4, "0")}`));
-      }
-    }
-    try {
-      const url = encodeURIComponent(base);
-      for (const u of [url, strictUrl(url)])
-        for (const f of [u, u.replaceAll("%20", "+")])
-          out.add(f).add(lowerHex(f));
-    } catch {}
-    for (const f of base64Forms(base))
-      out.add(f);
-  }
-  return [...out];
-}
-var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-function makeScrubber(values) {
-  const byForm = new Map;
-  for (const [name, value] of [...values].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
-    for (const f of forms(value))
-      if (!byForm.has(f))
-        byForm.set(f, name);
-  }
-  if (byForm.size === 0)
-    return null;
-  const re = new RegExp([...byForm.keys()].sort((a, b) => b.length - a.length || (a < b ? -1 : 1)).map(escape).join("|"), "g");
-  return (text) => {
-    const names = new Set;
-    const out = text.replace(re, (hit) => {
-      const name = byForm.get(hit);
-      names.add(name);
-      return `{{secret:${name}}}`;
-    });
-    return { text: out, names: [...names] };
-  };
 }
 var PATH_FIELDS = new Set(["persistedOutputPath", "rawOutputPath"]);
 var KEEP_ON_FAILURE = new Set([...PATH_FIELDS, "backgroundTaskId", "type"]);
@@ -297,18 +154,20 @@ function helperExists(helper) {
     return false;
   }
 }
-async function loadValues(helper) {
-  const r = await run("/", [helper, "values"], undefined, 1e4);
-  if (!r.ok)
-    return null;
-  try {
-    const raw = JSON.parse(r.out);
-    if (raw === null || typeof raw !== "object" || Array.isArray(raw))
-      return null;
-    return new Map(Object.entries(raw).filter((e) => typeof e[1] === "string"));
-  } catch {
-    return null;
-  }
+function request(helper, texts) {
+  return new Promise((resolve, reject) => {
+    const child = execFile(helper, ["scrub"], { timeout: 1e4, maxBuffer: 4 * 1024 * 1024, encoding: "utf8" }, (error, stdout) => {
+      if (error)
+        return reject(new Error("scrub failed"));
+      try {
+        resolve(parseReply(stdout, texts.length));
+      } catch {
+        reject(new Error("invalid scrub reply"));
+      }
+    });
+    child.stdin?.on("error", () => {});
+    child.stdin?.end(JSON.stringify(texts));
+  });
 }
 var rewrite = (helper, command) => rewriteCommand(helper, command, true);
 var WITHHELD = "[secret-box: this content was withheld because scrubbing failed]";
@@ -355,60 +214,28 @@ function scrubValue(value, scrub) {
   const out = walk(value, 0, new Set);
   return { value: out, names: [...names], changed };
 }
-var RETRY_MS = 30000;
-function createBox(helper, now = Date.now) {
-  let scrubber = null;
-  let known = null;
-  let failedAt = null;
-  let inflight = null;
-  const load = () => {
-    inflight ??= (async () => {
-      try {
-        const values = await loadValues(helper);
-        failedAt = values ? null : now();
-        if (values) {
-          known = values;
-          scrubber = makeScrubber(values);
-        }
-        return values !== null;
-      } finally {
-        inflight = null;
-      }
-    })();
-    return inflight;
-  };
-  return {
-    load,
-    async scrubber() {
-      if (known !== null)
-        return scrubber;
-      if (inflight)
-        await inflight;
-      else if (failedAt === null || now() - failedAt >= RETRY_MS)
-        await load();
-      return scrubber;
-    }
-  };
+async function scrubRemote(helper, value) {
+  try {
+    const r = await scrubBatch((scrub) => scrubValue(value, scrub), (texts) => request(helper, texts));
+    return r.value;
+  } catch {
+    return scrubValue(value, () => ({ text: WITHHELD, names: ["withheld"] })).value;
+  }
 }
 
 // mods/secret-box/host/opencode.ts
 var SHELL_TOOLS = new Set(["shell", "bash"]);
-var WITHHELD2 = "[secret-box: this content was withheld because scrubbing failed]";
 async function setup(ctx, deps) {
-  const box = createBox(deps.helper);
   const mode = () => {
     const loaded = loadOptions("secret-box", deps.options);
     return loaded.error ? "on" : parseMode(loaded.options.mode);
   };
-  const reload = new Set;
   await ctx.tool.hook("execute.before", async (e) => {
     if (!SHELL_TOOLS.has(e.tool.toLowerCase()) || mode() === "off")
       return;
     const input = e.input;
     if (typeof input?.command !== "string")
       return;
-    if (mode() === "on" && runsValues(input.command))
-      throw new Error(VALUES_DENIED);
     const names = placeholderNames(input.command);
     if (names.length === 0)
       return;
@@ -424,47 +251,25 @@ async function setup(ctx, deps) {
     if (!helperExists(deps.helper))
       throw new Error(helperMissing(deps.helper));
     input.command = rewrite(deps.helper, input.command);
-    reload.add(e.id);
   });
   await ctx.tool.hook("execute.after", async (e) => {
     if (mode() !== "on")
       return;
-    if (reload.delete(e.id))
-      await box.load();
-    const scrub = await box.scrubber();
-    if (!scrub)
-      return;
-    for (const key of ["result", "error"]) {
-      if (e[key] === undefined)
-        continue;
-      try {
-        const r = scrubValue(e[key], scrub);
-        if (r.changed)
-          e[key] = r.value;
-      } catch {
-        e[key] = WITHHELD2;
-      }
-    }
+    const [result, error] = await scrubRemote(deps.helper, [e.result, e.error]);
+    if (e.result !== undefined)
+      e.result = result;
+    if (e.error !== undefined)
+      e.error = error;
   });
   await ctx.session.hook("context", async (e) => {
     if (mode() !== "on")
       return;
-    const scrub = await box.scrubber();
-    if (!scrub)
-      return;
-    const r = scrubValue(e.messages, scrub);
-    if (r.changed)
-      e.messages = r.value;
+    e.messages = await scrubRemote(deps.helper, e.messages);
   });
   await ctx.session.hook("prompt", async (e) => {
     if (mode() !== "on")
       return;
-    const scrub = await box.scrubber();
-    if (!scrub)
-      return;
-    const r = scrubValue(e.prompt, scrub);
-    if (r.changed)
-      e.prompt = r.value;
+    e.prompt = await scrubRemote(deps.helper, e.prompt);
   });
 }
 var helper = join2(dirname(fileURLToPath(import.meta.url)), "bin", "secret-box");
