@@ -1,4 +1,5 @@
 import type { EngineInterface as Engine, Register } from 'claude-code'
+import { runsValues, VALUES_DENIED } from './commands'
 
 import { makeScrubber, MIN_LEN, placeholderNames, quote, rewriteCommand, scrubBlocks, scrubToolAnswer, withhold, type Block, type Scrubber } from './scrub'
 
@@ -181,6 +182,7 @@ export const register: Register = (on, options) => {
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     if (s.mode === 'off') return next(e)
+    if (s.mode === 'on' && runsValues(e.command)) return { deny: VALUES_DENIED }
     const names = placeholderNames(e.command)
     if (names.length === 0) {
       if (s.mode !== 'on') return next(e)
@@ -218,7 +220,7 @@ export const register: Register = (on, options) => {
       const answer = await next(e)
       return s.mode === 'on' && s.scrubber ? scrubToolAnswer(answer, s.scrubber) : answer
     }
-    if (s.mode !== 'off' && e.tool === 'Bash' && placeholderNames((e as { command?: string }).command ?? '').length > 0) {
+    if (s.mode !== 'off' && e.tool === 'Bash' && (runsValues(e.command) || placeholderNames(e.command).length > 0)) {
       return { deny: 'secret-box: the hook failed, so the command was blocked before it ran (fail closed). Check the debug log, or set mode to off or dry in the plugin options. The placeholders were left as written and no value was read.' }
     }
     return next(e)

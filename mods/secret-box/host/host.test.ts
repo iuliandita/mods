@@ -6,6 +6,8 @@ import { join } from 'node:path'
 
 import { main, type Io } from './cli'
 import { setup } from './opencode'
+import { runsValues } from '../claude/hooks/commands'
+import { loadValues } from './core'
 
 const SECRET = 'tok_AbC123xyz-Qq9'
 
@@ -64,6 +66,27 @@ test('codex: commands without a placeholder, other tools and bad input are left 
   expect((await hook(bash('echo hi'))).out).toBeNull()
   expect((await hook(JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { command: '{{secret:API_KEY}}' } }))).out).toBeNull()
   expect(await hook('not json')).toEqual({ code: 0, out: null })
+})
+
+test('all hosts: literal values calls and visible wrappers are denied, data and other subcommands are allowed', async () => {
+  withMode()
+  const h = await plugin()
+  for (const command of [
+    'secret-box values', '/opt/plugin/bin/secret-box values', '"/opt/plugin dir/secret-box" "values"',
+    'bash -c "/opt/plugin/secret-box values"', 'env X=1 command secret-box values | cat',
+    "secret-box exec -- 'secret-box values'", "secret-box exec --scrub -- 'bash -c \"secret-box values\"'",
+    'echo hi; secret-box val"ues"', '# comment\nsecret-box values',
+  ]) {
+    expect(runsValues(command)).toBe(true)
+    expect((await hook(bash(command))).out.hookSpecificOutput.permissionDecision).toBe('deny')
+    await expect(h.before!({ tool: 'shell', id: 'values', input: { command } })).rejects.toThrow('reserved for the hook')
+  }
+  for (const command of ['echo "secret-box values"', 'secret-box names', 'cat /tmp/secret-box-values', '# secret-box values\necho ok']) {
+    expect(runsValues(command)).toBe(false)
+    expect((await hook(bash(command))).out).toBeNull()
+    await h.before!({ tool: 'shell', id: 'data', input: { command } })
+  }
+  expect((await loadValues(helper))?.get('API_KEY')).toBe(SECRET)
 })
 
 test('codex: off leaves the command alone, dry only reports, an unreadable options file counts as on', async () => {

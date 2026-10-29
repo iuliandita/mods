@@ -79,6 +79,18 @@ test('a command without a valid placeholder is not touched and the values load o
   expect(seen.loads).toBe(1)
 })
 
+test('model values calls are denied while the internal load and scrubbing still work', async ($, on) => {
+  const seen = world(on, undefined, { stdout: SECRET })
+  for (const command of ['secret-box values', '/opt/plugin/secret-box values', 'bash -c "secret-box values"', "secret-box exec --scrub -- 'secret-box values'"]) {
+    const r = await $.tool.call({ tool: 'Bash', command })
+    expect(r.deny).toContain('reserved for the hook')
+  }
+  expect(seen.commands).toEqual([])
+  const allowed = await $.tool.call({ tool: 'Bash', command: 'secret-box names' })
+  expect(allowed.result).toEqual({ stdout: '{{secret:api.token}}' })
+  expect(seen.loads).toBe(1)
+})
+
 test('a Bash call without a placeholder has a known value in its structured result replaced', async ($, on) => {
   world(on, undefined, { stdout: `t=${SECRET}`, stderr: `e ${B64}`, interrupted: false })
   const r = await $.tool.call({ tool: 'Bash', command: 'echo $TOKEN' })

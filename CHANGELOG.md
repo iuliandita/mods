@@ -12,6 +12,8 @@
 
 ### Fixed
 
+- `secret-box` denies model shell calls to its internal `values` command on all three hosts.
+
 - `guard-rules` treats file arguments and known data commands as data while keeping command runners guarded.
 - `guard-rules` follows both plain and scrubbed `secret-box exec` wrappers when checking commands.
 
