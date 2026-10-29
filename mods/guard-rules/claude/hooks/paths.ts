@@ -29,5 +29,5 @@ export function resolvePath(base: string, p: string, home: string): string {
 }
 
 export function hasVariable(p: string): boolean {
-  return p.includes('$') || p.includes('`')
+  return p.includes('$') || p.includes('`') || /\{\{secret:[^}]*\}\}/.test(p)
 }

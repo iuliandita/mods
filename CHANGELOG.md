@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- `guard-rules` treats secret placeholders in context and workspace values as unknown targets, including switches earlier in the command.
 - `guard-rules` leaves ambiguous kubeconfig keys and unsupported line breaks unclassified instead of falling through to a relaxed context in a later file.
 - `guard-rules` treats cleared or removed infra target variables, empty values, changed HOME and privilege-wrapper environments as custom targets instead of using inherited relaxed lookups.
 - `guard-rules` keeps explicit kubeconfig paths intact and tracks context switches by the first existing file in a `KUBECONFIG` list.
