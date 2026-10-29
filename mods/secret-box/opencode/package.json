@@ -1,6 +1,6 @@
 {
   "name": "secret-box",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Resolves {{secret:NAME}} placeholders from Linux Secret Service or macOS Keychain at execution time, with optional directory scopes and host-specific output scrubbing.",
   "private": true,
   "type": "module",

@@ -16,7 +16,8 @@ See [what it does not protect](#what-it-does-not-protect) for the limits on each
   text, tool results, hook context, notes, attachments such as @-mentioned files and file-change
   diffs, other agents' messages, compaction summaries, notices) and in messages sent to other
   agents. Values shorter than 6
-  characters are never scrubbed; `secret-box set` warns about them.
+  characters are never scrubbed; `secret-box set` warns about them. Overlapping matches are
+  masked together using the first leftmost, longest match's name; adjacent matches stay separate.
 - **placeholder failures**: if the stored values cannot be loaded, a Bash call
   with a placeholder is denied before it runs, and the reason tells the model what to check.
   Scrubbing runs through the helper in batches, using current keyring values on every call.
