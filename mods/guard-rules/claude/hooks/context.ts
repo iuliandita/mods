@@ -187,12 +187,16 @@ function lastPart(path: string): string {
 // key (nested ones belong to other fields) with a plain scalar or a quoted one without escapes. '' when none is set,
 // null when the guard cannot tell (an escape, anchor, tag, block or flow value, a continuation, a duplicate key).
 export function parseCurrentContext(text: string): string | null {
+  if (/\r(?!\n)|[\u0085\u2028\u2029]/.test(text)) return null
   const lines = text.replace(/^﻿/, '').split(/\r?\n/)
   const first = lines.find((l) => l.trim() !== '' && !l.trimStart().startsWith('#'))
   if (first !== undefined && /^\s*[{[]/.test(first)) return null
   if (lines.slice(1).some((l) => /^(?:---|\.\.\.)(?:\s|$)/.test(l))) return null
   const key = /^(?:current-context|"current-context"|'current-context')[ \t]*:(?:[ \t]+(.*))?$/
   const at = lines.flatMap((l, i) => (key.test(l) ? [i] : []))
+  // Unrecognized keys, nested mentions and escaped key spellings can hide a root value. Never let a later
+  // kubeconfig's relaxed value stand in for YAML this deliberately small parser cannot interpret.
+  if (lines.some((l, i) => (l.includes('current-context') && !at.includes(i)) || /^[^:#]*\\/.test(l))) return null
   if (at.length === 0) return ''
   if (at.length > 1) return null
   const i = at[0]!

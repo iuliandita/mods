@@ -118,12 +118,36 @@ test('context: a kubeconfig current-context is read like kubectl reads it, and a
   }
 })
 
-test('context: a nested current-context is not the root one', async () => {
+test('context: a current-context mention outside the recognized root line is unknown', async () => {
   const body = 'clusters:\n- name: prod\n  cluster:\n    extensions:\n    - extension:\n        current-context: dev\ncurrent-context: prod-eu\n'
   const v = await denied('kubectl --kubeconfig /h/.kube/config apply -f x', env({ files: { [KUBE]: body } }))
   expect(v).toHaveLength(1)
-  expect(v[0]?.message).toContain('"prod-eu"')
-  expect(await denied('kubectl --kubeconfig /h/.kube/config apply -f x', env({ files: { [KUBE]: 'extensions:\n  current-context: prod-eu\ncurrent-context: dev-1\n' } }))).toEqual([])
+  expect(v[0]?.message).toContain('(custom target)')
+  expect(await denied('kubectl --kubeconfig /h/.kube/config apply -f x', env({ files: { [KUBE]: 'extensions:\n  current-context: prod-eu\ncurrent-context: dev-1\n' } }))).toHaveLength(1)
+})
+
+test('context: ambiguous first-file keys never fall through to a relaxed second kubeconfig', async () => {
+  for (const body of [
+    '? current-context\n: prod\n',
+    '  current-context: prod\n',
+    '"current\\u002dcontext": prod\n',
+    '"\\x63urrent-context": prod\n',
+    '&key current-context: prod\n',
+    '!!str current-context: prod\n',
+    '--- {current-context: prod}\n',
+    'apiVersion: v1\rcurrent-context: prod\r',
+    'apiVersion: v1\u0085current-context: prod\u0085',
+    'apiVersion: v1\u2028current-context: prod\u2028',
+    'apiVersion: v1\u2029current-context: prod\u2029',
+    '# current-context is stored elsewhere\n',
+  ]) {
+    const files = { '/w/dev/first.yaml': body, '/w/dev/dev.yaml': 'current-context: dev\n' }
+    const v = await denied('KUBECONFIG=first.yaml:dev.yaml kubectl apply -f x', env({ dir: '/w/dev', files }))
+    expect(v, body).toHaveLength(1)
+    expect(v[0]?.message, body).toContain('(custom target)')
+  }
+  const files = { '/w/dev/first.yaml': 'clusters: []\n', '/w/dev/dev.yaml': 'current-context: dev\n' }
+  expect(await denied('KUBECONFIG=first.yaml:dev.yaml kubectl apply -f x', env({ dir: '/w/dev', files }))).toEqual([])
 })
 
 test('context: a terraform workspace the guard cannot tell is not classified, whatever the directory is called', async () => {
