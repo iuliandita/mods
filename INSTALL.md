@@ -123,7 +123,22 @@ codex plugin marketplace add iuliandita/mods
 codex plugin add guard-rules@iuliandita-mods   # or secret-box or notify, same suffix
 ```
 
-Codex skips a plugin hook until you trust it once with `/hooks` in the Codex terminal UI.
+Codex skips new or changed plugin hooks, including under `codex exec`. After every install or
+update, open `/hooks` in the Codex terminal UI and review and trust each changed hook again.
+Until then, `guard-rules` and `secret-box` fail open: commands run without their checks.
+Run `scripts/mods doctor --json` to inspect each installed collection hook's `status`
+(`trusted`, `modified`, `untrusted`) and `enabled` flag under `codex_hooks`. Doctor exits 1
+for an untrusted or disabled guard, or if the Codex inventory cannot be checked. A missing
+Claude CLI alone still exits 3. Other untrusted hooks are reported
+without failing doctor. The clone installer still installs Claude plugins only; for mods with
+a Codex adapter it also prints this re-trust reminder (`manual` in JSON).
+
+Doctor reads the user config and collection plugin cache under `CODEX_HOME` (default
+`~/.codex`). Codex stores approvals in `[hooks.state]` in `config.toml`, with `trusted_hash`
+and `trusted_content_hash`; legacy plugin baselines live under `.hook-trust/`. Doctor copies
+these inputs to a temporary directory and queries the installed Codex `hooks/list` API there.
+It starts no agent turn or hook and writes no live Codex configuration. Discovery errors,
+an unavailable API, or a ten-second inventory timeout fail the check; inspect `/hooks`.
 Remove with `codex plugin remove guard-rules@iuliandita-mods`.
 
 OpenCode 2.x has no marketplace: clone this repository and add the package to `opencode.json`

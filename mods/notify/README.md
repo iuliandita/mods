@@ -71,7 +71,8 @@ Install steps are in [INSTALL.md](../../INSTALL.md); what each host can do is in
   `bin/notify.mjs hook` in the background, so notification delivery does not delay approval prompts.
   See [Codex background hooks](https://developers.openai.com/codex/hooks#run-hooks-in-the-background).
   Delivery has a 250 ms process timeout on both Codex entry paths and still exits 0 on failure.
-  Trust the hooks once with `/hooks`, or Codex skips them.
+  After every install or update, review and trust changed hooks again with `/hooks`, or Codex
+  skips them. `scripts/mods doctor` reports their trust state.
   Codex's own `notify` setting covers completion only. To use it instead of the plugin hooks, add
   `notify = ["node", "<clone>/mods/notify/codex/bin/notify.mjs", "notify"]` to `~/.codex/config.toml`;
   Codex appends its JSON payload as the last argument. Do not use both, or a finish notifies twice.

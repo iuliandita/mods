@@ -22,6 +22,8 @@ registers that clone as the marketplace instead (or `--source <owner/repo>`).
 
 For Codex and OpenCode, see the mod's README and [INSTALL.md](INSTALL.md). OpenCode hook
 plugins use `opencode.json`; its terminal UI plugins use the global `cli.json` instead.
+After every Codex plugin install or update, trust changed hooks again with `/hooks`.
+Codex skips them until trusted, so guards fail open; `scripts/mods doctor` checks their trust.
 
 ## Usage
 

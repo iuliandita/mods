@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- `scripts/mods doctor` reports installed Codex hook trust and disabled state and fails for untrusted guard hooks. Install reminders and recovery docs explain re-trusting after every update; Codex hook labels identify the mod and event in `/hooks`.
 - All five current plugins use version 0.3.1 in every host manifest so marketplace updates pick up their changes since v0.2.0. Lint now rejects shipped plugin changes without an increased version since the latest collection tag.
 
 ## [0.3.0] - 2026-10-29

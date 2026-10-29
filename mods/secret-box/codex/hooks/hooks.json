@@ -6,6 +6,7 @@
         "hooks": [
           {
             "type": "command",
+            "statusMessage": "secret-box PreToolUse",
             "command": "node \"$PLUGIN_ROOT/bin/secret-box.mjs\" hook",
             "timeout": 30
           }

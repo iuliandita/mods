@@ -23,6 +23,11 @@ DEFAULT_TEST = (
     "test('loads', () => {\n  expect(1).toBe(1)\n})\n"
 )
 
+
+@pytest.fixture(autouse=True)
+def isolated_codex_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+
 FAKE_CLAUDE = r"""#!/bin/sh
 echo "$@" >> "$FAKE_CLAUDE_DIR/calls.log"
 if [ -n "$FAKE_CLAUDE_FAIL" ]; then echo "boom" >&2; exit 1; fi
