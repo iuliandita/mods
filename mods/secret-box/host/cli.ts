@@ -1,4 +1,5 @@
 import { loadOptions } from '../../../host-lib/options'
+import { runsValues, VALUES_DENIED } from '../claude/hooks/commands'
 import { helperExists, helperMissing, parseMode, placeholderNames, rewrite } from './core'
 
 export type Io = { stdin: () => Promise<string>; out: (s: string) => void; err: (s: string) => void; helper: string; options?: string }
@@ -26,6 +27,7 @@ export async function hook(io: Io): Promise<number> {
     const loaded = loadOptions('secret-box', io.options)
     const mode = loaded.error ? 'on' : parseMode(loaded.options.mode)
     const names = placeholderNames(command)
+    if (mode === 'on' && runsValues(command)) return deny(io, VALUES_DENIED)
     if (mode === 'off' || names.length === 0) return 0
     if (mode === 'dry') {
       io.out(JSON.stringify({ systemMessage: `secret-box (dry run): would resolve ${names.join(', ')} at execution time` }))
@@ -44,7 +46,7 @@ export async function hook(io: Io): Promise<number> {
     )
     return 0
   } catch {
-    if (placeholderNames(command).length === 0) return 0
+    if (!runsValues(command) && placeholderNames(command).length === 0) return 0
     return deny(io, 'secret-box: the hook failed, so the command was blocked before it ran (fail closed). Set mode to off or dry in ~/.config/iuliandita-mods/secret-box.json, or disable the plugin.')
   }
 }

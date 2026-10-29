@@ -129,10 +129,11 @@ This is not a security boundary.
   `$(...)` can confuse it.
 - Bash permission rules (allow and deny patterns) see the wrapper command
   `<wrapper> exec -- '...'`, not the original. Do not allow `<wrapper> exec:*` broadly.
-- `secret-box values` prints every secret, and the model can run it through Bash. The scrubber
-  catches that output only in the raw and escaped forms above; a transformed copy (reversed,
-  base64 of a split value, split across lines) is not caught. The keyring protects values at rest
-  and from accidental display, not from a model that is told to exfiltrate them.
+- In mode `on`, all three hosts deny model shell calls to `secret-box values`, including literal
+  paths, shell `-c` strings and `secret-box exec [--scrub] --` wrappers. The hook's internal load
+  still works. This check does not inspect scripts, dynamically built commands or other keyring
+  clients. The helper has no authentication boundary; a model that can run arbitrary code can
+  still read the keyring. An environment marker would be forgeable by that same code.
 - Rows are rewritten when they are stored. The screen may show a row just before its rewrite.
 - The model's own tool calls and thinking blocks cannot be rewritten by a hook. If the model writes a
   literal value into a command, that stored `tool_use` keeps it; the value is scrubbed from the rows

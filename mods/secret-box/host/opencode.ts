@@ -2,6 +2,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { loadOptions } from '../../../host-lib/options'
+import { runsValues, VALUES_DENIED } from '../claude/hooks/commands'
 import { createBox, helperExists, helperMissing, parseMode, placeholderNames, rewrite, scrubValue, type Mode } from './core'
 
 // The parts of the OpenCode v2 plugin context this adapter uses, so the bundle needs no host package.
@@ -37,6 +38,7 @@ export async function setup(ctx: Context, deps: Deps): Promise<void> {
     if (!SHELL_TOOLS.has(e.tool.toLowerCase()) || mode() === 'off') return
     const input = e.input as { command?: unknown } | null
     if (typeof input?.command !== 'string') return
+    if (mode() === 'on' && runsValues(input.command)) throw new Error(VALUES_DENIED)
     const names = placeholderNames(input.command)
     if (names.length === 0) return
     if (mode() === 'dry') {
