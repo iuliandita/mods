@@ -163,19 +163,21 @@ function stream() {
 
 const settle = () => new Promise((r) => setTimeout(r, 20))
 
-test('opencode: idle, permission and form events notify; subagent sessions and other events do not', async () => {
+test('opencode: success, permission and form events notify; legacy idle does not duplicate success', async () => {
   withOptions({})
   const { ctx, push, isAborted } = stream()
   const runs: string[][] = []
   const cleanup = await setup(ctx, { options, platform: 'linux', run: async (argv) => (runs.push(argv), { exitCode: 0 }) })
   push({ type: 'session.created', data: { sessionID: 'main' } })
   push({ type: 'session.created', data: { sessionID: 'child', parentID: 'main' } })
+  push({ type: 'session.execution.succeeded', data: { sessionID: 'child' } })
   push({ type: 'session.idle', data: { sessionID: 'child' } })
   push({ type: 'permission.asked', data: { sessionID: 'child' } })
   push({ type: 'session.execution.succeeded', data: { sessionID: 'main' } })
   push({ type: 'session.idle', data: { sessionID: 'main' } })
   push({ type: 'permission.asked', data: { sessionID: 'main' } })
   push({ type: 'form.created', data: { form: { sessionID: 'main' } } })
+  push({ type: 'session.execution.failed', data: { sessionID: 'main' } })
   await settle()
   expect(runs.map((a) => a.at(-1))).toEqual(['Finished', 'Needs your permission', 'Needs your input'])
   expect(runs.every((a) => a.at(-2) === 'my-repo')).toBe(true)
@@ -194,10 +196,36 @@ test('opencode: options are read per event and a failing notifier warns once', a
   await settle()
   expect(runs).toEqual([])
   withOptions({})
+  push({ type: 'session.status', data: { sessionID: 'main', status: { type: 'busy' } } })
   push({ type: 'session.idle', data: { sessionID: 'main' } })
+  push({ type: 'session.status', data: { sessionID: 'main', status: { type: 'busy' } } })
   push({ type: 'session.idle', data: { sessionID: 'main' } })
   await settle()
   expect(runs).toHaveLength(2)
   expect(warnings).toEqual(['notify: warning: notify-send not found: no notification was shown; install it or set mode to off'])
+  cleanup()
+})
+
+test.each([
+  ['session.execution.succeeded'],
+  ['session.idle'],
+  ['session.execution.succeeded', 'session.idle'],
+  ['session.idle', 'session.execution.succeeded'],
+])('opencode: completion names %j notify once per execution and separately per session', async (...events: string[]) => {
+  withOptions({})
+  const { ctx, push } = stream()
+  const runs: string[][] = []
+  const cleanup = await setup(ctx, { options, platform: 'linux', run: async (argv) => (runs.push(argv), { exitCode: 0 }) })
+  for (let turn = 0; turn < 2; turn++) {
+    for (const sessionID of ['one', 'two']) push({ type: 'session.execution.started', data: { sessionID } })
+    for (const type of events) {
+      for (const sessionID of ['one', 'two']) {
+        push({ type, data: { sessionID } })
+        push({ type, data: { sessionID } })
+      }
+    }
+  }
+  await settle()
+  expect(runs.map((argv) => argv.at(-1))).toEqual(['Finished', 'Finished', 'Finished', 'Finished'])
   cleanup()
 })

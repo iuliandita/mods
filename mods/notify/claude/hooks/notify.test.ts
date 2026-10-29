@@ -39,11 +39,12 @@ test('Codex events: Stop and the notify setting finish, PermissionRequest is inp
   }
 })
 
-test('OpenCode events: idle is finish, a permission or a form is input', () => {
+test('OpenCode events: execution success or legacy idle is finish, a permission or a form is input', () => {
+  expect(opencodeNotice('session.execution.succeeded', '/w/repo')?.kind).toBe('finish')
   expect(opencodeNotice('session.idle', '/w/repo')?.kind).toBe('finish')
   expect(opencodeNotice('permission.asked', '/w/repo')?.body).toBe('Needs your permission')
   expect(opencodeNotice('form.created', '/w/repo')?.body).toBe('Needs your input')
-  for (const type of ['session.created', 'permission.replied', 'session.execution.succeeded']) expect(opencodeNotice(type, '/w/repo')).toBeNull()
+  for (const type of ['session.created', 'permission.replied', 'form.replied', 'session.execution.started', 'session.execution.failed']) expect(opencodeNotice(type, '/w/repo')).toBeNull()
 })
 
 test('events and mode decide whether a notice is shown', () => {

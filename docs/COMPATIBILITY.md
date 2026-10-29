@@ -194,7 +194,7 @@ Why the differences:
 
 | | Claude Code | Codex | OpenCode |
 | --- | --- | --- | --- |
-| Agent finished | `classic.Stop` hook | Background `Stop` hook, or the `notify` setting (`agent-turn-complete`, completion only) | `session.idle` on the plugin's event stream |
+| Agent finished | `classic.Stop` hook | Background `Stop` hook, or the `notify` setting (`agent-turn-complete`, completion only) | `session.execution.succeeded` on 2.2.1; `session.idle` on older versions, deduplicated per execution |
 | Permission needed | `classic.Notification`, type `permission_prompt` | Background `PermissionRequest` hook | `permission.asked` |
 | Waiting for input | `classic.Notification`, types `idle_prompt` and `elicitation_dialog` | **not available** | `form.created` |
 | Subagents | not notified | events with `agent_id` are skipped; `SubagentStop` is not hooked | not notified when seen created with a parent; sessions that existed before the plugin loaded are not told apart |
@@ -205,8 +205,11 @@ Why the differences:
 Nothing here was run on a real host. The Claude events are checked against the installed API types
 and tests with a mocked engine; the Codex events against the hook schemas shipped in Codex CLI 0.165.0
 (`stop.command.input`, `permission-request.command.input`) and the `agent-turn-complete` payload of
-the `notify` setting; the OpenCode events against the `@opencode/plugin` and `@opencode/client` 2.0.29
-types. Codex hooks use `async: true` so delivery does not delay approval prompts, and the command
+the `notify` setting; the OpenCode events against the published `@opencode/schema` 2.2.1 types
+(a dependency of `@opencode/ai` 2.2.1). `permission.asked` still carries `data.sessionID`, and
+`form.created` carries `data.form.sessionID`. Success and legacy idle events share one finish
+notice per execution, reset by `session.execution.started` or the older busy-status event.
+Codex hooks use `async: true` so delivery does not delay approval prompts, and the command
 ends in `exit 0`. Both Codex entry paths give the notifier a 250 ms process timeout; a slow notifier
 may show nothing, and Codex cancels unfinished background hooks when the session ends. The legacy
 `notify` setting waits up to that timeout. Notifications show the
