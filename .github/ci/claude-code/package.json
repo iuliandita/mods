@@ -1,0 +1,9 @@
+{
+  "name": "mods-ci-claude-code",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Pinned Claude Code CLI for the CI integration job",
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.296"
+  }
+}
