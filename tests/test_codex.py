@@ -43,7 +43,7 @@ def test_doctor_reports_guard_trust_from_an_isolated_snapshot(tmp_path: Path, mo
     assert len(payload["codex_hooks"]) == 2
     assert payload["codex_hooks"][0]["status"] == status
     assert f"codex guard-rules preToolUse: {status}" in _text_for(payload)
-    assert all("/hooks" in error for error in payload["errors"])
+    assert all("/hooks" in error and "error:" not in error for error in payload["errors"])
     assert (bundle / "test.txt").read_text() == "original"
 
 
@@ -77,3 +77,24 @@ def test_install_reminds_codex_users_to_trust_again(fake_claude: Path, tmp_path:
     generate(tmp_path, bundles=False)
     code, payload = install_mods(tmp_path, ["alpha"], scope="user", include_local=False, source=None)
     assert code == 0 and payload["manual"] == [codex.RETRUST]
+
+
+def test_doctor_ignores_leftover_trust_state_of_uninstalled_plugins(tmp_path: Path, monkeypatch) -> None:
+    home = Path(os.environ["CODEX_HOME"])
+    (home / "plugins/cache/iuliandita-mods/guard-rules/0.1.0").mkdir(parents=True)
+    (home / "config.toml").write_text(
+        '[hooks.state."prompt-gate@iuliandita-mods:hooks/hooks.json:user_prompt_submit:0:0"]\n'
+        'trusted_hash = "sha256:stale"\n'
+    )
+    seen: list[list[str]] = []
+
+    def inventory(cwd: Path, snapshot: Path) -> dict:
+        seen.append(sorted(p.name for p in (snapshot / "plugins/cache/iuliandita-mods").iterdir()))
+        return {"data": [{"hooks": [
+            {"pluginId": "guard-rules@iuliandita-mods", "eventName": "preToolUse", "trustStatus": "trusted", "enabled": True},
+        ], "warnings": [], "errors": []}]}
+
+    monkeypatch.setattr(codex, "_list_hooks", inventory)
+    rows, errors = codex.hook_trust(tmp_path)
+    assert seen == [["guard-rules"]]
+    assert [row["mod"] for row in rows] == ["guard-rules"] and errors == []
