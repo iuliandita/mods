@@ -81,7 +81,15 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _emit(args: argparse.Namespace, payload: dict, text: str) -> None:
-    print(json.dumps(payload) if args.json else text)
+    if args.json:
+        print(json.dumps(payload))
+        return
+    if text:
+        print(text)
+    for note in payload.get("notes", []):
+        print(f"note: {note}", file=sys.stderr)
+    for err in payload.get("errors", []):
+        print(f"error: {err}", file=sys.stderr)
 
 
 def _text_for(payload: dict) -> str:
@@ -91,11 +99,9 @@ def _text_for(payload: dict) -> str:
         for m in payload["mods"]:
             missing = [r["bin"] for r in m["requires"] if not r["found"]]
             lines.append(f"{m['name']}: " + (f"missing {', '.join(missing)}" if missing else "ok"))
-        lines += [f"note: {n}" for n in payload["notes"]]
-        lines += [f"error: {e}" for e in payload["errors"]]
         return "\n".join(lines)
     if payload.get("errors"):
-        return "\n".join(f"error: {e}" for e in payload["errors"])
+        return ""
     if "installed" in payload or "uninstalled" in payload:
         return "\n".join(payload.get("installed") or payload.get("uninstalled") or []) or "nothing to do"
     if "mods" in payload:
@@ -119,7 +125,7 @@ def _fail(args: argparse.Namespace, msg: str) -> int:
 def _bad_root(root: Path) -> str | None:
     if root.is_dir() and ((root / "mods").is_dir() or (root / "local" / "mods").is_dir()):
         return None
-    return f"{root} is not a mods repo (needs a mods/ or local/mods/ directory)"
+    return f"{root}: not a mods repo: it has no mods/ or local/mods/ directory; pass --root DIR"
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -127,9 +133,10 @@ def _run(args: argparse.Namespace) -> int:
     if args.cmd == "generate":
         changed = [str(p.relative_to(root)) for p in generate(root, check=args.check, include_local=args.local)]
         if args.check:
-            _emit(args, {"ok": not changed, "errors": [f"generated file is stale: {c}" for c in changed],
+            _emit(args, {"ok": not changed,
+                         "errors": [f"generated file is stale: {c}; run scripts/mods generate" for c in changed],
                          "stale": changed},
-                  "up to date" if not changed else "stale: " + ", ".join(changed))
+                  "up to date" if not changed else "")
             return 1 if changed else 0
         _emit(args, {"ok": True, "errors": [], "written": changed},
               "wrote: " + (", ".join(changed) or "nothing"))
@@ -137,7 +144,7 @@ def _run(args: argparse.Namespace) -> int:
     if args.cmd == "validate":
         problems = validate(root, run_claude=not args.no_claude)
         _emit(args, {"ok": not problems, "errors": problems, "problems": problems},
-              "ok" if not problems else "\n".join(problems))
+              "ok" if not problems else "")
         return 1 if problems else 0
     if args.cmd == "list":
         code, payload = list_mods(root, scope=args.scope)

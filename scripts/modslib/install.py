@@ -44,16 +44,16 @@ def install_mods(
     source: str | None,
 ) -> tuple[int, dict]:
     if include_local and source is not None:
-        return _fail("--local cannot be combined with --source: local mods always install from this clone")
+        return _fail("--local cannot be combined with --source: local mods always install from this clone; drop one of them")
     done: list[str] = []
     try:
         mods = {m.name: m for m in load_all(root, include_local=include_local)}
         unknown = [n for n in names if n not in mods]
         if unknown:
             known = ", ".join(sorted(mods)) or "none"
-            return _fail(f"unknown mod(s): {', '.join(unknown)} (known: {known})")
+            return _fail(f"unknown mod(s): {', '.join(unknown)}; known: {known} (see scripts/mods list)")
         if source is None and generate(root, check=True, bundles=False):
-            return _fail("generated files are stale; run scripts/mods generate")
+            return _fail("generated files are stale: they differ from the sources; run scripts/mods generate")
         if include_local:
             generate(root, include_local=True, bundles=False)
         for name in names:
@@ -80,7 +80,7 @@ def uninstall_mods(root: Path, names: list[str], *, scope: str) -> tuple[int, di
                 mods.setdefault(m.name, m)
             unknown = [n for n in names if n not in mods]
         if unknown:
-            return _fail(f"unknown mod(s): {', '.join(unknown)}", key="uninstalled")
+            return _fail(f"unknown mod(s): {', '.join(unknown)}; see scripts/mods list", key="uninstalled")
         for name in names:
             plugin_id = f"{name}@{_marketplace(mods[name])}"
             result = claude.uninstall(plugin_id, scope)
@@ -113,7 +113,7 @@ def list_mods(root: Path, *, scope: str | None = None) -> tuple[int, dict]:
                 if scope is None or e.get("scope", scope) == scope
             }
         except claude.ClaudeError as exc:
-            errors.append(f"could not read the installed plugins: {exc}")
+            errors.append(f"could not read the installed plugins: {exc}; run claude plugin list")
     rows = [
         {
             "name": m.name,
@@ -131,7 +131,7 @@ def list_mods(root: Path, *, scope: str | None = None) -> tuple[int, dict]:
 
 def doctor(root: Path) -> tuple[int, dict]:
     found = _claude_status()
-    errors = [] if found["found"] else ["the claude CLI was not found or did not run"]
+    errors = [] if found["found"] else ["claude CLI not found: it is missing or did not run; install Claude Code and retry"]
     try:
         mods = load_all(root, include_local=True)
     except CatalogError as exc:

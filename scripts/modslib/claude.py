@@ -15,7 +15,7 @@ class ClaudeError(Exception):
 def binary() -> str:
     path = shutil.which("claude")
     if path is None:
-        raise ClaudeError("the claude CLI is not on PATH")
+        raise ClaudeError("claude CLI not found: it is not on PATH; install Claude Code and retry")
     return path
 
 
