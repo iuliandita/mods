@@ -250,7 +250,7 @@ var RUN_WORD = new RegExp(`(?<![\\w.-])(${[...TOOLS, ...SHELL_NAMES].join("|")})
 function toolWords(text, opts = {}) {
   const re = opts.shells ? RUN_WORD : TOOL_WORD;
   const flags = opts.anyCase ? "gi" : "g";
-  const found = [...text.matchAll(new RegExp(re.source, flags))].filter((m) => !(text[m.index - 1] === "/" && /^\.\w/.test(text.slice(m.index + m[0].length))));
+  const found = [...text.matchAll(new RegExp(re.source, flags))].filter((m) => opts.commands ? !/^[/.]/.test(text.slice(m.index + m[0].length)) : !(text[m.index - 1] === "/" && /^\.\w/.test(text.slice(m.index + m[0].length))));
   return [...new Set(found.map((m) => m[1].toLowerCase()))];
 }
 var esc = (s) => s.replace(/[.+^${}()|[\]\\*?]/g, "\\$&");
@@ -655,7 +655,7 @@ function arithEnd(src, i) {
   return -1;
 }
 function arithOpaque(inner) {
-  return /\$\(|`|\[/.test(inner);
+  return /\$\(|`|\[|\bPATH\b/.test(inner);
 }
 var ANSI_ESCAPES = {
   a: "\x07",
@@ -906,7 +906,7 @@ function tokenize(src, depth = 0) {
           break;
         if (body[j + 2] === "(" && arithEnd(body, j + 1) === e) {
           if (arithOpaque(body.slice(j + 3, e - 2)))
-            opaque.push("arithmetic with a substitution or subscript");
+            opaque.push("arithmetic with a substitution, subscript or PATH reference");
         } else {
           sub(body.slice(j + 2, e - 1));
         }
@@ -982,7 +982,7 @@ function tokenize(src, depth = 0) {
         cur += src.slice(i, end);
         if (src[i + 2] === "(" && arithEnd(src, i + 1) === end) {
           if (arithOpaque(src.slice(i + 3, end - 2)))
-            opaque.push("arithmetic with a substitution or subscript");
+            opaque.push("arithmetic with a substitution, subscript or PATH reference");
         } else {
           sub(src.slice(i + 2, end - 1));
         }
@@ -1086,7 +1086,7 @@ function tokenize(src, depth = 0) {
     } else if (c === "(" && src[i + 1] === "(" && !inWord && !words.length && arithEnd(src, i) !== -1) {
       const end = arithEnd(src, i);
       if (arithOpaque(src.slice(i + 2, end - 2)))
-        opaque.push("arithmetic with a substitution or subscript");
+        opaque.push("arithmetic with a substitution, subscript or PATH reference");
       endCmd();
       i = end;
     } else if (c === ">" || c === "<" || c === "&" && src[i + 1] === ">") {
@@ -1674,15 +1674,7 @@ function shellScript(argv) {
 var OPAQUE_TOOLS = new Set(["git", "gh", "glab", "tea", "fj", "kubectl", "helm", "terraform", "tofu", ...SHELLS]);
 var TEXT_HEADS = new Set(["echo", "printf", "man", "which", "type", "grep", "rg", "cat"]);
 var DATA_HEADS = new Set(["ls", "mkdir", "rmdir", "touch", "cp", "mv", "rm", "head", "tail", "wc", "tee", "curl", "basename", "dirname", "realpath", "readlink", "file", "stat", "du", "df", "cut", "uniq", "diff", "cmp"]);
-var FILE_CODE_HEADS = new Set(["sed", "vi", "vim", "nvim", "nano", "less", "more"]);
-var EDITOR_FLAGS = {
-  vi: new Set(["-R", "-n"]),
-  vim: new Set(["-R", "-o", "-O", "-p", "-d", "-M", "-m", "-n", "-b"]),
-  nvim: new Set(["-R", "-o", "-O", "-p", "-d", "-M", "-m", "-n", "-b"]),
-  nano: new Set(["-v", "--view"]),
-  less: new Set(["-R", "-M", "-m", "-N", "-S", "-X", "-F"]),
-  more: new Set(["-d", "-f", "-l", "-s", "-u"])
-};
+var INPUT_EXECUTORS = new Set(["xargs", ...SHELLS, "awk", "gawk", "mawk", "perl", "ruby", "node", "env", "parallel", "watch", "script"]);
 var SED_FLAGS = new Set(["-n", "--quiet", "--silent", "-E", "-r", "--regexp-extended"]);
 var STRUCTURES = {
   case: "a case statement",
@@ -1781,7 +1773,7 @@ function applyBuiltin(w, s) {
     applyPopd(w.st, argv, s.dyn, effect);
   else if (name === "set")
     applySet(w.st, argv, effect);
-  else if ((name === "source" || name === ".") && (argv.length === 1 || s.dyn[1] || argv[1] === "/dev/stdin" || argv[1] === "-"))
+  else if (name === "source" || name === ".")
     mark(w, "a sourced script the guard cannot read");
   else
     return false;
@@ -1931,6 +1923,16 @@ function pipedWords(w, s) {
   const words = [];
   let cmd = s.cmd;
   let idx = s.idx;
+  if (cmd.op === "$(") {
+    while (idx > 0 && w.queue[idx - 1].op === "$(")
+      idx--;
+    while (idx < w.queue.length - 1 && w.queue[idx].op === "$(") {
+      const nested = w.queue[idx++];
+      words.push(...nested.argv, ...Object.values(nested.assigns), ...nested.input ?? []);
+    }
+    cmd = w.queue[idx];
+    words.push(...cmd.input ?? []);
+  }
   while (SINGLE_PIPE.test(cmd.op)) {
     do {
       idx--;
@@ -1938,30 +1940,40 @@ function pipedWords(w, s) {
     if (idx < 0)
       break;
     cmd = w.queue[idx];
-    words.push(...cmd.argv, ...Object.values(cmd.assigns), ...cmd.input ?? []);
+    if (cmd.argv[0] === "}" || cmd.argv[0] === "fi" || w.queue[idx + 1].op.includes(")")) {
+      return w.queue.flatMap((c) => [...c.argv, ...Object.values(c.assigns), ...c.input ?? []]);
+    }
+    const u = unwrap(cmd);
+    const name = basename(u.argv[0] ?? "");
+    const modeled = name === "git" || name === "gh" || name === "glab" || name === "tea" || name === "fj" || INFRA_TOOLS.has(name);
+    words.push(...u.argv.slice(modeled ? 1 : 0), ...Object.values(u.assigns), ...cmd.input ?? []);
   }
   return words;
 }
 function markOpaque(w, s) {
+  if (s.u.clear || s.u.unset.has("PATH"))
+    mark(w, "a cleared PATH for an unmodeled command");
   const bare = s.argv[0] === s.name;
   const executableOption = s.name === "rg" ? s.argv.some((a) => a === "--pre" || a.startsWith("--pre=")) : s.name === "man" && s.argv.slice(1).some((a) => /^-[^-]*[PH]|^--(?:pager|html)(?:=|$)/.test(a));
   if (bare && (FLOW_HEADS.has(s.name) || TEXT_HEADS.has(s.name) && !executableOption))
     return;
-  if (bare && (DATA_HEADS.has(s.name) || s.name === "brew" && s.argv[1] === "install"))
-    return;
   const sedFiles = s.name === "sed" ? sedFileSlots(s) : new Set;
-  const editor = Object.hasOwn(EDITOR_FLAGS, s.name) && s.argv.slice(1).every((a, i) => !s.dyn[i + 1] && (!/^[+-]/.test(a) || EDITOR_FLAGS[s.name].has(a)));
+  const data = bare && (DATA_HEADS.has(s.name) || s.name === "brew" && s.argv[1] === "install");
+  const executor = INPUT_EXECUTORS.has(s.name) || /^python[\d.]*$/.test(s.name) || s.name === "sed" && sedFiles === null;
   const words = s.argv.slice(1).map((a, i) => {
+    if (data)
+      return "";
+    if (executor)
+      return a;
     if (s.dyn[i + 1])
       return a.replace(SUBST_TEXT, " ");
     if (s.name === "man")
       return a.replace(/^-[^-]*?[PH]/, " ");
-    const file = s.name === "sed" ? sedFiles?.has(i + 1) : editor && !/^[+-]/.test(a);
-    return bare && FILE_CODE_HEADS.has(s.name) && file && isDataWord(a) ? "" : a;
+    return bare && s.name === "sed" && sedFiles?.has(i + 1) && isDataWord(a) ? "" : a;
   });
   if (!PLAIN_WORD.test(s.argv[0]))
     words.push(s.argv[0]);
-  const input = s.name === "sed" && sedFiles !== null ? [] : [...s.cmd.input ?? [], ...pipedWords(w, s)];
+  const input = s.name === "sed" && sedFiles !== null ? [] : [...s.cmd.input ?? [], ...executor ? pipedWords(w, s) : []];
   const tools = toolWords([...words, ...input].join(" "), { shells: true });
   if (tools.length)
     w.local.push({ why: `${s.name} with ${tools.join(", ")} among its words`, tools });
@@ -2003,6 +2015,8 @@ function extractCalls(src, startDir, home) {
     for (const k of assigned)
       if (SHELL_ENV.has(k))
         mark(w, `an assignment to ${k}`);
+    if (s.cmd.argv.some((a) => /^PATH(?:\+|\[[^\]]*\])?=/.test(a)) || ["printf", "read", "mapfile", "readarray", "unset", "let"].includes(s.name) && s.argv.slice(1).some((a) => /^(?:-v)?PATH\b/.test(a)))
+      mark(w, "a possible write to PATH");
     const settings = Object.entries(s.u.assigns);
     if (s.name === "export" || DECLARES.has(s.name))
       for (const a of s.argv.slice(1)) {
@@ -2013,7 +2027,7 @@ function extractCalls(src, startDir, home) {
     for (const [key, value] of settings) {
       if (!EXEC_ENV.test(key))
         continue;
-      const tools = toolWords(value, { shells: true });
+      const tools = toolWords(value, { shells: key !== "SHELL" || !isDataWord(value), commands: true });
       if (tools.length)
         w.local.push({ why: `an assignment to ${key} with ${tools.join(", ")} among its words`, tools });
     }

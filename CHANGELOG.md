@@ -22,6 +22,8 @@
 
 ### Fixed
 
+- `guard-rules` removes editor/pager file exemptions, checks data-command inline input and PATH writes, and limits producer checks to named input executors; use a file-reading tool for tool-named editor paths.
+
 - `delegation-board` on OpenCode honors `mode` `off` from the user-level options file; the panel shows a notice and reads no sessions.
 
 - `statusline` clears the branch's PR badge when the repository or branch changes, so a failed lookup no longer shows the previous branch's PR.

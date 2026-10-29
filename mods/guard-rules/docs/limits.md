@@ -22,8 +22,9 @@ such as `make release` runs). It models a small, explicit grammar and treats eve
   `time`, `timeout`, `stdbuf`, `chronic`, `setsid`, `rtk`, with their value-taking options.
 - Inline scripts with a literal script: `bash -c`/`sh -c` (and zsh, dash, ksh), `eval`, `secret-box exec [--scrub] --`.
 - `$(...)`, backticks and process substitutions `<(...)`/`>(...)` are parsed as their own calls (nesting up to 4),
-  and so are the substitutions in the body of an unquoted heredoc. A quoted heredoc is data.
-- Arithmetic `$((...))` and `((...))` without a substitution, backtick or `[` inside.
+  and so are the substitutions in the body of an unquoted heredoc. A quoted heredoc runs no substitutions;
+  its literal body is still checked where input is inspected.
+- Arithmetic `$((...))` and `((...))` without a substitution, backtick, `[` or PATH reference inside.
 
 A dynamic value in an argument only makes that value unknown: `git log -n "$N"`, `git diff $(git merge-base ...)`,
 `git add src/{a,b}.ts` and `cd "$(git rev-parse --show-toplevel)" && git status` pass, while a write that depends on
@@ -43,9 +44,11 @@ These constructs make the whole command unparsed when its text names `git`, `gh`
   `source`/`.` of `<(...)`, `/dev/stdin` or a dynamic path; an `env -S` string the guard cannot split;
 - `case`, `select`, `coproc`, `trap`, `alias`, function definitions (`f()`, `function f`), and `declare` with
   other flags;
-- assignments to `IFS`, `BASH_ENV`, `ENV`, `GIT_CONFIG_PARAMETERS` or `PATH`, and `hash` or `enable` calls;
-  these and alias or function definitions override data and file exemptions for the whole command;
-- arithmetic with a substitution or subscript inside;
+- assignments to `IFS`, `BASH_ENV`, `ENV`, `GIT_CONFIG_PARAMETERS` or `PATH`; PATH writes via `export`,
+  declarations, append/array assignments, `printf -v`, `read`, `mapfile`/`readarray`, `let` or `unset`;
+  `source`/`.`, `hash` or `enable` calls. These and alias or function definitions override exemptions for the
+  whole command. Clearing PATH with `env -i` or `env -u PATH` also disables unmodeled command exemptions;
+- arithmetic with a substitution, subscript or PATH reference inside;
 - an unterminated quote, nesting deeper than 4, more than 16 combinations of directory and variables for one call,
   or a command too long to follow.
 
@@ -54,29 +57,36 @@ These are unparsed on their own, without another tool word:
 - a command the guard does not model whose own words, or heredoc or here-string body, name one of those tools or
   a shell (`xargs git ...`, `flock /l git push`, `find -exec`, `su -c '...'`, `python3 -c "os.system('git push')"`,
   `perl`, `node -e`, `python3 <<'EOF'`). `echo`, `printf`, `man` (without `-P`, `--pager`, `-H` or `--html`), `which`, `type`, `grep`, `rg` (without `--pre`)
-  and `cat` are text heads and exempt. Known data commands (`ls`, `mkdir`, `head`, `tail`, `tee`,
-  `curl` and similar file utilities) and `brew install` also treat their arguments as data. These exemptions
-  require bare command names, so `./cat` and `/tmp/bin/curl` stay checked. Editors ignore literal file arguments
-  containing `/` or an extension only when every word is literal and every option is on that editor's safe list:
-  `vi`: `-R -n`; `vim`/`nvim`: `-R -o -O -p -d -M -m -n -b`; `nano`: `-v --view`;
-  `less`: `-R -M -m -N -S -X -F`; `more`: `-d -f -l -s -u`. Any other option or `+cmd` keeps all words checked.
+  and `cat` are text heads and exempt. Data commands `ls`, `mkdir`, `rmdir`, `touch`, `cp`, `mv`, `rm`, `head`,
+  `tail`, `wc`, `tee`, `curl`, `basename`, `dirname`, `realpath`, `readlink`, `file`, `stat`, `du`, `df`, `cut`,
+  `uniq`, `diff`, `cmp`, and `brew install` treat their arguments as data, but still check heredoc and here-string
+  input. These exemptions require bare command names, so `./cat` and `/tmp/bin/curl` stay checked.
+  Editors and pagers `vi`, `vim`, `nvim`, `nano`, `less` and `more` have no file-word exemption or flag allowlist.
   `sed` exempts literal file arguments only
   with known options: `-n`, `--quiet`, `--silent`, `-E`, `-r`, `--regexp-extended`, separate `-e SCRIPT` or
   `--expression SCRIPT`, and `--`. Script words always stay checked. An unsupported option, dynamic word or
   any `e` in any script keeps every word checked, including harmless text containing `e`; this avoids guessing
-  whether a script can execute commands. Path-qualified editors and `sed` have no file exemptions.
+  whether a script can execute commands. Path-qualified `sed` has no file exemption.
   Unknown commands stay conservative, including runners such as `xargs`, `find -exec`, `flock`,
   `su -c`, `direnv exec`, interpreters, and programs with executable options such as `sort --compress-program`.
-  A pipeline into one of these commands also checks the literal words and inline input of its producer stages,
-  including through text-only stages such as `cat`. `sed` with known options and scripts containing no `e`
-  keeps piped text as data; executable or unsupported sed forms check it. The guard does not inspect interpreter
-  code to prove that it only prints input, so `echo git | awk '{print $0}'` is conservative too.
+  Producer checks apply only to named input executors: `xargs`, `bash`, `sh`, `zsh`, `dash`, `ksh`, `awk`, `gawk`,
+  `mawk`, `perl`, `python` with an optional numeric version, `ruby`, `node`, `env`, `parallel`, `watch`, `script`,
+  and executable or unsupported `sed` forms. Literal words and inline input are checked through pass-through
+  pipeline stages. A modeled tool producer is already checked by its own rule; its command name does not count
+  as output. Thus `kubectl get pods | awk '{print $1}'` and `git ls-files | xargs wc -l` pass.
+  `sed` with known options and scripts containing no `e` keeps piped text as data. The guard does not inspect
+  interpreter code to prove that it only prints input, so `echo git | awk '{print $0}'` is conservative too.
+  For braces, `if`/`fi` and subshell producers, the check conservatively includes the whole enclosing command's
+  literal words rather than resolving group output. Process-substitution executors also check their enclosing
+  command's inline input and pipeline producers; executor arguments retain substitution text. Substitutions
+  remain bounded to four levels. These checks do not establish which descriptor reaches which process.
   A tool path in command position (`/usr/bin/git push`, `./terraform apply`) is checked by its normal rule;
 - command-bearing environment values naming a tool or shell, even on text/data commands or in standalone
   assignments, `export` or declarations. The checked names are `PAGER`, `MANPAGER`, `LESS`, `LESSOPEN`,
   `LESSCLOSE`, `EDITOR`, `VISUAL`, `BROWSER`, `MANOPT`, `SHELL`, every `GIT_*` name, and names ending in
-  `_PAGER`, `_EDITOR` or `_BROWSER`. Values are scanned as words rather than executed, so harmless data such as
-  `PAGER='cat docs/git' man ls` can also be unparsed;
+  `_PAGER`, `_EDITOR` or `_BROWSER`. Values match command names rather than directory segments or filename stems;
+  executable basenames such as `/usr/bin/git` still count. A literal shell path in `SHELL` does not by itself
+  name a guarded tool. `GIT_DIR=/srv/git/repo git log` and `SHELL=/bin/bash make test` pass;
 - a glob or brace command word that can expand to a tool or shell (`gi[t]`, `/usr/bin/gi?`, `{git,true}`);
 - a shell whose script is dynamic (`bash -c "$CMD"`, `bash <(curl ...)`);
 - a guarded git write in a repository or environment the guard cannot follow (`--git-dir`, `--work-tree`,
@@ -92,10 +102,16 @@ change (`cd "$X" && git push`, `env -C "$X" git push`, or `git -C "$X" push`) us
 Known false positives: a dynamic
 command word next to a tool word (`$EDITOR notes.md && git status`) and an unmodeled command that names a tool as
 data (`custom-reader docs/git`). Run those parts separately, or use literal command words.
-Harmless editor invocations with unlisted options are also conservative, such as `vim -u NONE terraform/main.tf`,
-`vim +1 terraform/main.tf`, or a dynamic flag (`vim "$FLAGS" terraform/main.tf`). No editor exemption was removed,
-but these previously exempted forms now fail closed. A harmless PATH assignment or hash lookup alongside a tool
-filename is conservative too (`PATH=/usr/bin ls terraform`, `hash tee; cat docs/git`). Run the setup separately.
+Editor and pager file exemptions are removed: `vim terraform/main.tf`, `vim -R terraform/main.tf`,
+`vim -o terraform/main.tf`, and tool-named paths or filenames under any of `vi`, `vim`, `nvim`, `nano`, `less`,
+`more` are unparsed again, as are unlisted options such as `vim -u NONE terraform/main.tf` or `vim +1 terraform/main.tf`.
+Harmless PATH setup, sourcing a script or hash lookups alongside tool words are conservative too
+(`PATH=/usr/bin ls terraform`, `read PATH; cat docs/git`, `source .venv/bin/activate && git status`,
+`hash tee; cat docs/git`). Data-command inline input is checked even without a runner (`tee <<< 'git notes'`).
+Harmless PATH operands to the listed builtins, arithmetic that only reads PATH (`echo $((PATH)) git`),
+and clearing the environment before a data command (`env -i ls terraform`) are conservative too.
+Grouped producer checks can include unrelated tool names elsewhere in the enclosing command. Run setup
+separately, use a file-reading tool, or run the command yourself.
 
 ### Other limits
 
@@ -103,6 +119,10 @@ filename is conservative too (`PATH=/usr/bin ls terraform`, `hash tee; cat docs/
   `printf '%s%s push origin main' gi t | xargs env` still passes because the producer builds `git` at run time.
   This exact case remains in the regression corpus as a known gap. Output from files, transformations and
   external programs is not evaluated; arbitrary pipelines remain outside a security boundary.
+- Variable values are not executed or resolved. A data path ending in a guarded executable basename, such as
+  `GIT_DIR=/srv/git git log` or `PAGER='cat docs/git' man ls`, remains conservative. Startup files and variables,
+  inherited PATH, aliases and functions are not read. Indirect writes through computed variable names or code
+  loaded from files are not resolved.
 - State changes inside one command are followed as the set of values each could have: the directory (`cd`,
   `pushd`, `popd`, `cd -`, `env -C DIR`, `sudo -D DIR`), variables set by `export`, `declare -x` and friends or a
   statement of only assignments (`unset` removes one; a prefix on the call wins), the branch per repository, the

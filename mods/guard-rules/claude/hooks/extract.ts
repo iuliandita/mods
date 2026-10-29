@@ -17,17 +17,7 @@ const OPAQUE_TOOLS = new Set(['git', 'gh', 'glab', 'tea', 'fj', 'kubectl', 'helm
 // `cat` only copies its input, so a commit message heredoc (`"$(cat <<'EOF' ...)"`) that names a tool stays data.
 const TEXT_HEADS = new Set(['echo', 'printf', 'man', 'which', 'type', 'grep', 'rg', 'cat'])
 const DATA_HEADS = new Set(['ls', 'mkdir', 'rmdir', 'touch', 'cp', 'mv', 'rm', 'head', 'tail', 'wc', 'tee', 'curl', 'basename', 'dirname', 'realpath', 'readlink', 'file', 'stat', 'du', 'df', 'cut', 'uniq', 'diff', 'cmp'])
-// These can execute code, so only plain filename/path words are data; their scripts still name tools.
-const FILE_CODE_HEADS = new Set(['sed', 'vi', 'vim', 'nvim', 'nano', 'less', 'more'])
-// Only standalone flags known not to run code preserve an editor's file exemption.
-const EDITOR_FLAGS: Record<string, Set<string>> = {
-  vi: new Set(['-R', '-n']),
-  vim: new Set(['-R', '-o', '-O', '-p', '-d', '-M', '-m', '-n', '-b']),
-  nvim: new Set(['-R', '-o', '-O', '-p', '-d', '-M', '-m', '-n', '-b']),
-  nano: new Set(['-v', '--view']),
-  less: new Set(['-R', '-M', '-m', '-N', '-S', '-X', '-F']),
-  more: new Set(['-d', '-f', '-l', '-s', '-u']),
-}
+const INPUT_EXECUTORS = new Set(['xargs', ...SHELLS, 'awk', 'gawk', 'mawk', 'perl', 'ruby', 'node', 'env', 'parallel', 'watch', 'script'])
 const SED_FLAGS = new Set(['-n', '--quiet', '--silent', '-E', '-r', '--regexp-extended'])
 // Shell constructs the guard does not follow: code defined here and run later, or a branch it does not model.
 const STRUCTURES: Record<string, string> = {
@@ -164,7 +154,7 @@ function applyBuiltin(w: Walk, s: Step): boolean {
   else if (name === 'popd') applyPopd(w.st, argv, s.dyn, effect)
   else if (name === 'set') applySet(w.st, argv, effect)
   // A sourced script is not read; one the shell makes up or reads from stdin is not even a file.
-  else if ((name === 'source' || name === '.') && (argv.length === 1 || s.dyn[1] || argv[1] === '/dev/stdin' || argv[1] === '-')) mark(w, 'a sourced script the guard cannot read')
+  else if (name === 'source' || name === '.') mark(w, 'a sourced script the guard cannot read')
   else return false
   return true
 }
@@ -310,34 +300,53 @@ function pipedWords(w: Walk, s: Step): string[] {
   const words: string[] = []
   let cmd = s.cmd
   let idx = s.idx
+  // A nested input executor may consume the enclosing command's stdin (for example tee >(xargs env)).
+  if (cmd.op === '$(') {
+    while (idx > 0 && w.queue[idx - 1]!.op === '$(') idx--
+    while (idx < w.queue.length - 1 && w.queue[idx]!.op === '$(') {
+      const nested = w.queue[idx++]!
+      words.push(...nested.argv, ...Object.values(nested.assigns), ...(nested.input ?? []))
+    }
+    cmd = w.queue[idx]!
+    words.push(...(cmd.input ?? []))
+  }
   while (SINGLE_PIPE.test(cmd.op)) {
     do { idx-- } while (idx >= 0 && w.queue[idx]!.op === '$(')
     if (idx < 0) break
     cmd = w.queue[idx]!
-    words.push(...cmd.argv, ...Object.values(cmd.assigns), ...(cmd.input ?? []))
+    // Group output is not evaluated: conservatively check the enclosing command's literal words.
+    if (cmd.argv[0] === '}' || cmd.argv[0] === 'fi' || w.queue[idx + 1]!.op.includes(')')) {
+      return w.queue.flatMap((c) => [...c.argv, ...Object.values(c.assigns), ...(c.input ?? [])])
+    }
+    const u = unwrap(cmd)
+    const name = basename(u.argv[0] ?? '')
+    // A modeled tool call is already checked; its executable name is not evidence about its output.
+    const modeled = name === 'git' || name === 'gh' || name === 'glab' || name === 'tea' || name === 'fj' || INFRA_TOOLS.has(name)
+    words.push(...u.argv.slice(modeled ? 1 : 0), ...Object.values(u.assigns), ...(cmd.input ?? []))
   }
   return words
 }
 
 function markOpaque(w: Walk, s: Step): void {
+  if (s.u.clear || s.u.unset.has('PATH')) mark(w, 'a cleared PATH for an unmodeled command')
   const bare = s.argv[0] === s.name
   const executableOption = s.name === 'rg' ? s.argv.some((a) => a === '--pre' || a.startsWith('--pre='))
     : s.name === 'man' && s.argv.slice(1).some((a) => /^-[^-]*[PH]|^--(?:pager|html)(?:=|$)/.test(a))
   if (bare && (FLOW_HEADS.has(s.name) || (TEXT_HEADS.has(s.name) && !executableOption))) return
-  if (bare && (DATA_HEADS.has(s.name) || (s.name === 'brew' && s.argv[1] === 'install'))) return
   const sedFiles = s.name === 'sed' ? sedFileSlots(s) : new Set<number>()
-  const editor = Object.hasOwn(EDITOR_FLAGS, s.name) && s.argv.slice(1).every((a, i) =>
-    !s.dyn[i + 1] && (!/^[+-]/.test(a) || EDITOR_FLAGS[s.name]!.has(a)))
+  const data = bare && (DATA_HEADS.has(s.name) || (s.name === 'brew' && s.argv[1] === 'install'))
+  const executor = INPUT_EXECUTORS.has(s.name) || /^python[\d.]*$/.test(s.name) || (s.name === 'sed' && sedFiles === null)
   // Substitutions are followed as calls of their own, so their text is not this command's words. A command word
   // that is not a plain name or path (`"git push" origin main`) counts among them.
   const words = s.argv.slice(1).map((a, i) => {
+    if (data) return ''
+    if (executor) return a
     if (s.dyn[i + 1]) return a.replace(SUBST_TEXT, ' ')
     if (s.name === 'man') return a.replace(/^-[^-]*?[PH]/, ' ')
-    const file = s.name === 'sed' ? sedFiles?.has(i + 1) : editor && !/^[+-]/.test(a)
-    return bare && FILE_CODE_HEADS.has(s.name) && file && isDataWord(a) ? '' : a
+    return bare && s.name === 'sed' && sedFiles?.has(i + 1) && isDataWord(a) ? '' : a
   })
   if (!PLAIN_WORD.test(s.argv[0]!)) words.push(s.argv[0]!)
-  const input = s.name === 'sed' && sedFiles !== null ? [] : [...(s.cmd.input ?? []), ...pipedWords(w, s)]
+  const input = s.name === 'sed' && sedFiles !== null ? [] : [...(s.cmd.input ?? []), ...(executor ? pipedWords(w, s) : [])]
   const tools = toolWords([...words, ...input].join(' '), { shells: true })
   if (tools.length) w.local.push({ why: `${s.name} with ${tools.join(', ')} among its words`, tools })
 }
@@ -364,6 +373,7 @@ export function extractCalls(src: string, startDir: string, home: string): Parse
     for (const why of s.u.opaque) mark(w, why)
     const assigned = [...Object.keys(s.u.assigns), ...(s.name === 'export' || DECLARES.has(s.name) ? s.argv.slice(1).map((a) => a.split('=')[0]!) : [])]
     for (const k of assigned) if (SHELL_ENV.has(k)) mark(w, `an assignment to ${k}`)
+    if (s.cmd.argv.some((a) => /^PATH(?:\+|\[[^\]]*\])?=/.test(a)) || (['printf', 'read', 'mapfile', 'readarray', 'unset', 'let'].includes(s.name) && s.argv.slice(1).some((a) => /^(?:-v)?PATH\b/.test(a)))) mark(w, 'a possible write to PATH')
     const settings = Object.entries(s.u.assigns)
     if (s.name === 'export' || DECLARES.has(s.name)) for (const a of s.argv.slice(1)) {
       const eq = a.indexOf('=')
@@ -371,7 +381,7 @@ export function extractCalls(src: string, startDir: string, home: string): Parse
     }
     for (const [key, value] of settings) {
       if (!EXEC_ENV.test(key)) continue
-      const tools = toolWords(value, { shells: true })
+      const tools = toolWords(value, { shells: key !== 'SHELL' || !isDataWord(value), commands: true })
       if (tools.length) w.local.push({ why: `an assignment to ${key} with ${tools.join(', ')} among its words`, tools })
     }
     if (s.dyn[0]) {

@@ -156,16 +156,26 @@ Code, or run it in your own terminal. On Codex and OpenCode, use the context CLI
   Use a literal editor name or run the parts separately.
 - A command runner that only searches text, such as `find . | xargs grep git`. The guard cannot
   tell whether its arguments will be executed; use a direct `rg` or `grep` call.
-- A pipeline into an interpreter that only prints input, such as `echo git | awk '{print $0}'`, or a
-  harmless pager setting such as `PAGER='cat docs/git' man ls`. Runner input and command-bearing environment
-  values stay checked; ordinary text pipelines and `man git` pass.
+- A pipeline into an interpreter that only prints input, such as `echo git | awk '{print $0}'`.
+  Literal producer words stay checked for named input executors. Ordinary read-only pipelines,
+  including `gh api repos/o/r | jq .name` and `git log -p | less`, pass.
+- A harmless command-bearing variable whose value ends in a tool name, such as `PAGER='cat docs/git' man ls`.
+  Directory segments such as `GIT_DIR=/srv/git/repo` pass, but executable basenames stay checked.
 - An unknown utility with a tool name as data, such as `custom-reader docs/git`, or an editor
-  opening a bare file named `git`. Known file commands and literal editor filenames with an extension pass.
-- A path-qualified data command such as `/usr/bin/ls terraform`, or an editor option operand
-  such as `vim -u NONE terraform/main.tf` or `vim +1 terraform/main.tf`. Data exemptions require a bare command
-  name; editor flags must all be on the [safe list](docs/limits.md). `vim -R terraform/main.tf` passes.
-- A PATH assignment, `hash`, `alias`, `enable` or a function definition alongside tool words disables data
-  exemptions for the whole command, even for harmless setup such as `PATH=/usr/bin ls terraform`.
+  opening a tool-named file or path. Editors and pagers (`vi`, `vim`, `nvim`, `nano`, `less`, `more`)
+  have no filename exemptions: `vim terraform/main.tf`, `vim -R terraform/main.tf`, `vim -o terraform/main.tf`,
+  `nano git.txt` and `less docs/git` are unparsed again. Use a file-reading tool or run them yourself.
+- A path-qualified data command such as `/usr/bin/ls terraform`. Data exemptions require a bare command
+  name; [the exact list and sed options](docs/limits.md) are documented separately. Data commands still check
+  heredoc and here-string input, even without an executable consumer (`tee <<< 'git notes'`).
+- A PATH write (including `printf -v`, `read`, `mapfile`, declarations and `unset`), `source`/`.`,
+  `hash`, `alias`, `enable` or a function definition alongside tool words disables exemptions for the whole
+  command. Harmless setup such as `PATH=/usr/bin ls terraform`, `read PATH; cat docs/git`, or
+  `source .venv/bin/activate && git status` is conservative too. Run the setup separately.
+  PATH references in arithmetic and harmless PATH operands to these builtins are also conservative;
+  clearing the environment before a data command (`env -i ls terraform`) disables its exemption.
+- An input executor receiving group output: braces, `if`/`fi` and subshell producers conservatively check
+  the whole enclosing command's literal words, so unrelated tool names can also trigger a finding.
 - A `sed` command with unsupported options or an `e` anywhere in its script, even harmless text
   such as `sed -e s/name/title/ docs/git`. All its words stay checked; see the [supported options](docs/limits.md).
 - A fixture or search containing attribution text in the same shell call as a message-bearing
