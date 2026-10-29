@@ -1570,7 +1570,19 @@ var KUBE_SWITCHERS = {
 };
 var KUBECTX_READ = new Set(["-c", "--current", "-h", "--help"]);
 var OC_CONFIG_READ = new Set(["view", "get-contexts", "current-context", "get-clusters", "get-users"]);
-var FILE_WRITERS = new Set(["cp", "mv", "ln", "install", "rsync", "tee", "truncate", "dd", "sed", "perl"]);
+var FILE_WRITERS = new Set(["cp", "mv", "ln", "install", "rsync", "tee", "truncate", "dd", "scp", "sponge"]);
+var INPLACE_WRITERS = new Set(["sed", "perl", "yq", "sops"]);
+var FILE_OUTPUT_OPTIONS = {
+  cp: ["-t", "--target-directory", "--target"],
+  mv: ["-t", "--target-directory", "--target"],
+  ln: ["-t", "--target-directory", "--target"],
+  install: ["-t", "--target-directory", "--target"],
+  curl: ["-o", "--output"],
+  wget: ["-O", "--output-document"],
+  sops: ["--output"],
+  gpg: ["-o", "--output"],
+  age: ["-o", "--output"]
+};
 var KUBE_FILE = /(?:^|\/)\.kube(?:\/|$)|kubeconfig/i;
 var WORKSPACE_FILE = /(?:^|\/)\.terraform(?:\/environment)?\/?$/;
 function mark(w, why) {
@@ -1733,9 +1745,37 @@ function inlineScript(w, s) {
 }
 function markSwitch(w, s) {
   const words = s.argv.slice(1);
-  const inPlace = words.some((a) => /^-[a-zA-Z]*i|^--in-place/.test(a));
-  const writes = FILE_WRITERS.has(s.name) && (inPlace || s.name !== "sed" && s.name !== "perl");
-  for (const f of [...s.cmd.outputs ?? [], ...writes ? words.filter((a) => !a.startsWith("-")) : []]) {
+  const inPlace = INPLACE_WRITERS.has(s.name) && words.some((a) => /^-[a-zA-Z]*i|^--in-?place(?:=|$)/.test(a));
+  const awkInPlace = s.name === "gawk" && words.some((a, i) => (a === "-i" || a === "--include") && words[i + 1] === "inplace" || a === "-iinplace" || a === "--include=inplace");
+  const options = Object.hasOwn(FILE_OUTPUT_OPTIONS, s.name) ? FILE_OUTPUT_OPTIONS[s.name] : [];
+  const outputOption = (a) => options.find((opt) => a === opt || a.startsWith(opt + (opt.startsWith("--") ? "=" : "")));
+  const writes = FILE_WRITERS.has(s.name) || inPlace || awkInPlace || words.some((a) => outputOption(a) !== undefined);
+  const targets = (s.cmd.outputs ?? []).map((path) => ({ path, dynamic: hasVariable(path) || SECRET_PLACEHOLDER.test(path) }));
+  if (writes)
+    for (let i = 1;i < s.argv.length; i++) {
+      const a = s.argv[i];
+      const opt = outputOption(a);
+      let path = a;
+      if (a.startsWith("-")) {
+        if (a.startsWith("--") && a.includes("="))
+          path = a.slice(a.indexOf("=") + 1);
+        else {
+          if (opt === undefined || a === opt)
+            continue;
+          path = a.slice(opt.length);
+        }
+      } else if (s.name === "dd") {
+        if (!a.startsWith("of="))
+          continue;
+        path = a.slice(3);
+      }
+      targets.push({ path, dynamic: Boolean(s.dyn[i]) || hasVariable(path) || SECRET_PLACEHOLDER.test(path) });
+    }
+  for (const { path: f, dynamic } of targets) {
+    if (dynamic) {
+      w.kube = w.workspace = true;
+      continue;
+    }
     w.written.add(basename(f));
     if (KUBE_FILE.test(f))
       w.kube = true;

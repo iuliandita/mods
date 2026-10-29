@@ -70,6 +70,76 @@ function fakeEnv(w: World = {}): Env & { probes: (Record<string, string> | undef
 const heredoc = (msg: string) => `git commit -m "$(cat <<'EOF'\n${msg}\nEOF\n)"`
 
 export const ROWS: Row[] = [
+  // #19/#21: writer flags and unresolved paths invalidate the files read before the command runs.
+  ...[
+    'scp remote:config TARGET',
+    'yq -i . TARGET',
+    'yq --inplace . TARGET',
+    'sponge TARGET',
+    'curl -o TARGET https://example.com/config',
+    'curl --output=TARGET https://example.com/config',
+    'curl -oTARGET https://example.com/config',
+    'wget -O TARGET https://example.com/config',
+    'wget --output-document=TARGET https://example.com/config',
+    'wget -OTARGET https://example.com/config',
+    'sops --decrypt --output TARGET source.yaml',
+    'sops decrypt --output=TARGET source.yaml',
+    'sops --decrypt -i TARGET',
+    'sops decrypt --in-place TARGET',
+    'gpg -o TARGET --decrypt source.gpg',
+    'gpg --output=TARGET --decrypt source.gpg',
+    'gpg -oTARGET --decrypt source.gpg',
+    'age -d -o TARGET source.age',
+    'age -d --output=TARGET source.age',
+    'age -d -oTARGET source.age',
+    "gawk -i inplace '{print}' TARGET",
+    "gawk --include=inplace '{print}' TARGET",
+    "gawk -iinplace '{print}' TARGET",
+    'dd if=source of=TARGET',
+    'cp source TARGET',
+    'tee TARGET',
+    'sed -i s/dev/prod/ TARGET',
+  ].flatMap((writer): Row[] => [
+    [`${writer.replace('TARGET', '.kube/config')} && kubectl apply -f a`, 'D:context'],
+    [`${writer.replace('TARGET', 'c')} && KUBECONFIG=c kubectl apply -f a`, 'D:context', { world: { files: { '/h/personal/repo/c': 'current-context: kind-dev\n' } } }],
+    [`${writer.replace('TARGET', '.terraform/environment')} && terraform apply`, 'D:context', { world: { cwd: '/w/envs/dev' } }],
+    [`${writer.replace('TARGET', '"$DEST"')} && kubectl apply -f a`, 'D:context'],
+    [`${writer.replace('TARGET', '"$DEST"')} && terraform apply`, 'D:context', { world: { cwd: '/w/envs/dev' } }],
+    [`${writer.replace('TARGET', '.kube/config')} && kubectl get pods`, 'A'],
+  ]),
+  ...['cp', 'mv', 'ln', 'install'].flatMap((writer) =>
+    ['--target-directory=TARGET', '--target-dir=TARGET', '--target=TARGET', '-tTARGET', '-t TARGET'].flatMap((flag): Row[] => [
+      [`${writer} ${flag.replace('TARGET', '.kube/')} config && kubectl apply -f a`, 'D:context'],
+      [`${writer} ${flag.replace('TARGET', '.terraform/')} environment && terraform apply`, 'D:context', { world: { cwd: '/w/envs/dev' } }],
+      [`${writer} ${flag.replace('TARGET', '"$DEST"')} config && kubectl apply -f a`, 'D:context'],
+    ]),
+  ),
+  ...[
+    'echo prod > "$KUBECONFIG"',
+    'echo prod > "${HOME}/.kube/config"',
+    'echo prod > "$DEST"',
+    'echo prod > "$(printf /tmp/c)"',
+    'echo prod > {{secret:TARGET}}',
+    'cp source "$KUBECONFIG"',
+    'tee "${HOME}/.kube/config"',
+  ].flatMap((writer): Row[] => [
+    [`${writer} && kubectl apply -f a`, 'D:context'],
+    [`${writer} && helm upgrade x chart`, 'D:context'],
+    [`${writer} && terraform apply`, 'D:context', { world: { cwd: '/w/envs/dev' } }],
+    [`${writer} && kubectl get pods`, 'A'],
+    [`${writer} && terraform plan`, 'A', { world: { cwd: '/w/envs/dev' } }],
+  ]),
+  ['dd if=source of=c && KUBECONFIG=c kubectl apply -f a', 'D:context', { world: { files: { '/h/personal/repo/c': 'current-context: kind-dev\n' } } }],
+  ...[
+    'yq . .kube/config',
+    'curl https://example.com/.kube/config',
+    'sops --decrypt .kube/config',
+    'gpg --decrypt .kube/config',
+    'age -d .kube/config',
+    "gawk -i ordchr '{print}' .kube/config",
+    'cp source unrelated.yaml',
+    'echo prod > unrelated.yaml',
+  ].map((read): Row => [`${read} && kubectl apply -f a`, 'A']),
   // #17/#18: switchers invalidate a prior context lookup, including aliases and option-bearing forms.
   ...['kubernetes', 'kube', 'k8s', 'k'].flatMap((kube) =>
     ['cluster', 'clusters', 'c'].flatMap((cluster) => [

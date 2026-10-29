@@ -1,7 +1,7 @@
 import { REAL, UNKNOWN, type Flow, type Possible } from './flow'
-import { INFRA_TOOLS, parseGh, parseGit, parseInfra, type Call, type InfraTool } from './calls'
+import { INFRA_TOOLS, parseGh, parseGit, parseInfra, SECRET_PLACEHOLDER, type Call, type InfraTool } from './calls'
 import { tokenize, type Simple } from './lex'
-import { basename } from './paths'
+import { basename, hasVariable } from './paths'
 import { applyAssign, applyCd, applyDeclare, applyExport, applyPopd, applyPushd, applySet, applyUnset, dirOf, move, newProcState, UNSET, type ProcState } from './state'
 import { IDENTITY_ENV, isDataWord, mayName, READ_ENV, toolWords } from './words'
 import { SHELLS, shellScript, unwrap } from './wrappers'
@@ -69,8 +69,20 @@ const KUBE_SWITCHERS: Record<string, string[][]> = {
 }
 const KUBECTX_READ = new Set(['-c', '--current', '-h', '--help'])
 const OC_CONFIG_READ = new Set(['view', 'get-contexts', 'current-context', 'get-clusters', 'get-users'])
-// Commands that write the files named among their words (`sed` and `perl` only with -i).
-const FILE_WRITERS = new Set(['cp', 'mv', 'ln', 'install', 'rsync', 'tee', 'truncate', 'dd', 'sed', 'perl'])
+// Operand paths are conservative: even a source can name a file whose lookup may become stale.
+const FILE_WRITERS = new Set(['cp', 'mv', 'ln', 'install', 'rsync', 'tee', 'truncate', 'dd', 'scp', 'sponge'])
+const INPLACE_WRITERS = new Set(['sed', 'perl', 'yq', 'sops'])
+const FILE_OUTPUT_OPTIONS: Record<string, string[]> = {
+  cp: ['-t', '--target-directory', '--target'],
+  mv: ['-t', '--target-directory', '--target'],
+  ln: ['-t', '--target-directory', '--target'],
+  install: ['-t', '--target-directory', '--target'],
+  curl: ['-o', '--output'],
+  wget: ['-O', '--output-document'],
+  sops: ['--output'],
+  gpg: ['-o', '--output'],
+  age: ['-o', '--output'],
+}
 const KUBE_FILE = /(?:^|\/)\.kube(?:\/|$)|kubeconfig/i
 const WORKSPACE_FILE = /(?:^|\/)\.terraform(?:\/environment)?\/?$/
 
@@ -266,9 +278,34 @@ function inlineScript(w: Walk, s: Step): void {
 // whether or not the command surely ran.
 function markSwitch(w: Walk, s: Step): void {
   const words = s.argv.slice(1)
-  const inPlace = words.some((a) => /^-[a-zA-Z]*i|^--in-place/.test(a))
-  const writes = FILE_WRITERS.has(s.name) && (inPlace || (s.name !== 'sed' && s.name !== 'perl'))
-  for (const f of [...(s.cmd.outputs ?? []), ...(writes ? words.filter((a) => !a.startsWith('-')) : [])]) {
+  const inPlace = INPLACE_WRITERS.has(s.name) && words.some((a) => /^-[a-zA-Z]*i|^--in-?place(?:=|$)/.test(a))
+  const awkInPlace = s.name === 'gawk' && words.some((a, i) =>
+    ((a === '-i' || a === '--include') && words[i + 1] === 'inplace') || a === '-iinplace' || a === '--include=inplace')
+  const options = Object.hasOwn(FILE_OUTPUT_OPTIONS, s.name) ? FILE_OUTPUT_OPTIONS[s.name]! : []
+  const outputOption = (a: string) => options.find((opt) => a === opt || a.startsWith(opt + (opt.startsWith('--') ? '=' : '')))
+  const writes = FILE_WRITERS.has(s.name) || inPlace || awkInPlace || words.some((a) => outputOption(a) !== undefined)
+  const targets = (s.cmd.outputs ?? []).map((path) => ({ path, dynamic: hasVariable(path) || SECRET_PLACEHOLDER.test(path) }))
+  if (writes) for (let i = 1; i < s.argv.length; i++) {
+    const a = s.argv[i]!
+    const opt = outputOption(a)
+    let path = a
+    if (a.startsWith('-')) {
+      if (a.startsWith('--') && a.includes('=')) path = a.slice(a.indexOf('=') + 1)
+      else {
+        if (opt === undefined || a === opt) continue
+        path = a.slice(opt.length)
+      }
+    } else if (s.name === 'dd') {
+      if (!a.startsWith('of=')) continue
+      path = a.slice(3)
+    }
+    targets.push({ path, dynamic: Boolean(s.dyn[i]) || hasVariable(path) || SECRET_PLACEHOLDER.test(path) })
+  }
+  for (const { path: f, dynamic } of targets) {
+    if (dynamic) {
+      w.kube = w.workspace = true
+      continue
+    }
     w.written.add(basename(f))
     if (KUBE_FILE.test(f)) w.kube = true
     if (WORKSPACE_FILE.test(f)) w.workspace = true

@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- `guard-rules` tracks more file writers, attached output options and `dd of=` paths; unresolved writer and redirect targets make later Kubernetes and Terraform writes unclassified.
 - `guard-rules` invalidates stale kube context lookups after more documented switchers and cloud CLI aliases, and checks only the `oc config` verb for read exemptions.
 
 ## [0.3.2] - 2026-10-29
