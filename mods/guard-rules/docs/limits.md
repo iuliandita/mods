@@ -27,7 +27,8 @@ such as `make release` runs). It models a small, explicit grammar and treats eve
 
 A dynamic value in an argument only makes that value unknown: `git log -n "$N"`, `git diff $(git merge-base ...)`,
 `git add src/{a,b}.ts` and `cd "$(git rev-parse --show-toplevel)" && git status` pass, while a write that depends on
-an unknown directory or variable is unparsed.
+an unknown variable is unparsed. A guarded git write after an unresolved directory change fails
+the parsed lookup check, independently of `modeUnparsed`.
 
 ### When a command is unparsed
 
@@ -53,21 +54,29 @@ These are unparsed on their own, without another tool word:
   a shell (`xargs git ...`, `flock /l git push`, `find -exec`, `su -c '...'`, `python3 -c "os.system('git push')"`,
   `perl`, `node -e`, `python3 <<'EOF'`). `echo`, `printf`, `man`, `which`, `type`, `grep`, `rg` (without `--pre`)
   and `cat` are text heads and exempt. Known data commands (`ls`, `mkdir`, `head`, `tail`, `tee`,
-  `curl` and similar file utilities) and `brew install` also treat their arguments as data. Editors and `sed`
-  ignore literal file arguments containing `/` or an extension, while option operands and script words remain
-  checked. Unknown commands stay conservative, including runners such as `xargs`, `find -exec`, `flock`,
+  `curl` and similar file utilities) and `brew install` also treat their arguments as data. These exemptions
+  require bare command names, so `./cat` and `/tmp/bin/curl` stay checked. Editors ignore literal file arguments
+  containing `/` or an extension; every option operand stays checked, including a filename after a flag such as
+  `vim -R`. No editor file-taking options are specially exempted. `sed` exempts literal file arguments only
+  with known options: `-n`, `--quiet`, `--silent`, `-E`, `-r`, `--regexp-extended`, separate `-e SCRIPT` or
+  `--expression SCRIPT`, and `--`. Script words always stay checked. An unsupported option, dynamic word or
+  any `e` in any script keeps every word checked, including harmless text containing `e`; this avoids guessing
+  whether a script can execute commands. Path-qualified editors and `sed` have no file exemptions.
+  Unknown commands stay conservative, including runners such as `xargs`, `find -exec`, `flock`,
   `su -c`, `direnv exec`, interpreters, and programs with executable options such as `sort --compress-program`.
   A tool path in command position (`/usr/bin/git push`, `./terraform apply`) is checked by its normal rule;
 - a glob or brace command word that can expand to a tool or shell (`gi[t]`, `/usr/bin/gi?`, `{git,true}`);
 - a shell whose script is dynamic (`bash -c "$CMD"`, `bash <(curl ...)`);
-- a guarded git write in a repository or directory the guard cannot follow (`--git-dir`, `--work-tree`,
+- a guarded git write in a repository or environment the guard cannot follow (`--git-dir`, `--work-tree`,
   `--namespace`, `--config-env`, `--bare`, `GIT_DIR`/`GIT_WORK_TREE`/`GIT_NAMESPACE`, an option git's parser may
-  read differently such as `-C/path` or `-cname=value`, a `cd` to a dynamic path, a variable the guard cannot tell).
+  read differently such as `-C/path` or `-cname=value`, a variable the guard cannot tell).
 
 Git and forge tools use the strictest of the attribution and protected-branch modes (and identity, once rules are
 set); kubectl, helm and terraform use the context mode; a shell name uses both. `modeUnparsed=on` keeps
 those inherited modes, `dry` caps denial at reporting, and `off` removes only unparsed findings. Parsed
-checks, lookup failures and invalid configuration still apply. No host supports `ask` in this adapter.
+checks, lookup failures and invalid configuration still apply. A git write after an unresolved directory
+change (`cd "$X" && git push`) uses the strictest active git-side mode as a lookup finding, even with
+`modeUnparsed=off`. No host supports `ask` in this adapter.
 Known false positives: a dynamic
 command word next to a tool word (`$EDITOR notes.md && git status`) and an unmodeled command that names a tool as
 data (`custom-reader docs/git`). Run those parts separately, or use literal command words.

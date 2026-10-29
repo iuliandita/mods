@@ -142,7 +142,9 @@ Identity does nothing until `identityRules` is set. Change options in your user 
 
 With `modeUnparsed=on`, unparsed commands inherit the strictest active git-side mode, or `modeContext`
 for infra. `dry` reports findings that would deny; `off` suppresses parser findings. Both can let
-commands run that the guard cannot inspect. Parsed rule checks still apply. There is no approval prompt;
+commands run that the guard cannot inspect. Parsed rule checks still apply. A git write after an
+unresolved directory change uses the active git-side modes even with `modeUnparsed=off`.
+There is no approval prompt;
 `ask` is rejected as an invalid option on every host.
 
 The model cannot approve its own exception. Type the command yourself with the `!` prefix in Claude
@@ -156,6 +158,11 @@ Code, or run it in your own terminal. On Codex and OpenCode, use the context CLI
   tell whether its arguments will be executed; use a direct `rg` or `grep` call.
 - An unknown utility with a tool name as data, such as `custom-reader docs/git`, or an editor
   opening a bare file named `git`. Known file commands and literal editor filenames with an extension pass.
+- A path-qualified data command such as `/usr/bin/ls terraform`, or an editor option operand
+  such as `vim -R terraform/main.tf`. Data exemptions require a bare command name; editor option
+  operands stay checked. Use `ls terraform` or `vim terraform/main.tf` when appropriate.
+- A `sed` command with unsupported options or an `e` anywhere in its script, even harmless text
+  such as `sed -e s/name/title/ docs/git`. All its words stay checked; see the [supported options](docs/limits.md).
 - A fixture or search containing attribution text in the same shell call as a message-bearing
   git or forge command. Split the calls so the message scan does not include the fixture.
 - A valid command whose directory, environment, refspec, script or option cannot be resolved

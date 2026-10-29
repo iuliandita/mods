@@ -16,8 +16,10 @@ export type GitCall = {
   flow: Flow
   // `env -i`, or `env -u` of a variable git reads its identity from.
   scrubbed?: boolean
-  // Why the repository or directory the call acts on cannot be followed; a write is then unparsed.
+  // Why the repository or environment the call acts on cannot be followed; a write is then unparsed.
   opaque?: string
+  // The starting directory is unknown; a guarded write fails the parsed lookup check.
+  unresolvedDir?: true
   // Follows `args`: set when some word is not literal (a variable, substitution, glob or secret placeholder).
   dynArgs?: boolean[]
 }
