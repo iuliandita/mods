@@ -172,7 +172,8 @@ function request(helper, texts) {
 var rewrite = (helper, command) => rewriteCommand(helper, command, true);
 var WITHHELD = "[secret-box: this content was withheld because scrubbing failed]";
 var MAX_DEPTH = 24;
-function scrubValue(value, scrub) {
+var KEEP_ON_FAILURE2 = new Set(["role", "type"]);
+function scrubValue(value, scrub, shape = false) {
   const names = new Set;
   let changed = false;
   const text = (s) => {
@@ -200,11 +201,11 @@ function scrubValue(value, scrub) {
         return v;
       const out = Object.create(Object.getPrototypeOf(v));
       for (const [k, x] of entries) {
-        const base = text(k);
+        const base = shape ? k : text(k);
         let key = base;
         for (let n = 2;key in out; n++)
           key = `${base}#${n}`;
-        out[key] = walk(x, depth + 1, path);
+        out[key] = shape && typeof x === "string" && KEEP_ON_FAILURE2.has(k) ? x : walk(x, depth + 1, path);
       }
       return out;
     } finally {
@@ -219,7 +220,7 @@ async function scrubRemote(helper, value) {
     const r = await scrubBatch((scrub) => scrubValue(value, scrub), (texts) => request(helper, texts));
     return r.value;
   } catch {
-    return scrubValue(value, () => ({ text: WITHHELD, names: ["withheld"] })).value;
+    return scrubValue(value, () => ({ text: WITHHELD, names: ["withheld"] }), true).value;
   }
 }
 

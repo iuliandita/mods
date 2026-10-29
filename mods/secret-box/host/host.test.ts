@@ -99,6 +99,30 @@ test('opencode withholds unchecked strings when the scrub helper cannot start', 
   expect(JSON.stringify(after.result)).toContain('withheld')
 })
 
+test('opencode keeps message keys and withholds text when the scrub helper fails', async () => {
+  withMode()
+  const h = await plugin({ helper: join(root, 'missing') })
+  const ctx: { messages: { role: string; parts: Record<string, unknown>[] }[] } = {
+    messages: [{ role: 'user', parts: [{ type: 'text', text: `see ${SECRET}` }] }, { role: 'assistant', parts: [{ type: 'tool', state: { input: { command: SECRET } } }] }],
+  }
+  await h.context!(ctx)
+  const text = JSON.stringify(ctx.messages)
+  expect(text).not.toContain(SECRET.slice(0, 8))
+  expect(Object.keys(ctx.messages[0]!)).toEqual(['role', 'parts'])
+  expect(Object.keys(ctx.messages[0]!.parts[0]!)).toEqual(['type', 'text'])
+  expect(ctx.messages[0]!.role).toBe('user')
+  expect(ctx.messages[0]!.parts[0]!.type).toBe('text')
+  expect(ctx.messages[0]!.parts[0]!.text).toContain('withheld')
+  expect(Object.keys(ctx.messages[1]!.parts[0]!)).toEqual(['type', 'state'])
+})
+
+test('the helper reply stays near the text size for non-ASCII text, so a large file still fits the 4 MiB cap', async () => {
+  const big = '汉'.repeat(700_000)
+  const r = await request(helper, [big, '\ud800 lone'])
+  expect(r.results[0]!.text).toBe(big)
+  expect(r.results[1]!.text).toBe('\ud800 lone')
+})
+
 test('codex: off leaves the command alone, dry only reports, an unreadable options file counts as on', async () => {
   withMode('off')
   expect((await hook(bash('echo {{secret:API_KEY}}'))).out).toBeNull()

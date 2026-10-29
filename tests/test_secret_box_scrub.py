@@ -168,9 +168,9 @@ def test_short_value_is_not_scrubbed(tmp_path):
     assert p.stdout == b"abc12\n"
 
 
-def test_exec_without_scrub_still_works(tmp_path):
+def test_exec_without_the_scrub_flag_scrubs_too(tmp_path):
     p = run(tmp_path, "exec", "--", "printf '%s\\n' {{secret:tok}}", secrets={"tok": VALUE})
-    assert p.returncode == 0 and p.stdout == VALUE.encode() + b"\n"
+    assert p.returncode == 0 and p.stdout == b"{{secret:tok}}\n"
     assert run(tmp_path, "exec", "--scrub", "x").returncode == 1
 
 

@@ -37,7 +37,9 @@ This is not a security boundary. These limits apply in mode `on`; `off` and `dry
   Child processes receive the values in their environment and may put them in argv, files or
   network requests; scrubbing does not prevent that access.
 - **Claude Code:** A failed scrub withholds checked text. Saved Bash output over
-  4 MiB, links, unexpected paths and files that cannot be read or written stay unchanged.
+  4 MiB (a file just under it can still exceed the helper's 4 MiB reply once JSON escapes are
+  added, and then stays unchanged with the same toast), links, unexpected paths and files that
+  cannot be read or written stay unchanged.
   Attachments, structured non-Bash records, tool calls and thinking can retain raw values even
   when model-facing text is scrubbed. Prompt-history protection is unverified.
 - **Codex:** Only a helper-wrapped command's own stdout and stderr are scrubbed. Other tool
@@ -104,7 +106,7 @@ Other commands of the helper:
 
     secret-box names [--json]    list stored names
     secret-box remove NAME       delete a secret
-    secret-box exec [--scrub] -- SCRIPT    run SCRIPT, optionally filtering stdout and stderr
+    secret-box exec [--scrub] -- SCRIPT    run SCRIPT, filtering stdout and stderr (--scrub is optional)
     secret-box scrub                     filter a JSON array of strings on stdin
 
 A placeholder for a secret that is not stored makes the command exit 3 with a line naming it and
@@ -132,7 +134,10 @@ Install steps are in [INSTALL.md](../../INSTALL.md); what differs from Claude Co
   you typed) stays. The hook answers `allow`; the sandbox still applies to the rewritten command.
   Trust the hook once with `/hooks`.
 - OpenCode 2.x: the same rewrite in `execute.before`, plus scrubbing of every tool result and error, of the
-  messages the model sees again, and of the prompt as typed.
+  messages the model sees again, and of the prompt as typed. If a scrub fails (locked keyring, timeout,
+  reply over 4 MiB), text values are replaced by a notice but object keys and the `role` and `type`
+  values stay, so the host still reads its messages; a secret used as an object key is not removed
+  in that case.
 - The mode is read from `~/.config/iuliandita-mods/secret-box.json` (`{"mode": "on"}`; `off`, `dry`
   or `on`). An unreadable file counts as `on`. Nothing is read from a repository.
 - The helper holds back the last few bytes of each stream until more output arrives or the command
@@ -197,7 +202,10 @@ This is not a security boundary.
   of strings on stdin and returns `results` (each with `text` and matched `names`), stored
   `names`, and `short` names, without exporting stored values. One helper call handles all
   distinct strings within a result or conversation update. Checked batches whose JSON output
-  exceeds the host's 4 MiB process limit are withheld. The helper has no authentication
+  exceeds the host's 4 MiB process limit are withheld. The reply carries text as UTF-8, so its size
+  is the text size plus JSON escapes (quotes, backslashes, newlines and control characters count
+  two to six bytes each). `exec` always filters its own output; `--scrub` is accepted and does
+  nothing more. The helper has no authentication
   boundary; arbitrary code and other keyring clients can still read the keyring.
 - Rows are rewritten when they are stored. The screen may show a row just before its rewrite.
 - The model's own tool calls and thinking blocks cannot be rewritten by a hook. If the model writes a

@@ -123,6 +123,7 @@ function helperExists(helper) {
   }
 }
 var rewrite = (helper, command) => rewriteCommand(helper, command, true);
+var KEEP_ON_FAILURE2 = new Set(["role", "type"]);
 
 // mods/secret-box/host/cli.ts
 var deny = (io, reason) => {
