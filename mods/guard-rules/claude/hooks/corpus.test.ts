@@ -70,6 +70,20 @@ function fakeEnv(w: World = {}): Env & { probes: (Record<string, string> | undef
 const heredoc = (msg: string) => `git commit -m "$(cat <<'EOF'\n${msg}\nEOF\n)"`
 
 export const ROWS: Row[] = [
+  ...[
+    '"Co-Authored-""By: A"',
+    String.raw`$'Co-Authored\x2dBy: A'`,
+    String.raw`Co-Authored-\By:A`,
+    String.raw`$'subject\012\012Co-Authored-By: A'`,
+    'Co-Authored-By:A',
+  ].flatMap((message): Row[] => [
+    [`git commit -m ${message}`, 'D:attribution'],
+    [`gh pr create --body ${message}`, 'D:attribution'],
+  ]),
+  ...[String.raw`$'\x67it' status`, String.raw`$'\x67h' pr list`, String.raw`$'\x6bubectl' get pods`].flatMap((tool): Row[] => [
+    [`f() { :; }; ${tool}`, 'U'],
+    [`${['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL', 'EMAIL'].map((key) => `export ${key}=a; export ${key}=b;`).join(' ')} ${tool}`, 'U'],
+  ]),
   ...['HOME=/srv/ops kubectl config use-context dev && kubectl apply -f a', 'sudo kubectl config use-context dev && kubectl apply -f a', 'TF_DATA_DIR=/other terraform workspace select dev && terraform apply'].map((cmd): Row => [cmd, 'D:context', { world: { cwd: '/w/dev', workspace: 'dev' } }]),
   ...['TF_CLI_ARGS=-migrate-state terraform init', 'export TF_CLI_ARGS_init=-force-copy && terraform init', 'TF_CLI_ARGS_plan=-destroy terraform plan', 'TF_CLOUD_ORGANIZATION=other terraform apply', 'export TF_CLOUD_HOSTNAME=cloud.example && terraform apply', 'TF_CLOUD_PROJECT=other tofu apply'].map((cmd): Row => [cmd, 'D:context', { world: { cwd: '/w/dev', workspace: 'dev' } }]),
   ...['GIT_COMMON_DIR=/other git commit -m x', 'export GIT_COMMON_DIR=/other && git push origin feature/x', 'unset GIT_COMMON_DIR && git commit -m x', 'env -u GIT_COMMON_DIR git push origin feature/x'].map((cmd): Row => [cmd, 'U']),

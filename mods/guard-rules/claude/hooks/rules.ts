@@ -1,7 +1,7 @@
 import { COMMIT_SUBS, createFollower, protectedBranchViolations } from './branch'
 import { contextViolations, followSwitch, isMutating, newContextState, stepContext, type Classes } from './context'
 import { annotates, identityViolations } from './identity'
-import { extractCalls, resolvePath, type Call, type GhCall, type GitCall, type Parsed } from './shell'
+import { extractCalls, resolvePath, tokenize, type Call, type GhCall, type GitCall, type Parsed } from './shell'
 import { taintConfig, type ConfigTaint } from './state'
 import { SHELL_NAMES, toolWords } from './words'
 
@@ -184,7 +184,11 @@ function unparsedViolations(command: string, parsed: Parsed, guarded: Call[], cf
   const tools = new Map<string, string>()
   // `${G:-git}` names git through a default-value operator.
   const plain = command.replace(/["'\\]/g, '').replace(/\$\{\w*:?[-=+?]/g, ' ')
-  if (parsed.opaque.length) for (const t of toolWords(plain, { anyCase: true })) tools.set(t, parsed.opaque[0]!)
+  if (parsed.opaque.length) {
+    const why = parsed.opaque[0]!
+    for (const t of toolWords(plain, { anyCase: true })) tools.set(t, why)
+    for (const call of parsed.calls) tools.set(call.kind === 'infra' ? call.tool : call.kind === 'gh' ? call.cli : 'git', why)
+  }
   for (const l of parsed.local) for (const t of l.tools) if (!tools.has(t)) tools.set(t, l.why)
   const call = guarded.find((c): c is GitCall => c.kind === 'git' && c.opaque !== undefined)
   if (call && !tools.has('git')) tools.set('git', call.opaque!)
@@ -232,6 +236,9 @@ export async function evaluate(command: string, cfg: Config, rawEnv: Env): Promi
   }
   if (cfg.attribution !== 'off' && parsed.calls.some(isMessageCall)) {
     all.push(...attributionViolations(command, cfg))
+    // Scan words separately so quote boundaries and escapes cannot split a trailer, and a word's start stays visible.
+    for (const word of tokenize(command).cmds.flatMap((c) => c.argv)) all.push(...attributionViolations(word, cfg))
+    for (const call of parsed.calls) for (const word of call.args) all.push(...attributionViolations(word, cfg))
     for (const call of parsed.calls) {
       if (call.kind !== 'gh' || !isMessageCall(call)) continue
       for (const path of bodyFiles(call, env.home)) {
