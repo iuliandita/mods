@@ -30,7 +30,7 @@ For Codex and OpenCode see [Codex and OpenCode](#codex-and-opencode) and
 
 | Event | Claude Code | Codex | OpenCode |
 | --- | --- | --- | --- |
-| `finish`: the agent stopped | `Stop` hook | Background `Stop` hook; or the `notify` setting (`agent-turn-complete`) | `session.execution.succeeded` (2.2.1); `session.idle` for older versions |
+| `finish`: the agent stopped | `Stop` hook | Synchronous `Stop` hook (one-second cap), including `codex exec`; or the `notify` setting (`agent-turn-complete`) | `session.execution.succeeded` (2.2.1); `session.idle` for older versions |
 | `input`: permission needed | `Notification` with type `permission_prompt` | Background `PermissionRequest` hook | `permission.asked` |
 | `input`: waiting for input | `Notification` with type `idle_prompt` or `elicitation_dialog` | not available | `form.created` |
 
@@ -68,8 +68,10 @@ stderr on every call. `scripts/mods doctor` lists the notifier for your platform
 Install steps are in [INSTALL.md](../../INSTALL.md); what each host can do is in
 [docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md).
 
-- Codex: the plugin hooks `Stop` and `PermissionRequest` with `async: true` and runs
-  `bin/notify.mjs hook` in the background, so notification delivery does not delay approval prompts.
+- Codex: the plugin runs `bin/notify.mjs hook` synchronously for `Stop`, so one-shot
+  `codex exec` waits for finish delivery before exiting. The hook has a one-second timeout;
+  the notifier process still has a 250 ms timeout. `PermissionRequest` keeps `async: true`,
+  so notification delivery does not delay approval prompts.
   See [Codex background hooks](https://developers.openai.com/codex/hooks#run-hooks-in-the-background).
   Delivery has a 250 ms process timeout on both Codex entry paths and still exits 0 on failure.
   After every install or update, review and trust changed hooks again with `/hooks`, or Codex
@@ -94,8 +96,9 @@ Install steps are in [INSTALL.md](../../INSTALL.md); what each host can do is in
 - Remote sessions notify on the machine the agent runs on, not on your desktop.
 - The title is the last folder of the session directory. Control characters are replaced with
   spaces and the name is cut at 60 characters.
-- Codex cancels unfinished background hooks when the session ends. A slow notifier can time out
-  before showing a notification; the legacy `notify` setting waits up to the delivery timeout.
+- Codex cancels unfinished background permission hooks when the session ends. The finish hook
+  waits up to its one-second cap; the notifier and the legacy `notify` setting's delivery each
+  have a 250 ms process timeout. A slow notifier can still time out before showing anything.
 
 ## Development
 

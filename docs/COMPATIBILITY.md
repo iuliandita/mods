@@ -194,7 +194,7 @@ Why the differences:
 
 | | Claude Code | Codex | OpenCode |
 | --- | --- | --- | --- |
-| Agent finished | `classic.Stop` hook | Background `Stop` hook, or the `notify` setting (`agent-turn-complete`, completion only) | `session.execution.succeeded` on 2.2.1; `session.idle` on older versions, deduplicated per execution |
+| Agent finished | `classic.Stop` hook | Synchronous `Stop` hook (one-second cap), including `codex exec`, or the `notify` setting (`agent-turn-complete`, completion only) | `session.execution.succeeded` on 2.2.1; `session.idle` on older versions, deduplicated per execution |
 | Permission needed | `classic.Notification`, type `permission_prompt` | Background `PermissionRequest` hook | `permission.asked` |
 | Waiting for input | `classic.Notification`, types `idle_prompt` and `elicitation_dialog` | **not available** | `form.created` |
 | Subagents | not notified | events with `agent_id` are skipped; `SubagentStop` is not hooked | not notified when seen created with a parent; sessions that existed before the plugin loaded are not told apart |
@@ -209,9 +209,10 @@ the `notify` setting; the OpenCode events against the published `@opencode/schem
 (a dependency of `@opencode/ai` 2.2.1). `permission.asked` still carries `data.sessionID`, and
 `form.created` carries `data.form.sessionID`. Success and legacy idle events share one finish
 notice per execution, reset by `session.execution.started` or the older busy-status event.
-Codex hooks use `async: true` so delivery does not delay approval prompts, and the command
-ends in `exit 0`. Both Codex entry paths give the notifier a 250 ms process timeout; a slow notifier
-may show nothing, and Codex cancels unfinished background hooks when the session ends. The legacy
+Codex's `Stop` hook is synchronous with a one-second hook timeout so `codex exec` waits for it.
+`PermissionRequest` keeps `async: true` so delivery does not delay approval prompts. Both commands
+end in `exit 0`. Both Codex entry paths give the notifier a 250 ms process timeout; a slow notifier
+may show nothing, and Codex cancels unfinished background permission hooks when the session ends. The legacy
 `notify` setting waits up to that timeout. Notifications show the
 project folder name and a fixed reason only, never message text or commands.
 

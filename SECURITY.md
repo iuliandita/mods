@@ -55,4 +55,6 @@ access and host integration remain unverified. See [what secret-box does not pro
 `notify` makes no network or model calls. It starts one local program (`notify-send` or
 `osascript`) with the project folder name and a fixed reason as text, never message text or
 commands, and without a shell. It reads options only from the plugin options or the user-level
-`notify.json`. Its hooks never block the agent; a failing notifier is a warning line.
+`notify.json`. A failing notifier is a warning line and never denies an operation. Codex waits
+for the finish hook, capped at one second with a 250 ms notifier timeout; permission
+notifications stay in the background.
