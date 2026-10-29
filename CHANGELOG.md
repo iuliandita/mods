@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- `secret-box` rechecks saved output metadata and link status immediately before writing, skips changed files, and documents the remaining race window in the engine API.
 - `secret-box` merges overlapping known-value matches in the hooks and helper, including across streamed output chunks, so overlapping values leave no exposed tail.
 - `guard-rules` scans decoded argument words for attribution and retains unparsed findings for encoded tool names, including when state combinations exceed the parser limit.
 - `guard-rules` tracks Terraform argument injection and cloud target overrides, HOME changes and alternate git common directories; injected Terraform arguments no longer bypass mutation checks.

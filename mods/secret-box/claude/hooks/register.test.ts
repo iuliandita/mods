@@ -13,16 +13,19 @@ const done = (stdout: string, exitCode = 0) => ({
 // Stands in for the engine beneath the plugin: the scrub protocol, its file, and the Bash tool.
 // `files` is the fake disk behind fs.read and fs.write; `stats` overrides what fs.stat reports for a path
 // ('throw' rejects it, 'hang' never answers).
+type StatOverride = Record<string, unknown> | 'throw' | 'hang'
+
 function world(
   on: On,
   values: Record<string, string> | 'fail' | (() => Record<string, string>) = { 'api.token': SECRET, pin: 'abc' },
   bash: object = { stdout: 'ran', stderr: '', interrupted: false },
   files = new Map<string, string>(),
-  stats = new Map<string, Record<string, unknown> | 'throw' | 'hang'>(),
+  stats = new Map<string, StatOverride | (() => StatOverride)>(),
 ) {
   const seen = { commands: [] as string[], loads: 0, toasts: [] as string[], reads: [] as string[], writes: [] as string[] }
   on('fs.stat', (_$, e) => {
-    const over = stats.get(e.path)
+    const configured = stats.get(e.path)
+    const over = typeof configured === 'function' ? configured() : configured
     if (over === 'throw') throw new Error('EIO')
     if (over === 'hang') return new Promise<never>(() => {})
     return { value: { kind: 'file', size: files.get(e.path)?.length ?? 1, mtimeMs: 0, isLink: false, realPath: e.path, ...over } }
@@ -135,6 +138,36 @@ test('the saved output file is scrubbed in place once; a failure leaves it, toas
   expect((r.result as { stdout: string }).stdout).toBe('x {{secret:api.token}}')
   expect(seen.writes).toEqual(['/o/tool-results/ok.txt'])
   expect(seen.toasts).toEqual(['secret-box: could not scrub the saved output file (unreadable); it may contain a secret'])
+})
+
+test('a changed or unreadable saved file is not overwritten after scrubbing', async ($, on) => {
+  const changes: [string, StatOverride][] = [
+    ['link', { isLink: true }],
+    ['size', { size: 999 }],
+    ['mtime', { mtimeMs: 1 }],
+    ['target', { realPath: '/other/tool-results/target.txt' }],
+    ['unresolved', { realPath: undefined }],
+    ['kind', { kind: 'dir' }],
+    ['missing', 'throw'],
+  ]
+  const text = `a ${SECRET}`
+  const files = new Map(changes.map(([name]) => [`/o/tool-results/${name}.txt`, text]))
+  const stats = new Map<string, StatOverride | (() => StatOverride)>()
+  const bash = { stdout: SECRET, persistedOutputPath: '' }
+  const seen = world(on, undefined, bash, files, stats)
+  for (const [name, changed] of changes) {
+    const path = `/o/tool-results/${name}.txt`
+    let calls = 0
+    stats.set(path, () => calls++ === 0 ? {} : changed)
+    bash.persistedOutputPath = path
+    const answer = await $.tool.call({ tool: 'Bash', command: 'cat big' })
+    expect((answer.result as { stdout: string }).stdout).toBe('{{secret:api.token}}')
+    expect(files.get(path)).toBe(text)
+    expect(calls).toBe(2)
+  }
+  expect(seen.reads).toEqual([...files.keys()])
+  expect(seen.writes).toEqual([])
+  expect(seen.toasts).toEqual(['secret-box: could not scrub the saved output file (changed-file); it may contain a secret'])
 })
 
 test('a link, a path outside or nested below tool-results, a path with .. and a file over 4 MiB are left alone with one toast', async ($, on) => {

@@ -244,8 +244,11 @@ This is not a security boundary.
   a larger file is never scrubbed in place. If the file cannot be checked, read or written, or is
   too large or in an unexpected place, it is left unchanged and one toast per session says
   `could not scrub the saved output file` with a short reason; it may still hold a secret. The
-  file existed unscrubbed between the command finishing and the rewrite. Mode `dry` reads and
-  writes nothing.
+  file existed unscrubbed between the command finishing and the rewrite. Immediately before writing,
+  the hook checks the file kind, link status, resolved path, size and modification time again;
+  a changed or unreadable file is left alone. The engine API exposes no inode, no-follow write or
+  rename, so a replacement with the same metadata or a swap after that check can still race the
+  write. Saved-file scrubbing is best-effort. Mode `dry` reads and writes nothing.
 - If the hook fails or runs out of time after the command ran (a hung file step, say), the fallback
   scrubs the answer only: it does no file work and shows no toast, so the saved file may keep a
   value. The file step is the likely cause of such a failure, so the fallback does not repeat it.

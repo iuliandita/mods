@@ -95,6 +95,12 @@ async function scrubSavedFile($: Engine, s: State, answer: unknown): Promise<voi
         reason = 'scrub-failed'
         const r = (await request($, [text])).results[0]!
         if (r.text === text) continue
+        reason = 'changed-file'
+        const current = await $.fs.stat(path, { resolve: true })
+        if (current.kind !== 'file' || current.isLink || current.realPath !== st.realPath ||
+          current.size !== st.size || current.mtimeMs !== st.mtimeMs) throw new Error(reason)
+        // The engine exposes no inode, no-follow write or rename. A same-metadata replacement or
+        // a swap after this check can still race the write; saved-file scrubbing stays best-effort.
         reason = 'write-failed'
         await $.fs.write(path, r.text)
       } catch {
