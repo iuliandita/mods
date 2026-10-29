@@ -97,7 +97,7 @@ Codex:
 
 ```bash
 codex plugin marketplace add iuliandita/mods
-codex plugin add guard-rules@iuliandita-mods   # or secret-box, prompt-gate, skill-pick @iuliandita-mods
+codex plugin add guard-rules@iuliandita-mods   # or secret-box @iuliandita-mods
 ```
 
 Codex skips a plugin hook until you trust it once with `/hooks` in the Codex terminal UI.
@@ -123,17 +123,19 @@ Claude plugin options. Remove their `cli.json` entries and restart OpenCode to d
 remove hook-plugin entries from `opencode.json` to uninstall those. Preserve the clone and
 user-level configuration when updating or rolling back a path-based install.
 
-`prompt-gate` and `skill-pick` default to `dry`, which still sends eligible prompts to a model:
-a nested Codex session uses plan tokens, and OpenCode uses its selected model provider. With a
-TypeSafe key, Jev may also receive them. On these two hosts, `jevPaths` restricts all of those
-calls; `mode: "off"` stops them. See the mod READMEs before enabling either.
-The catalog lists destinations across all supported hosts: `anthropic` for Claude,
-`third-party:openai` for Codex, and `third-party:host-provider` for OpenCode's selected provider.
-`third-party:typesafe` applies when Jev is enabled with a key.
-
 After a Codex install the hook command is
 `node <plugin>/bin/guard-rules.mjs`; the same file in a clone (`mods/guard-rules/codex/bin/`) is
 the command line tool for OpenCode users too.
+
+## Retired mods
+
+`prompt-gate` and `skill-pick` are no longer in the catalog. Remove an existing install with
+`scripts/mods uninstall prompt-gate skill-pick --scope user --json` (use the scope you installed
+at). The command also prints the steps it cannot do itself: on Codex run
+`codex plugin remove <mod>@iuliandita-mods`, and on OpenCode remove the `plugins` entry in
+`opencode.json` that ends in `mods/<mod>/opencode`. Their option files in
+`~/.config/iuliandita-mods/` and stored files under `~/.local/share/iuliandita-mods/` can be
+deleted. `scripts/mods list` shows a retired mod only while it is installed.
 
 ## Contributor checks
 

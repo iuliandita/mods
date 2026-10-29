@@ -116,6 +116,8 @@ def _emit(args: argparse.Namespace, payload: dict, text: str) -> None:
         print(text)
     for note in payload.get("notes", []):
         print(f"note: {note}", file=sys.stderr)
+    for step in payload.get("manual", []):
+        print(f"manual: {step}", file=sys.stderr)
     for err in payload.get("errors", []):
         print(f"error: {err}", file=sys.stderr)
 

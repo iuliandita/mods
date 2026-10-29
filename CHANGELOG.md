@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Removed
+
+- Breaking: the `prompt-gate` and `skill-pick` mods, with their shared helpers, the Jev client and
+  the Codex and OpenCode adapters. Neither showed a measured benefit, and both made a model call
+  per prompt. No prompt leaves the machine through mods now. To remove an existing install, run
+  `scripts/mods uninstall prompt-gate skill-pick` at the scope you installed at; it also prints the
+  Codex and OpenCode steps. `scripts/mods list` shows them as retired while installed.
+
 ## [0.2.0] - 2026-10-29
 
 Second collection prerelease, tagged on `develop`. Individual plugin versions are unchanged.

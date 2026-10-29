@@ -75,7 +75,7 @@ a terminal install at user scope loads in Desktop sessions too.
   `shared/`, never the copies. Only helpers that never touch `$` live there: the engine does not
   follow `$` across an import, and `claude plugin validate` lists a mod's `$` calls (env, http,
   store) from the mod's own files, so code that uses `$` stays in each mod on purpose.
-- `shared/<name>.inject.ts` is code that uses `$` and several mods need (the Jev client and log
+- `shared/<name>.inject.ts` is code that uses `$` and several mods need (for example a client or log
   write chain). A mod lists it in `"inject"` in its mod.json and holds the marker pair
   `// @inject <name> begin (...)` / `// @inject <name> end` in `claude/hooks/register.ts`;
   `scripts/mods generate` rewrites the text between them, and `generate --check` and `validate`
@@ -92,9 +92,6 @@ a terminal install at user scope loads in Desktop sessions too.
   A terminal UI plugin for OpenCode is `host/tui.ts`, built into `opencode/tui.js` with `@opentui/core` left external
   (see `scripts/host-shims`).
   `host_files` in mod.json copies a plugin file (a helper script) into each host package.
-  `prompt-gate` and `skill-pick` run the exported `gate`/`choose` of their `register.ts` on a Node
-  stand-in for the engine (`host-lib/engine.ts`), so that file may import only types from
-  `claude-code`; `scripts/host-shims/claude-code.d.ts` models those types for `typecheck --hosts`.
 - `local/` is gitignored: private mods (`local/mods/<name>/`) installed with `--local`.
 - `scripts/modslib/` is the CLI package; `tests/` is its pytest suite; `.github/` holds CI.
 - `private-patterns.txt` (gitignored, one regex per line; see `private-patterns.example.txt`)

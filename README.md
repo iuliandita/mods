@@ -1,6 +1,6 @@
 <h1><img src="assets/wordmark.png" alt="mods" width="360"></h1>
 
-Hooks and plugins for Claude Code, Codex, and OpenCode that you install one at a time: commit and infrastructure guards, secret handling, prompt and skill advisers, and session status panels.
+Hooks and plugins for Claude Code, Codex, and OpenCode that you install one at a time: commit and infrastructure guards, secret handling, and session status panels.
 
 Each mod is a plugin built on its host's hooks or plugin API. Mods run with your permissions and are not sandboxed: read a mod before installing it. Each mod lists what leaves your machine (`egress`) in its README and in `mods.json`.
 
@@ -22,8 +22,6 @@ registers that clone as the marketplace instead (or `--source <owner/repo>`).
 
 For Codex and OpenCode, see the mod's README and [INSTALL.md](INSTALL.md). OpenCode hook
 plugins use `opencode.json`; its terminal UI plugins use the global `cli.json` instead.
-Prompt advisers make model calls even in their default `dry` mode; check the host's costs
-and privacy limits before installing them.
 
 ## Usage
 
@@ -35,18 +33,16 @@ installed with `scripts/mods list`, and check the environment with `scripts/mods
 
 - `guard-rules`: blocks AI attribution in commits and PRs, direct commits to protected branches, commits under the wrong git identity, and mutating kubectl, helm and terraform calls on protected or unclassified environments.
 - `secret-box`: keeps secret values out of the chat; a secret placeholder in a Bash command is filled in at execution time from the OS keyring.
-- `prompt-gate`: before the main model spends a turn on a vague prompt, a small model says so and asks one short question. With a TypeSafe API key in the environment the prompt goes to a third party (Jev); `jevPaths` restricts where.
-- `skill-pick`: names the 1 to 5 installed skills that fit each prompt. With a TypeSafe API key the prompt and skill descriptions go to a third party (Jev); `jevPaths` restricts where.
 - `delegation-board`: a live pane of the session's subagents and teammates: type, model, effort, state, elapsed time and tokens; in Claude Desktop, a compact band above the prompt.
 - `statusline`: a two-row status line above the prompt in the terminal and Claude Desktop: model and effort, git state, context against your auto-compact window, 5h and 7d limits with pace, cache, cost and time. In a git repo with a GitHub or GitLab remote it runs `gh` or `glab` for PR and issue counts; `forge=off` turns that off.
 
 `mods.json` has the full catalog: egress, modes, requirements, and the install command per mod.
-All six mods have recorded Claude terminal checks; the compatibility page lists the tested
+All four mods have recorded Claude terminal checks; the compatibility page lists the tested
 behavior and versions. Other Claude surfaces remain unverified.
 
 ## Compatibility
 
-`guard-rules`, `secret-box`, `prompt-gate` and `skill-pick` run on Claude Code, Codex and OpenCode. `statusline` and `delegation-board` run on Claude Code and, as terminal UI plugins, on OpenCode.
+`guard-rules` and `secret-box` run on Claude Code, Codex and OpenCode. `statusline` and `delegation-board` run on Claude Code and, as terminal UI plugins, on OpenCode.
 [What works on which host, and why](docs/COMPATIBILITY.md).
 
 ## Private mods
