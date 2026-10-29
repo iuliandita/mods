@@ -1,5 +1,7 @@
 import { loadOptions } from '../../../host-lib/options'
 import { runsValues, VALUES_DENIED } from '../claude/hooks/commands'
+import { scopeDenied } from '../claude/hooks/scopes'
+import { resolve } from 'node:path'
 import { helperExists, helperMissing, parseMode, placeholderNames, rewrite } from './core'
 
 export type Io = { stdin: () => Promise<string>; out: (s: string) => void; err: (s: string) => void; helper: string; options?: string }
@@ -13,14 +15,14 @@ const deny = (io: Io, reason: string): number => {
 // helper running it (so the value is filled in only when it runs, and the helper scrubs the output, which a Codex
 // hook cannot). Like the Claude plugin it fails closed for placeholder commands only.
 export async function hook(io: Io): Promise<number> {
-  let input: { hook_event_name?: unknown; tool_name?: unknown; tool_input?: unknown }
+  let input: { hook_event_name?: unknown; tool_name?: unknown; tool_input?: unknown; cwd?: unknown }
   try {
     input = JSON.parse(await io.stdin())
   } catch {
     return 0
   }
   if (input.hook_event_name !== 'PreToolUse' || input.tool_name !== 'Bash') return 0
-  const toolInput = input.tool_input as { command?: unknown } | null
+  const toolInput = input.tool_input as { command?: unknown; workdir?: unknown } | null
   if (typeof toolInput?.command !== 'string') return 0
   const command = toolInput.command
   try {
@@ -29,10 +31,16 @@ export async function hook(io: Io): Promise<number> {
     const names = placeholderNames(command)
     if (mode === 'on' && runsValues(command)) return deny(io, VALUES_DENIED)
     if (mode === 'off' || names.length === 0) return 0
+    const cwd = typeof input.cwd === 'string' && input.cwd.startsWith('/') ? input.cwd : ''
+    const dir = cwd && typeof toolInput.workdir === 'string' && toolInput.workdir !== '' ? resolve(cwd, toolInput.workdir) : cwd
+    const scope = loaded.error
+      ? 'secret-box: error: secretScopes could not be read: the options file is invalid; fix secret-box.json'
+      : scopeDenied(loaded.options.secretScopes, names, dir)
     if (mode === 'dry') {
-      io.out(JSON.stringify({ systemMessage: `secret-box (dry run): would resolve ${names.join(', ')} at execution time` }))
+      io.out(JSON.stringify({ systemMessage: scope ?? `secret-box (dry run): would resolve ${names.join(', ')} at execution time` }))
       return 0
     }
+    if (scope) return deny(io, scope)
     if (!helperExists(io.helper)) return deny(io, helperMissing(io.helper))
     io.out(
       JSON.stringify({

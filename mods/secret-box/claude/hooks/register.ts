@@ -1,5 +1,6 @@
 import type { EngineInterface as Engine, Register } from 'claude-code'
 import { runsValues, VALUES_DENIED } from './commands'
+import { scopeDenied } from './scopes'
 
 import { makeScrubber, MIN_LEN, placeholderNames, quote, rewriteCommand, scrubBlocks, scrubToolAnswer, withhold, type Block, type Scrubber } from './scrub'
 
@@ -193,10 +194,13 @@ export const register: Register = (on, options) => {
       await scrubSavedFile($, s, scrub, clean)
       return clean
     }
+    const cwd = options.secretScopes === undefined || options.secretScopes === '' ? '' : await $.session.cwd()
+    const scope = scopeDenied(options.secretScopes, names, cwd)
     if (s.mode === 'dry') {
-      $.ui.toast(`secret-box (dry run): would resolve ${names.join(', ')} at execution time`)
+      $.ui.toast(scope ?? `secret-box (dry run): would resolve ${names.join(', ')} at execution time`)
       return next(e)
     }
+    if (scope) return { deny: scope }
     const wrapper = wrapperOf($)
     try {
       await $.fs.stat(wrapper)

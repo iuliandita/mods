@@ -91,6 +91,26 @@ test('model values calls are denied while the internal load and scrubbing still 
   expect(seen.loads).toBe(1)
 })
 
+test('scoped placeholders use the session directory while unscoped names still work', { options: { secretScopes: '{"api.token":["/projects/api/**"]}' } }, async ($, on) => {
+  const seen = world(on)
+  let cwd = '/projects/other'
+  on('session.cwd', () => ({ value: cwd }))
+  const denied = await $.tool.call({ tool: 'Bash', command: 'echo {{secret:api.token}}' })
+  expect(denied.deny).toBe('secret-box: error: api.token is not allowed in this directory; add the path to secretScopes')
+  expect(seen.commands).toEqual([])
+  cwd = '/projects/api/src'
+  expect((await $.tool.call({ tool: 'Bash', command: 'echo {{secret:api.token}}' })).deny).toBeUndefined()
+  cwd = '/projects/other'
+  expect((await $.tool.call({ tool: 'Bash', command: 'echo {{secret:pin}}' })).deny).toBeUndefined()
+})
+
+test('invalid scope options deny a placeholder before it runs', { options: { secretScopes: '{broken' } }, async ($, on) => {
+  const seen = world(on)
+  on('session.cwd', () => ({ value: '/projects/api' }))
+  expect((await $.tool.call({ tool: 'Bash', command: 'echo {{secret:api.token}}' })).deny).toContain('secretScopes is invalid')
+  expect(seen.commands).toEqual([])
+})
+
 test('a Bash call without a placeholder has a known value in its structured result replaced', async ($, on) => {
   world(on, undefined, { stdout: `t=${SECRET}`, stderr: `e ${B64}`, interrupted: false })
   const r = await $.tool.call({ tool: 'Bash', command: 'echo $TOKEN' })

@@ -4,6 +4,8 @@
 
 ### Added
 
+- `secret-box` option `secretScopes` limits named placeholders to configured directory globs on all three hosts.
+
 - `guard-rules` option `modeUnparsed` (`on`, `dry`, `off`) controls parser findings separately; `on` preserves existing behavior and `ask` remains unsupported.
 
 ### Changed
