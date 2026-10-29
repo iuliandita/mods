@@ -43,12 +43,6 @@
   },
   "allow": [
     {
-      "check": "workflow-jobs",
-      "path": ".github/workflows/ci.yml",
-      "match": "job \"test\"",
-      "reason": "The test matrix runs Python 3.10 and 3.12, and the branch ruleset requires the check names test (3.10) and test (3.12)."
-    },
-    {
       "check": "ascii-markdown",
       "path": "mods/statusline/README.md",
       "reason": "The statusline mod draws these glyphs, and its README documents the literal symbols a user sees."
