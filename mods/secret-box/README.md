@@ -27,6 +27,31 @@ is verified; Desktop, VS Code and headless behavior remain untested.
 Egress: none (no network, no model calls). The helper selects libsecret through `secret-tool`
 on Linux and Keychain through `/usr/bin/security` on macOS. Windows is unsupported.
 
+## What it does not protect
+
+This is not a security boundary. These limits apply in mode `on`; `off` and `dry` do not scrub.
+
+- **All hosts:** Values under 6 characters and unknown secrets are not scrubbed. Hashes, split
+  values and transformations outside the supported JSON, URL and base64 forms can pass through.
+  Child processes receive the values in their environment and may put them in argv, files or
+  network requests; scrubbing does not prevent that access.
+- **Claude Code:** A failed first keyring load leaves scrubbing off. Saved Bash output over
+  4 MiB, links, unexpected paths and files that cannot be read or written stay unchanged.
+  Attachments, structured non-Bash records, tool calls and thinking can retain raw values even
+  when model-facing text is scrubbed. Prompt-history protection is unverified.
+- **Codex:** Only a helper-wrapped command's own stdout and stderr are scrubbed. Other tool
+  results, prompts and conversation content stay raw. Failed helper loads block execution; a
+  hook that cannot start leaves the command unchanged with its placeholder unfilled.
+- **OpenCode:** A failed first keyring load leaves results, messages and prompts unscrubbed.
+  Result and conversation hooks do not rewrite saved output files on disk. On Claude Code and
+  OpenCode, a failed reload keeps the last successful values; newly added or changed values may
+  be unknown until a successful reload.
+- **Keyring access and scopes:** All hosts block literal model calls to `values` in mode `on`,
+  but scripts, dynamically built commands and other keyring clients remain accessible.
+  `secretScopes` is optional and checks only the call's starting directory. Neither Linux
+  Secret Service nor macOS Keychain makes these hooks a sandbox. Real macOS Keychain access
+  and host integration remain unverified.
+
 ## Compatibility status
 
 - Claude Code: verified on 2.1.296 in the terminal.
