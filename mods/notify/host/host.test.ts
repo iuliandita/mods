@@ -63,13 +63,17 @@ test('codex skips subagent hooks and notify-setting events', async () => {
   expect(seen.err).toEqual([])
 })
 
-test('codex hooks run in the background and a sleeping notifier is capped on both entry paths', async () => {
+test('codex Stop is synchronous, PermissionRequest stays background, and both entry paths cap a sleeping notifier', async () => {
   withOptions({})
   const manifest = JSON.parse(readFileSync(join(import.meta.dir, '../codex/hooks/hooks.json'), 'utf8'))
-  for (const event of ['Stop', 'PermissionRequest']) {
+  for (const { event, background, timeout } of [
+    { event: 'Stop', background: false, timeout: 1 },
+    { event: 'PermissionRequest', background: true, timeout: 10 },
+  ]) {
     expect(manifest.hooks[event]).toHaveLength(1)
     expect(manifest.hooks[event][0].hooks).toHaveLength(1)
-    expect(manifest.hooks[event][0].hooks[0].async).toBe(true)
+    expect(manifest.hooks[event][0].hooks[0].async).toBe(background)
+    expect(manifest.hooks[event][0].hooks[0].timeout).toBe(timeout)
   }
   const stub = join(root, 'sleeping-notifier')
   const started = join(root, 'notifier-started')
@@ -79,12 +83,24 @@ test('codex hooks run in the background and a sleeping notifier is capped on bot
     const { seen, io } = world({ run: () => codexRunner([stub, started]) })
     const begin = performance.now()
     const argv = command === 'hook' ? ['hook'] : ['notify', JSON.stringify({ type: 'agent-turn-complete' })]
-    expect(await main(argv, io(hook('PermissionRequest')))).toBe(0)
+    expect(await main(argv, io(hook('Stop')))).toBe(0)
     expect(performance.now() - begin).toBeLessThan(1_500)
     expect(readFileSync(started, 'utf8')).toBe('started')
     expect(seen.err).toHaveLength(1)
     expect(seen.err[0]).toContain('notify-send failed')
   }
+})
+
+test('codex Stop waits for delivery before returning, and notifier failure still exits zero', async () => {
+  withOptions({})
+  const stub = join(root, 'finish-notifier')
+  const delivered = join(root, 'finish-delivered')
+  writeFileSync(stub, '#!/bin/sh\nsleep 0.05\nprintf finished > "$1"\n', { mode: 0o755 })
+  const { seen, io } = world({ run: () => codexRunner([stub, delivered]) })
+  expect(await main(['hook'], io(hook('Stop')))).toBe(0)
+  expect(readFileSync(delivered, 'utf8')).toBe('finished')
+  expect(seen.err).toEqual([])
+  expect(await main(['hook'], world({ runner: 'fail' }).io(hook('Stop')))).toBe(0)
 })
 
 test('options from the user file: events, sound, mode off, and a broken file gives defaults with a warning', async () => {

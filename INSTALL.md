@@ -43,8 +43,9 @@ For `notify`, install `notify-send` (libnotify) on Linux; macOS uses the built-i
 A missing notifier is a one-line `notify: warning:` and never a failure; `scripts/mods doctor`
 lists it under the mod's `requires`. On Codex and OpenCode set options in
 `~/.config/iuliandita-mods/notify.json`; see the mod's [README](mods/notify/README.md) for the events
-each host supports. Codex hooks run in the background and skip events with `agent_id`; notifier
-delivery has a 250 ms process timeout. It has no verified runtime check on any host yet.
+each host supports. Codex's finish hook runs synchronously, including under `codex exec`, with a
+one-second hook cap; permission hooks stay in the background. Events with `agent_id` are skipped,
+and notifier delivery has a 250 ms process timeout. It has no verified runtime check on any host yet.
 
 ## Clone CLI and scopes
 
