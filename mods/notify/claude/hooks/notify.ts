@@ -59,7 +59,8 @@ export function claudeNotice(event: 'Stop' | 'Notification', input: { cwd?: unkn
 }
 
 // Codex: the Stop and PermissionRequest hooks (stdin), or the `notify` setting's agent-turn-complete payload.
-export function codexNotice(input: { hook_event_name?: unknown; type?: unknown; cwd?: unknown }): Notice | null {
+export function codexNotice(input: { hook_event_name?: unknown; type?: unknown; cwd?: unknown; agent_id?: unknown }): Notice | null {
+  if (input.agent_id) return null
   if (input.hook_event_name === 'Stop' || input.type === 'agent-turn-complete') return make('finish', input.cwd, REASON.finish)
   if (input.hook_event_name === 'PermissionRequest') return make('input', input.cwd, REASON.permission)
   return null

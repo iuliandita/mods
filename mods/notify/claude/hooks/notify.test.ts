@@ -34,6 +34,9 @@ test('Codex events: Stop and the notify setting finish, PermissionRequest is inp
   expect(codexNotice({ type: 'agent-turn-complete', cwd: '/w/repo' })?.kind).toBe('finish')
   expect(codexNotice({ hook_event_name: 'PermissionRequest', cwd: '/w/repo' })).toEqual({ kind: 'input', title: 'repo', body: 'Needs your permission' })
   for (const other of [{}, { hook_event_name: 'PreToolUse' }, { type: 'approval-requested' }]) expect(codexNotice(other)).toBeNull()
+  for (const event of [{ hook_event_name: 'Stop' }, { hook_event_name: 'PermissionRequest' }, { type: 'agent-turn-complete' }]) {
+    expect(codexNotice({ ...event, agent_id: 'child' })).toBeNull()
+  }
 })
 
 test('OpenCode events: idle is finish, a permission or a form is input', () => {

@@ -1,12 +1,12 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { Runner } from '../claude/hooks/notify'
 import { main, type Io } from './cli'
 import { setup } from './opencode'
-import { nodeRunner } from './run'
+import { codexRunner, nodeRunner } from './run'
 
 let root: string
 let options: string
@@ -50,6 +50,41 @@ test('codex notify setting: the JSON argument counts, agent-turn-complete only',
   expect(await main(['notify', JSON.stringify({ type: 'something-else', cwd: '/w' })], io(''))).toBe(0)
   expect(seen.runs).toEqual([['notify-send', '--app-name=mods', '--', 'api', 'Finished']])
   expect(JSON.stringify(seen.runs)).not.toContain('secret text')
+})
+
+test('codex skips subagent hooks and notify-setting events', async () => {
+  withOptions({})
+  const { seen, io } = world()
+  for (const hook_event_name of ['Stop', 'PermissionRequest', 'SubagentStop']) {
+    await main(['hook'], io(JSON.stringify({ hook_event_name, cwd: '/work/repo', agent_id: 'child' })))
+  }
+  await main(['notify', JSON.stringify({ type: 'agent-turn-complete', agent_id: 'child' })], io(''))
+  expect(seen.runs).toEqual([])
+  expect(seen.err).toEqual([])
+})
+
+test('codex hooks run in the background and a sleeping notifier is capped on both entry paths', async () => {
+  withOptions({})
+  const manifest = JSON.parse(readFileSync(join(import.meta.dir, '../codex/hooks/hooks.json'), 'utf8'))
+  for (const event of ['Stop', 'PermissionRequest']) {
+    expect(manifest.hooks[event]).toHaveLength(1)
+    expect(manifest.hooks[event][0].hooks).toHaveLength(1)
+    expect(manifest.hooks[event][0].hooks[0].async).toBe(true)
+  }
+  const stub = join(root, 'sleeping-notifier')
+  const started = join(root, 'notifier-started')
+  writeFileSync(stub, '#!/bin/sh\ntrap "" TERM\nprintf started > "$1"\nexec sleep 5\n', { mode: 0o755 })
+  for (const command of ['hook', 'notify']) {
+    rmSync(started, { force: true })
+    const { seen, io } = world({ run: () => codexRunner([stub, started]) })
+    const begin = performance.now()
+    const argv = command === 'hook' ? ['hook'] : ['notify', JSON.stringify({ type: 'agent-turn-complete' })]
+    expect(await main(argv, io(hook('PermissionRequest')))).toBe(0)
+    expect(performance.now() - begin).toBeLessThan(1_500)
+    expect(readFileSync(started, 'utf8')).toBe('started')
+    expect(seen.err).toHaveLength(1)
+    expect(seen.err[0]).toContain('notify-send failed')
+  }
 })
 
 test('options from the user file: events, sound, mode off, and a broken file gives defaults with a warning', async () => {

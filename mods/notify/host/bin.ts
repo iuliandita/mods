@@ -1,5 +1,5 @@
 import { main } from './cli'
-import { nodeRunner } from './run'
+import { codexRunner } from './run'
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = []
@@ -11,7 +11,7 @@ try {
   process.exitCode = await main(process.argv.slice(2), {
     stdin: readStdin,
     err: (s) => void process.stderr.write(s.endsWith('\n') ? s : s + '\n'),
-    run: nodeRunner,
+    run: codexRunner,
     platform: process.platform,
   })
 } catch (e) {

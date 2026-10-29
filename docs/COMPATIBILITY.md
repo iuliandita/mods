@@ -179,10 +179,10 @@ Why the differences:
 
 | | Claude Code | Codex | OpenCode |
 | --- | --- | --- | --- |
-| Agent finished | `classic.Stop` hook | `Stop` hook, or the `notify` setting (`agent-turn-complete`, completion only) | `session.idle` on the plugin's event stream |
-| Permission needed | `classic.Notification`, type `permission_prompt` | `PermissionRequest` hook | `permission.asked` |
+| Agent finished | `classic.Stop` hook | Background `Stop` hook, or the `notify` setting (`agent-turn-complete`, completion only) | `session.idle` on the plugin's event stream |
+| Permission needed | `classic.Notification`, type `permission_prompt` | Background `PermissionRequest` hook | `permission.asked` |
 | Waiting for input | `classic.Notification`, types `idle_prompt` and `elicitation_dialog` | **not available** | `form.created` |
-| Subagents | not notified | not notified (`SubagentStop` is not hooked) | not notified when seen created with a parent; sessions that existed before the plugin loaded are not told apart |
+| Subagents | not notified | events with `agent_id` are skipped; `SubagentStop` is not hooked | not notified when seen created with a parent; sessions that existed before the plugin loaded are not told apart |
 | Options | plugin options | `~/.config/iuliandita-mods/notify.json` | the same file, read per event |
 | Notifier | `notify-send` (Linux), `osascript` (macOS) | the same | the same |
 | Missing notifier | one warning toast per session | one stderr line per hook run | one log line per distinct warning |
@@ -191,7 +191,10 @@ Nothing here was run on a real host. The Claude events are checked against the i
 and tests with a mocked engine; the Codex events against the hook schemas shipped in Codex CLI 0.165.0
 (`stop.command.input`, `permission-request.command.input`) and the `agent-turn-complete` payload of
 the `notify` setting; the OpenCode events against the `@opencode/plugin` and `@opencode/client` 2.0.29
-types. The Codex hook command ends in `exit 0`, so it cannot block the agent. Notifications show the
+types. Codex hooks use `async: true` so delivery does not delay approval prompts, and the command
+ends in `exit 0`. Both Codex entry paths give the notifier a 250 ms process timeout; a slow notifier
+may show nothing, and Codex cancels unfinished background hooks when the session ends. The legacy
+`notify` setting waits up to that timeout. Notifications show the
 project folder name and a fixed reason only, never message text or commands.
 
 ## How a mod gets a host
