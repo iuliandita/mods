@@ -1,6 +1,6 @@
 {
   "name": "notify",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Desktop notification when the agent finishes or waits on a permission prompt or other input, with the project folder as title and an optional sound. Uses notify-send on Linux and osascript on macOS; makes no network or model calls.",
   "private": true,
   "type": "module",

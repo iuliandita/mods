@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `notify` clears `LD_LIBRARY_PATH` and `LD_PRELOAD` for Linux notifications so a host's bundled libraries do not break `notify-send`. Missing notifiers still warn without failing the session. The plugin is at 0.3.3.
+
 ### Changed
 
 - `notify` titles a notification `<repo> (<harness>)`, such as `mods (Codex)`, and adds ` on <branch>` to the text, such as `Finished on develop`. The repo is the nearest parent folder with a `.git`; the branch is read from `.git/HEAD` without running git. The plugin is at 0.3.2.

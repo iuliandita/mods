@@ -1,6 +1,6 @@
 {
   "name": "notify",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Desktop notification when the agent finishes or waits on a permission prompt or other input, titled with the repo and harness, the branch in the text, and an optional sound. Uses notify-send on Linux and osascript on macOS; makes no network or model calls.",
   "author": { "name": "iuliandita" },
   "userConfig": {

@@ -27,7 +27,7 @@ const sent = (seen: { runs: string[][] }) => seen.runs.filter((a) => a[0] !== 'u
 test('Stop shows a finish notice titled with the project folder and harness', async ($, on) => {
   const seen = world(on)
   await $.classic.Stop({ cwd: '/work/my-repo', stop_hook_active: false })
-  expect(sent(seen)).toEqual([['notify-send', '--app-name=mods', '--', 'my-repo (Claude Code)', 'Finished']])
+  expect(sent(seen)).toEqual([['env', '-u', 'LD_LIBRARY_PATH', '-u', 'LD_PRELOAD', 'notify-send', '--app-name=mods', '--', 'my-repo (Claude Code)', 'Finished']])
   expect(seen.toasts).toEqual([])
 })
 
@@ -36,7 +36,7 @@ test('Notification shows an input notice by its type; other types and subagents 
   await $.classic.Notification({ cwd: '/work/my-repo', message: 'Claude needs your permission to use Bash', notification_type: 'permission_prompt' })
   await $.classic.Notification({ cwd: '/work/my-repo', message: 'logged in', notification_type: 'auth_success' })
   await $.classic.Stop({ cwd: '/work/my-repo', stop_hook_active: false, agent_id: 'sub' })
-  expect(sent(seen)).toEqual([['notify-send', '--app-name=mods', '--', 'my-repo (Claude Code)', 'Needs your permission']])
+  expect(sent(seen)).toEqual([['env', '-u', 'LD_LIBRARY_PATH', '-u', 'LD_PRELOAD', 'notify-send', '--app-name=mods', '--', 'my-repo (Claude Code)', 'Needs your permission']])
   expect(JSON.stringify(seen.runs)).not.toContain('Bash')
 })
 
@@ -94,5 +94,5 @@ test('the title and body use the repo folder and branch read through the engine'
   on('fs.stat', (_$, e) => ((e as { path: string }).path === '/h/code/mods/.git' ? ({ value: { kind: 'dir' } } as never) : ({ deny: 'ENOENT' } as never)))
   on('fs.read', (_$, e) => ((e as { path: string }).path === '/h/code/mods/.git/HEAD' ? ({ value: 'ref: refs/heads/develop\n' } as never) : ({ deny: 'ENOENT' } as never)))
   await $.classic.Stop({ cwd: '/h/code/mods/mods/notify', stop_hook_active: false })
-  expect(sent(seen)).toEqual([['notify-send', '--app-name=mods', '--', 'mods (Claude Code)', 'Finished on develop']])
+  expect(sent(seen)).toEqual([['env', '-u', 'LD_LIBRARY_PATH', '-u', 'LD_PRELOAD', 'notify-send', '--app-name=mods', '--', 'mods (Claude Code)', 'Finished on develop']])
 })

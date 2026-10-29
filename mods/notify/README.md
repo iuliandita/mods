@@ -63,6 +63,7 @@ Linux or macOS, the mod shows one warning and the session carries on:
 On Claude Code the warning is a toast, once per session. On OpenCode it goes to the host log, once
 per distinct message. A Codex hook is a new process each time, so its warning goes to the hook's
 stderr on every call. `scripts/mods doctor` lists the notifier for your platform under `requires`.
+On Linux, the mod clears `LD_LIBRARY_PATH` and `LD_PRELOAD` before starting `notify-send` so hosts that set them do not load their bundled libraries into it.
 
 ## Codex and OpenCode
 
