@@ -28,7 +28,9 @@
 
 - `statusline` clears the branch's PR badge when the repository or branch changes, so a failed lookup no longer shows the previous branch's PR.
 
-- `secret-box` on OpenCode keeps object keys and the `role` and `type` values when a scrub fails, so messages stay readable; `exec` always scrubs its output (`--scrub` is still accepted); the helper reply is raw UTF-8, so large non-ASCII saved files fit the 4 MiB limit.
+- `secret-box` on OpenCode allowlists message roles and content-part fields after a scrub failure, discards arbitrary keys and nested payloads, and withholds results and prompts entirely.
+
+- `secret-box exec` always scrubs its output (`--scrub` is still accepted); the helper reply is raw UTF-8, so large non-ASCII saved files fit the 4 MiB limit.
 
 - `scripts/mods uninstall` always prints the Codex and OpenCode steps for retired mods, treats "not installed" in Claude Code as a skip and a missing `claude` CLI as a note, and keeps the steps in the payload when the Claude uninstall really fails.
 

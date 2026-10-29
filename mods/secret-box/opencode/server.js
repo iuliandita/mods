@@ -172,8 +172,45 @@ function request(helper, texts) {
 var rewrite = (helper, command) => rewriteCommand(helper, command, true);
 var WITHHELD = "[secret-box: this content was withheld because scrubbing failed]";
 var MAX_DEPTH = 24;
-var KEEP_ON_FAILURE2 = new Set(["role", "type"]);
-function scrubValue(value, scrub, shape = false) {
+var MESSAGE_ROLES = new Set(["system", "user", "assistant", "tool"]);
+var CONTENT_TYPES = new Set(["text", "reasoning", "media", "tool-call", "tool-result", "compaction", "effort"]);
+function withholdMessages(value) {
+  if (!Array.isArray(value))
+    return WITHHELD;
+  const toolIds = new Map;
+  const toolId = (part) => {
+    const original = part !== null && typeof part === "object" && "id" in part && typeof part.id === "string" ? part.id : "";
+    let id = toolIds.get(original);
+    if (id === undefined) {
+      id = `withheld-${toolIds.size + 1}`;
+      toolIds.set(original, id);
+    }
+    return id;
+  };
+  return value.map((message) => {
+    const role = message !== null && typeof message === "object" && "role" in message && typeof message.role === "string" && MESSAGE_ROLES.has(message.role) ? message.role : "user";
+    const content = message !== null && typeof message === "object" && "content" in message && Array.isArray(message.content) ? message.content : [null];
+    return {
+      role,
+      content: content.map((part) => {
+        const type = part !== null && typeof part === "object" && "type" in part && typeof part.type === "string" && CONTENT_TYPES.has(part.type) ? part.type : "text";
+        switch (type) {
+          case "tool-call":
+            return { type, id: toolId(part), name: "withheld", input: WITHHELD };
+          case "tool-result":
+            return { type, id: toolId(part), name: "withheld", result: { type: "text", value: WITHHELD } };
+          case "effort":
+            return { type };
+          case "reasoning":
+            return { type, text: WITHHELD };
+          default:
+            return { type: "text", text: WITHHELD };
+        }
+      })
+    };
+  });
+}
+function scrubValue(value, scrub) {
   const names = new Set;
   let changed = false;
   const text = (s) => {
@@ -201,11 +238,11 @@ function scrubValue(value, scrub, shape = false) {
         return v;
       const out = Object.create(Object.getPrototypeOf(v));
       for (const [k, x] of entries) {
-        const base = shape ? k : text(k);
+        const base = text(k);
         let key = base;
         for (let n = 2;key in out; n++)
           key = `${base}#${n}`;
-        out[key] = shape && typeof x === "string" && KEEP_ON_FAILURE2.has(k) ? x : walk(x, depth + 1, path);
+        out[key] = walk(x, depth + 1, path);
       }
       return out;
     } finally {
@@ -215,12 +252,12 @@ function scrubValue(value, scrub, shape = false) {
   const out = walk(value, 0, new Set);
   return { value: out, names: [...names], changed };
 }
-async function scrubRemote(helper, value) {
+async function scrubRemote(helper, value, messages = false) {
   try {
     const r = await scrubBatch((scrub) => scrubValue(value, scrub), (texts) => request(helper, texts));
     return r.value;
   } catch {
-    return scrubValue(value, () => ({ text: WITHHELD, names: ["withheld"] }), true).value;
+    return messages ? withholdMessages(value) : WITHHELD;
   }
 }
 
@@ -256,16 +293,16 @@ async function setup(ctx, deps) {
   await ctx.tool.hook("execute.after", async (e) => {
     if (mode() !== "on")
       return;
-    const [result, error] = await scrubRemote(deps.helper, [e.result, e.error]);
+    const checked = await scrubRemote(deps.helper, [e.result, e.error]);
     if (e.result !== undefined)
-      e.result = result;
+      e.result = Array.isArray(checked) ? checked[0] : checked;
     if (e.error !== undefined)
-      e.error = error;
+      e.error = Array.isArray(checked) ? checked[1] : checked;
   });
   await ctx.session.hook("context", async (e) => {
     if (mode() !== "on")
       return;
-    e.messages = await scrubRemote(deps.helper, e.messages);
+    e.messages = await scrubRemote(deps.helper, e.messages, true);
   });
   await ctx.session.hook("prompt", async (e) => {
     if (mode() !== "on")

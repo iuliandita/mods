@@ -99,21 +99,37 @@ test('opencode withholds unchecked strings when the scrub helper cannot start', 
   expect(JSON.stringify(after.result)).toContain('withheld')
 })
 
-test('opencode keeps message keys and withholds text when the scrub helper fails', async () => {
+test('opencode fallback allowlists message structure and withholds nested discriminators and keys', async () => {
   withMode()
   const h = await plugin({ helper: join(root, 'missing') })
-  const ctx: { messages: { role: string; parts: Record<string, unknown>[] }[] } = {
-    messages: [{ role: 'user', parts: [{ type: 'text', text: `see ${SECRET}` }] }, { role: 'assistant', parts: [{ type: 'tool', state: { input: { command: SECRET } } }] }],
+  const ctx = {
+    messages: [
+      { role: 'user', content: [{ type: 'text', text: SECRET, [SECRET]: true, nested: { type: SECRET, role: 'assistant' } }], [SECRET]: 1 },
+      { role: 'assistant', content: [{ type: 'tool-call', id: SECRET, name: SECRET, input: { type: SECRET, role: SECRET, [SECRET]: 1 } }] },
+      { role: 'tool', content: [{ type: 'tool-result', id: SECRET, name: SECRET, result: { type: 'json', value: { [SECRET]: SECRET } } }] },
+      { role: SECRET, content: [{ type: SECRET, text: SECRET }] },
+    ],
   }
   await h.context!(ctx)
   const text = JSON.stringify(ctx.messages)
   expect(text).not.toContain(SECRET.slice(0, 8))
-  expect(Object.keys(ctx.messages[0]!)).toEqual(['role', 'parts'])
-  expect(Object.keys(ctx.messages[0]!.parts[0]!)).toEqual(['type', 'text'])
+  expect(Object.keys(ctx.messages[0]!)).toEqual(['role', 'content'])
+  expect(Object.keys(ctx.messages[0]!.content[0]!)).toEqual(['type', 'text'])
   expect(ctx.messages[0]!.role).toBe('user')
-  expect(ctx.messages[0]!.parts[0]!.type).toBe('text')
-  expect(ctx.messages[0]!.parts[0]!.text).toContain('withheld')
-  expect(Object.keys(ctx.messages[1]!.parts[0]!)).toEqual(['type', 'state'])
+  expect(ctx.messages[0]!.content[0]!.type).toBe('text')
+  expect(ctx.messages[0]!.content[0]).toEqual({ type: 'text', text: expect.stringContaining('withheld') })
+  expect(ctx.messages[1]!.content[0]!.type).toBe('tool-call')
+  expect(ctx.messages[2]!.content[0]!.type).toBe('tool-result')
+  expect(ctx.messages[3]).toEqual({ role: 'user', content: [{ type: 'text', text: expect.stringContaining('withheld') }] })
+  for (const field of ['type', 'role', SECRET]) {
+    const after = { tool: 'read', id: 'failed', status: 'error', result: { [field]: SECRET }, error: { [SECRET]: { type: 'text', role: SECRET } } }
+    await h.after!(after)
+    expect(JSON.stringify([after.result, after.error])).not.toContain(SECRET)
+    expect(typeof after.result).toBe('string')
+  }
+  const prompt = { prompt: { [SECRET]: { type: SECRET, role: SECRET } } }
+  await h.prompt!(prompt)
+  expect(JSON.stringify(prompt)).not.toContain(SECRET)
 })
 
 test('the helper reply stays near the text size for non-ASCII text, so a large file still fits the 4 MiB cap', async () => {

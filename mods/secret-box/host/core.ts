@@ -41,15 +41,52 @@ export const rewrite = (helper: string, command: string): string => rewriteComma
 
 const WITHHELD = '[secret-box: this content was withheld because scrubbing failed]'
 const MAX_DEPTH = 24
-// Structural fields a host reads to tell a message part from another; the same idea as Claude's list.
-const KEEP_ON_FAILURE = new Set(['role', 'type'])
+
+// @opencode/ai 2.0.29 schema/messages: only message roles and content-part tags are structural.
+// Rebuild a minimal message rather than walking arbitrary payloads with a key-name exemption.
+const MESSAGE_ROLES = new Set(['system', 'user', 'assistant', 'tool'])
+const CONTENT_TYPES = new Set(['text', 'reasoning', 'media', 'tool-call', 'tool-result', 'compaction', 'effort'])
+
+function withholdMessages(value: unknown): unknown {
+  if (!Array.isArray(value)) return WITHHELD
+  const toolIds = new Map<string, string>()
+  const toolId = (part: unknown): string => {
+    const original = part !== null && typeof part === 'object' && 'id' in part && typeof part.id === 'string' ? part.id : ''
+    let id = toolIds.get(original)
+    if (id === undefined) {
+      id = `withheld-${toolIds.size + 1}`
+      toolIds.set(original, id)
+    }
+    return id
+  }
+  return value.map((message: unknown) => {
+    const role = message !== null && typeof message === 'object' && 'role' in message
+      && typeof message.role === 'string' && MESSAGE_ROLES.has(message.role) ? message.role : 'user'
+    const content = message !== null && typeof message === 'object' && 'content' in message
+      && Array.isArray(message.content) ? message.content : [null]
+    return {
+      role,
+      content: content.map((part: unknown) => {
+        const type = part !== null && typeof part === 'object' && 'type' in part
+          && typeof part.type === 'string' && CONTENT_TYPES.has(part.type) ? part.type : 'text'
+        switch (type) {
+          case 'tool-call': return { type, id: toolId(part), name: 'withheld', input: WITHHELD }
+          case 'tool-result': return { type, id: toolId(part), name: 'withheld', result: { type: 'text', value: WITHHELD } }
+          case 'effort': return { type }
+          case 'reasoning': return { type, text: WITHHELD }
+          // Media and compaction require unchecked assets/provider state; replace the whole part.
+          default: return { type: 'text', text: WITHHELD }
+        }
+      }),
+    }
+  })
+}
 
 // Every string and object key under a value, copied (a class instance keeps its prototype; a value with no
 // own enumerable fields, like a Date, is left as it is). A subtree deeper than MAX_DEPTH or looping back is
 // replaced by a notice and counts as a change, so a caller never keeps the original. A key that then collides
-// with another gets a `#2`, `#3`... suffix. With `shape` set the keys stay as they are, and so do the string
-// values under the KEEP_ON_FAILURE keys, so a host can still read what it was given.
-export function scrubValue<T>(value: T, scrub: Scrubber, shape = false): { value: T; names: string[]; changed: boolean } {
+// with another gets a `#2`, `#3`... suffix.
+export function scrubValue<T>(value: T, scrub: Scrubber): { value: T; names: string[]; changed: boolean } {
   const names = new Set<string>()
   let changed = false
   const text = (s: string): string => {
@@ -72,10 +109,10 @@ export function scrubValue<T>(value: T, scrub: Scrubber, shape = false): { value
       if (entries.length === 0) return v
       const out = Object.create(Object.getPrototypeOf(v)) as Record<string, unknown>
       for (const [k, x] of entries) {
-        const base = shape ? k : text(k)
+        const base = text(k)
         let key = base
         for (let n = 2; key in out; n++) key = `${base}#${n}`
-        out[key] = shape && typeof x === 'string' && KEEP_ON_FAILURE.has(k) ? x : walk(x, depth + 1, path)
+        out[key] = walk(x, depth + 1, path)
       }
       return out
     } finally {
@@ -86,12 +123,11 @@ export function scrubValue<T>(value: T, scrub: Scrubber, shape = false): { value
   return { value: out, names: [...names], changed }
 }
 
-export async function scrubRemote<T>(helper: string, value: T): Promise<T> {
+export async function scrubRemote(helper: string, value: unknown, messages = false): Promise<unknown> {
   try {
     const r = await scrubBatch((scrub) => scrubValue(value, scrub), (texts) => request(helper, texts))
     return r.value
   } catch {
-    // Renamed keys would break the host's messages for every turn until the helper works again.
-    return scrubValue(value, () => ({ text: WITHHELD, names: ['withheld'] }), true).value
+    return messages ? withholdMessages(value) : WITHHELD
   }
 }
