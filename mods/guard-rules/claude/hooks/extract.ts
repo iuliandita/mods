@@ -17,7 +17,7 @@ const OPAQUE_TOOLS = new Set(['git', 'gh', 'glab', 'tea', 'fj', 'kubectl', 'helm
 // `cat` only copies its input, so a commit message heredoc (`"$(cat <<'EOF' ...)"`) that names a tool stays data.
 const TEXT_HEADS = new Set(['echo', 'printf', 'man', 'which', 'type', 'grep', 'rg', 'cat'])
 const DATA_HEADS = new Set(['ls', 'mkdir', 'rmdir', 'touch', 'cp', 'mv', 'rm', 'head', 'tail', 'wc', 'tee', 'curl', 'basename', 'dirname', 'realpath', 'readlink', 'file', 'stat', 'du', 'df', 'cut', 'uniq', 'diff', 'cmp'])
-const INPUT_EXECUTORS = new Set(['xargs', ...SHELLS, 'awk', 'gawk', 'mawk', 'perl', 'ruby', 'node', 'env', 'parallel', 'watch', 'script'])
+const INPUT_EXECUTORS = new Set(['xargs', ...SHELLS, 'awk', 'gawk', 'mawk', 'perl', 'ruby', 'node', 'env', 'parallel', 'watch', 'script', 'ssh', 'php', 'lua', 'tclsh', 'at', 'crontab', 'batch'])
 const SED_FLAGS = new Set(['-n', '--quiet', '--silent', '-E', '-r', '--regexp-extended'])
 // Shell constructs the guard does not follow: code defined here and run later, or a branch it does not model.
 const STRUCTURES: Record<string, string> = {
@@ -39,7 +39,7 @@ const MAX_QUEUE = 4000
 const DECLARES = new Set(['declare', 'typeset', 'local', 'readonly'])
 const SUBST_TEXT = /[$<>]\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)|`[^`]*`/g
 // Variables that change how the shell or git reads every later word.
-const SHELL_ENV = new Set(['IFS', 'BASH_ENV', 'ENV', 'GIT_CONFIG_PARAMETERS', 'PATH'])
+const SHELL_ENV = new Set(['IFS', 'BASH_ENV', 'ENV', 'GIT_CONFIG_PARAMETERS'])
 // Values these programs can interpret as commands or command options, including exported settings.
 const EXEC_ENV = /^(?:PAGER|MANPAGER|LESS(?:OPEN|CLOSE)?|EDITOR|VISUAL|BROWSER|MANOPT|SHELL|GIT_.*|.*_(?:PAGER|EDITOR|BROWSER))$/
 const DYNAMIC = 'built from a variable, substitution or glob'
@@ -315,7 +315,7 @@ function pipedWords(w: Walk, s: Step): string[] {
     if (idx < 0) break
     cmd = w.queue[idx]!
     // Group output is not evaluated: conservatively check the enclosing command's literal words.
-    if (cmd.argv[0] === '}' || cmd.argv[0] === 'fi' || w.queue[idx + 1]!.op.includes(')')) {
+    if (cmd.argv[0] === '}' || cmd.argv[0] === 'fi' || cmd.argv[0] === 'done' || w.queue[idx + 1]!.op.includes(')')) {
       return w.queue.flatMap((c) => [...c.argv, ...Object.values(c.assigns), ...(c.input ?? [])])
     }
     const u = unwrap(cmd)
@@ -373,7 +373,8 @@ export function extractCalls(src: string, startDir: string, home: string): Parse
     for (const why of s.u.opaque) mark(w, why)
     const assigned = [...Object.keys(s.u.assigns), ...(s.name === 'export' || DECLARES.has(s.name) ? s.argv.slice(1).map((a) => a.split('=')[0]!) : [])]
     for (const k of assigned) if (SHELL_ENV.has(k)) mark(w, `an assignment to ${k}`)
-    if (s.cmd.argv.some((a) => /^PATH(?:\+|\[[^\]]*\])?=/.test(a)) || (['printf', 'read', 'mapfile', 'readarray', 'unset', 'let'].includes(s.name) && s.argv.slice(1).some((a) => /^(?:-v)?PATH\b/.test(a)))) mark(w, 'a possible write to PATH')
+    // PATH tokens can change command resolution through any builtin, including `{PATH}` redirections.
+    if ([...cmd.argv, ...Object.entries(s.u.assigns).flat(), ...(cmd.outputs ?? [])].some((a) => /\bPATH\b|^-vPATH\b/.test(a))) mark(w, 'a possible write to PATH')
     const settings = Object.entries(s.u.assigns)
     if (s.name === 'export' || DECLARES.has(s.name)) for (const a of s.argv.slice(1)) {
       const eq = a.indexOf('=')

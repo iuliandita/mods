@@ -18,7 +18,7 @@ such as `make release` runs). It models a small, explicit grammar and treats eve
   `-x +x -r -g -l -u`, `set -a`/`+a`/`-o allexport`, `cd`, `pushd [-n] DIR`, bare `pushd` (swaps the top two),
   `popd [-n] [+N|-N]`. A plain assignment, or `declare` without `-x`, reaches later calls only when the name was
   exported earlier in the command; otherwise both the new and the old value are possible.
-- Wrappers: `env` (including `-S`, `-u`, `-i`, `-C`), `command`, `exec`, `sudo`, `doas`, `nice`, `ionice`,
+- Wrappers: `env` (including `-S`, `-u`, `-i`, `-C`; `-P`/`--path` is unparsed), `command`, `exec`, `sudo`, `doas`, `nice`, `ionice`,
   `time`, `timeout`, `stdbuf`, `chronic`, `setsid`, `rtk`, with their value-taking options.
 - Inline scripts with a literal script: `bash -c`/`sh -c` (and zsh, dash, ksh), `eval`, `secret-box exec [--scrub] --`.
 - `$(...)`, backticks and process substitutions `<(...)`/`>(...)` are parsed as their own calls (nesting up to 4),
@@ -41,11 +41,11 @@ These constructs make the whole command unparsed when its text names `git`, `gh`
   refspec, a gh/glab/tea/fj area or verb, a kubectl/helm/terraform verb, `--context`, `--kube-context` or
   `--kubeconfig`;
 - a dynamic script for `eval` or `secret-box exec`; a shell reading its script from stdin (`| sh`, `<<<`, a heredoc);
-  `source`/`.` of `<(...)`, `/dev/stdin` or a dynamic path; an `env -S` string the guard cannot split;
+  any `source`/`.` call (the guard does not read sourced files); an `env -S` string the guard cannot split;
 - `case`, `select`, `coproc`, `trap`, `alias`, function definitions (`f()`, `function f`), and `declare` with
   other flags;
-- assignments to `IFS`, `BASH_ENV`, `ENV`, `GIT_CONFIG_PARAMETERS` or `PATH`; PATH writes via `export`,
-  declarations, append/array assignments, `printf -v`, `read`, `mapfile`/`readarray`, `let` or `unset`;
+- assignments to `IFS`, `BASH_ENV`, `ENV` or `GIT_CONFIG_PARAMETERS`; any PATH token in command words,
+  assignments or output redirections, including `{PATH}` and compact `-vPATH`; `env -P`/`--path`;
   `source`/`.`, `hash` or `enable` calls. These and alias or function definitions override exemptions for the
   whole command. Clearing PATH with `env -i` or `env -u PATH` also disables unmodeled command exemptions;
 - arithmetic with a substitution, subscript or PATH reference inside;
@@ -71,12 +71,13 @@ These are unparsed on their own, without another tool word:
   `su -c`, `direnv exec`, interpreters, and programs with executable options such as `sort --compress-program`.
   Producer checks apply only to named input executors: `xargs`, `bash`, `sh`, `zsh`, `dash`, `ksh`, `awk`, `gawk`,
   `mawk`, `perl`, `python` with an optional numeric version, `ruby`, `node`, `env`, `parallel`, `watch`, `script`,
+  `ssh`, `php`, `lua`, `tclsh`, `at`, `crontab`, `batch`,
   and executable or unsupported `sed` forms. Literal words and inline input are checked through pass-through
   pipeline stages. A modeled tool producer is already checked by its own rule; its command name does not count
   as output. Thus `kubectl get pods | awk '{print $1}'` and `git ls-files | xargs wc -l` pass.
   `sed` with known options and scripts containing no `e` keeps piped text as data. The guard does not inspect
   interpreter code to prove that it only prints input, so `echo git | awk '{print $0}'` is conservative too.
-  For braces, `if`/`fi` and subshell producers, the check conservatively includes the whole enclosing command's
+  For braces, `if`/`fi`, loop/`done` and subshell producers, the check conservatively includes the whole enclosing command's
   literal words rather than resolving group output. Process-substitution executors also check their enclosing
   command's inline input and pipeline producers; executor arguments retain substitution text. Substitutions
   remain bounded to four levels. These checks do not establish which descriptor reaches which process.
@@ -108,8 +109,12 @@ Editor and pager file exemptions are removed: `vim terraform/main.tf`, `vim -R t
 Harmless PATH setup, sourcing a script or hash lookups alongside tool words are conservative too
 (`PATH=/usr/bin ls terraform`, `read PATH; cat docs/git`, `source .venv/bin/activate && git status`,
 `hash tee; cat docs/git`). Data-command inline input is checked even without a runner (`tee <<< 'git notes'`).
-Harmless PATH operands to the listed builtins, arithmetic that only reads PATH (`echo $((PATH)) git`),
+PATH tokens are checked without a builtin allowlist: loop variables, `getopts`, `wait -p`, `read` and
+descriptor allocation with `{PATH}` all disable exemptions. Harmless PATH reads next to a tool word,
+arithmetic that only reads PATH (`echo $((PATH)) git`),
 and clearing the environment before a data command (`env -i ls terraform`) are conservative too.
+Text-only commands without a tool word still pass: `echo PATH=$PATH`, `grep -rn PATH= .` and
+`printf 'PATH is %s\n' "$PATH"`.
 Grouped producer checks can include unrelated tool names elsewhere in the enclosing command. Run setup
 separately, use a file-reading tool, or run the command yourself.
 

@@ -29,7 +29,7 @@ const WRAPPERS: Record<string, { short: string; long?: string[]; skip?: number; 
 }
 
 const ENV_VALUE_SHORT = 'uCSaPL'
-const ENV_VALUE_LONG = new Set(['--unset', '--chdir', '--split-string', '--argv0'])
+const ENV_VALUE_LONG = new Set(['--unset', '--chdir', '--split-string', '--argv0', '--path'])
 const ENV_ESCAPES: Record<string, string> = { f: '\f', n: '\n', r: '\r', t: '\t', v: '\v', '#': '#', $: '$', '"': '"', "'": "'", '\\': '\\' }
 
 // Splits an `env -S` string as GNU env does: `\_` separates words outside quotes, `\c` ends the string, and
@@ -133,7 +133,8 @@ function unwrapEnv(argv0: string[], dyn0: boolean[], assigns: Record<string, str
       assigns[w.slice(0, eq)] = w.slice(eq + 1)
       k++
     } else break
-    if (opt === 'u' || opt === '--unset') {
+    if (opt === 'P' || opt === '--path') dropped.opaque.push('an env command search path')
+    else if (opt === 'u' || opt === '--unset') {
       delete assigns[value]
       dropped.unset.add(value)
     } else if (opt === 'C' || opt === '--chdir') {

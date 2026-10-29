@@ -1283,7 +1283,7 @@ var WRAPPERS = {
   exec: { short: "a" }
 };
 var ENV_VALUE_SHORT = "uCSaPL";
-var ENV_VALUE_LONG = new Set(["--unset", "--chdir", "--split-string", "--argv0"]);
+var ENV_VALUE_LONG = new Set(["--unset", "--chdir", "--split-string", "--argv0", "--path"]);
 var ENV_ESCAPES = { f: "\f", n: `
 `, r: "\r", t: "\t", v: "\v", "#": "#", $: "$", '"': '"', "'": "'", "\\": "\\" };
 function splitEnvString(s) {
@@ -1395,7 +1395,9 @@ function unwrapEnv(argv0, dyn0, assigns, dropped) {
       k++;
     } else
       break;
-    if (opt === "u" || opt === "--unset") {
+    if (opt === "P" || opt === "--path")
+      dropped.opaque.push("an env command search path");
+    else if (opt === "u" || opt === "--unset") {
       delete assigns[value];
       dropped.unset.add(value);
     } else if (opt === "C" || opt === "--chdir") {
@@ -1523,7 +1525,7 @@ function shellScript(argv) {
 var OPAQUE_TOOLS = new Set(["git", "gh", "glab", "tea", "fj", "kubectl", "helm", "terraform", "tofu", ...SHELLS]);
 var TEXT_HEADS = new Set(["echo", "printf", "man", "which", "type", "grep", "rg", "cat"]);
 var DATA_HEADS = new Set(["ls", "mkdir", "rmdir", "touch", "cp", "mv", "rm", "head", "tail", "wc", "tee", "curl", "basename", "dirname", "realpath", "readlink", "file", "stat", "du", "df", "cut", "uniq", "diff", "cmp"]);
-var INPUT_EXECUTORS = new Set(["xargs", ...SHELLS, "awk", "gawk", "mawk", "perl", "ruby", "node", "env", "parallel", "watch", "script"]);
+var INPUT_EXECUTORS = new Set(["xargs", ...SHELLS, "awk", "gawk", "mawk", "perl", "ruby", "node", "env", "parallel", "watch", "script", "ssh", "php", "lua", "tclsh", "at", "crontab", "batch"]);
 var SED_FLAGS = new Set(["-n", "--quiet", "--silent", "-E", "-r", "--regexp-extended"]);
 var STRUCTURES = {
   case: "a case statement",
@@ -1542,7 +1544,7 @@ var MAX_FANOUT = 16;
 var MAX_QUEUE = 4000;
 var DECLARES = new Set(["declare", "typeset", "local", "readonly"]);
 var SUBST_TEXT = /[$<>]\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)|`[^`]*`/g;
-var SHELL_ENV = new Set(["IFS", "BASH_ENV", "ENV", "GIT_CONFIG_PARAMETERS", "PATH"]);
+var SHELL_ENV = new Set(["IFS", "BASH_ENV", "ENV", "GIT_CONFIG_PARAMETERS"]);
 var EXEC_ENV = /^(?:PAGER|MANPAGER|LESS(?:OPEN|CLOSE)?|EDITOR|VISUAL|BROWSER|MANOPT|SHELL|GIT_.*|.*_(?:PAGER|EDITOR|BROWSER))$/;
 var DYNAMIC = "built from a variable, substitution or glob";
 var PLAIN_WORD = /^[\w./+@%:,=~-]+$/;
@@ -1789,7 +1791,7 @@ function pipedWords(w, s) {
     if (idx < 0)
       break;
     cmd = w.queue[idx];
-    if (cmd.argv[0] === "}" || cmd.argv[0] === "fi" || w.queue[idx + 1].op.includes(")")) {
+    if (cmd.argv[0] === "}" || cmd.argv[0] === "fi" || cmd.argv[0] === "done" || w.queue[idx + 1].op.includes(")")) {
       return w.queue.flatMap((c) => [...c.argv, ...Object.values(c.assigns), ...c.input ?? []]);
     }
     const u = unwrap(cmd);
@@ -1864,7 +1866,7 @@ function extractCalls(src, startDir, home) {
     for (const k of assigned)
       if (SHELL_ENV.has(k))
         mark(w, `an assignment to ${k}`);
-    if (s.cmd.argv.some((a) => /^PATH(?:\+|\[[^\]]*\])?=/.test(a)) || ["printf", "read", "mapfile", "readarray", "unset", "let"].includes(s.name) && s.argv.slice(1).some((a) => /^(?:-v)?PATH\b/.test(a)))
+    if ([...cmd.argv, ...Object.entries(s.u.assigns).flat(), ...cmd.outputs ?? []].some((a) => /\bPATH\b|^-vPATH\b/.test(a)))
       mark(w, "a possible write to PATH");
     const settings = Object.entries(s.u.assigns);
     if (s.name === "export" || DECLARES.has(s.name))
