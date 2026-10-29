@@ -95,7 +95,7 @@ jobs:
         with:
           bun-version-file: .bun-version
       # Pinned independently of the per-mod manual runtime verification versions.
-      - run: npm install -g --ignore-scripts @anthropic-ai/claude-code@"${CLAUDE_CODE_VERSION}"
+      - run: npm install -g --ignore-scripts @anthropic-ai/claude-code@"${CLAUDE_CODE_VERSION}" # zizmor: ignore[adhoc-packages] exact pinned version
       # install.cjs is run by hand: --ignore-scripts skips the install script and the native binary
       # needs it; integrity relies on the registry's per-version signature, not a lockfile
       - run: node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs"
