@@ -104,6 +104,7 @@ export type Mark = (why: string) => void
 export function parseGit(s: Simple, argv: string[], dyn0: boolean[], dir0: string, home: string, flow: Flow, mark: Mark): { call: GitCall | null; ok: boolean } {
   const dyn = argv.map((a, k) => (dyn0[k] ?? false) || SECRET_PLACEHOLDER.test(a))
   let dir = dir0
+  let unresolvedDir = false
   let ok = !GIT_OPAQUE_ENV.some((k) => k in s.assigns)
   const overrides: Record<string, string> = {}
   const config: [string, string][] = []
@@ -114,7 +115,10 @@ export function parseGit(s: Simple, argv: string[], dyn0: boolean[], dir0: strin
     if ((a === '-C' || a === '-c') && dyn[i + 1]) mark(`a git ${a} value built from a variable, substitution or glob`)
     if (a === '-C') {
       const target = argv[i + 1] ?? ''
-      if (hasVariable(target) || dyn[i + 1]) ok = false
+      if (hasVariable(target) || dyn[i + 1]) {
+        ok = false
+        unresolvedDir = true
+      }
       else dir = joinPath(dir, target, home)
       i += 2
     } else if (a === '-c') {
@@ -159,6 +163,7 @@ export function parseGit(s: Simple, argv: string[], dyn0: boolean[], dir0: strin
     call: {
       kind: 'git', sub, args: argv.slice(i + 1), dir, overrides, config, assigns: s.assigns, op: s.op, flow,
       ...(scrubbed ? { scrubbed } : {}), ...(dynArgs.some(Boolean) ? { dynArgs } : {}),
+      ...(unresolvedDir ? { unresolvedDir: true } : {}),
     },
     ok,
   }

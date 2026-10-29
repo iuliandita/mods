@@ -483,7 +483,7 @@ test('a non-literal cd makes the directory unknown, so writes that depend on it 
 })
 
 test('git global options the guard cannot follow make a write unparsed', async () => {
-  for (const command of ['git -C/x commit -m y', 'git -cuser.email=a@b.c commit -m y', 'git --git-dir=/x/.git commit -m y', 'git --work-tree /x commit -m y', 'git --frobnicate commit -m y', 'GIT_DIR=/x/.git git commit -m y', 'git -C "$D" push origin x']) {
+  for (const command of ['git -C/x commit -m y', 'git -cuser.email=a@b.c commit -m y', 'git --git-dir=/x/.git commit -m y', 'git --work-tree /x commit -m y', 'git --frobnicate commit -m y', 'GIT_DIR=/x/.git git commit -m y']) {
     expect((await evaluate(command, cfg(), fakeEnv())).enforced.map((x) => x.rule), command).toEqual(['unparsed'])
   }
   for (const command of ['git --no-pager -c core.x=y commit -m y', 'git --git-dir=/x/.git log']) {

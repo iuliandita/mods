@@ -19,6 +19,15 @@ const TEXT_HEADS = new Set(['echo', 'printf', 'man', 'which', 'type', 'grep', 'r
 const DATA_HEADS = new Set(['ls', 'mkdir', 'rmdir', 'touch', 'cp', 'mv', 'rm', 'head', 'tail', 'wc', 'tee', 'curl', 'basename', 'dirname', 'realpath', 'readlink', 'file', 'stat', 'du', 'df', 'cut', 'uniq', 'diff', 'cmp'])
 // These can execute code, so only plain filename/path words are data; their scripts still name tools.
 const FILE_CODE_HEADS = new Set(['sed', 'vi', 'vim', 'nvim', 'nano', 'less', 'more'])
+// Only standalone flags known not to run code preserve an editor's file exemption.
+const EDITOR_FLAGS: Record<string, Set<string>> = {
+  vi: new Set(['-R', '-n']),
+  vim: new Set(['-R', '-o', '-O', '-p', '-d', '-M', '-m', '-n', '-b']),
+  nvim: new Set(['-R', '-o', '-O', '-p', '-d', '-M', '-m', '-n', '-b']),
+  nano: new Set(['-v', '--view']),
+  less: new Set(['-R', '-M', '-m', '-N', '-S', '-X', '-F']),
+  more: new Set(['-d', '-f', '-l', '-s', '-u']),
+}
 const SED_FLAGS = new Set(['-n', '--quiet', '--silent', '-E', '-r', '--regexp-extended'])
 // Shell constructs the guard does not follow: code defined here and run later, or a branch it does not model.
 const STRUCTURES: Record<string, string> = {
@@ -28,6 +37,8 @@ const STRUCTURES: Record<string, string> = {
   trap: 'a trap',
   alias: 'an alias',
   function: 'a function definition',
+  hash: 'a changed command hash table',
+  enable: 'a changed shell builtin',
 }
 // Commands the guard models that only test or iterate: their words name tools as data.
 const FLOW_HEADS = new Set(['[', '[[', 'test', 'for', 'true', 'false', ':'])
@@ -38,7 +49,7 @@ const MAX_QUEUE = 4000
 const DECLARES = new Set(['declare', 'typeset', 'local', 'readonly'])
 const SUBST_TEXT = /[$<>]\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)|`[^`]*`/g
 // Variables that change how the shell or git reads every later word.
-const SHELL_ENV = new Set(['IFS', 'BASH_ENV', 'ENV', 'GIT_CONFIG_PARAMETERS'])
+const SHELL_ENV = new Set(['IFS', 'BASH_ENV', 'ENV', 'GIT_CONFIG_PARAMETERS', 'PATH'])
 const DYNAMIC = 'built from a variable, substitution or glob'
 const PLAIN_WORD = /^[\w./+@%:,=~-]+$/
 // Commands that switch the kube context, or rewrite what a context points at, in a kubeconfig the guard read before
@@ -296,13 +307,13 @@ function markOpaque(w: Walk, s: Step): void {
   if (bare && (FLOW_HEADS.has(s.name) || (TEXT_HEADS.has(s.name) && !(s.name === 'rg' && s.argv.some((a) => a === '--pre' || a.startsWith('--pre=')))))) return
   if (bare && (DATA_HEADS.has(s.name) || (s.name === 'brew' && s.argv[1] === 'install'))) return
   const sedFiles = s.name === 'sed' ? sedFileSlots(s) : new Set<number>()
+  const editor = Object.hasOwn(EDITOR_FLAGS, s.name) && s.argv.slice(1).every((a, i) =>
+    !s.dyn[i + 1] && (!/^[+-]/.test(a) || EDITOR_FLAGS[s.name]!.has(a)))
   // Substitutions are followed as calls of their own, so their text is not this command's words. A command word
   // that is not a plain name or path (`"git push" origin main`) counts among them.
   const words = s.argv.slice(1).map((a, i) => {
     if (s.dyn[i + 1]) return a.replace(SUBST_TEXT, ' ')
-    // Every editor option operand stays code; no file-taking option is specially trusted here.
-    const code = a.startsWith('-') || a.startsWith('+') || /^[+-]/.test(s.argv[i]!)
-    const file = s.name === 'sed' ? sedFiles.has(i + 1) : !code
+    const file = s.name === 'sed' ? sedFiles.has(i + 1) : editor && !/^[+-]/.test(a)
     return bare && FILE_CODE_HEADS.has(s.name) && file && isDataWord(a) ? '' : a
   })
   if (!PLAIN_WORD.test(s.argv[0]!)) words.push(s.argv[0]!)

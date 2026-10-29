@@ -287,6 +287,7 @@ var PUSH_OPTION_VALUE = new Set(["-o", "--push-option"]);
 function parseGit(s, argv, dyn0, dir0, home, flow, mark) {
   const dyn = argv.map((a, k) => (dyn0[k] ?? false) || SECRET_PLACEHOLDER.test(a));
   let dir = dir0;
+  let unresolvedDir = false;
   let ok = !GIT_OPAQUE_ENV.some((k) => (k in s.assigns));
   const overrides = {};
   const config = [];
@@ -298,9 +299,10 @@ function parseGit(s, argv, dyn0, dir0, home, flow, mark) {
       mark(`a git ${a} value built from a variable, substitution or glob`);
     if (a === "-C") {
       const target = argv[i + 1] ?? "";
-      if (hasVariable(target) || dyn[i + 1])
+      if (hasVariable(target) || dyn[i + 1]) {
         ok = false;
-      else
+        unresolvedDir = true;
+      } else
         dir = joinPath(dir, target, home);
       i += 2;
     } else if (a === "-c") {
@@ -355,7 +357,8 @@ function parseGit(s, argv, dyn0, dir0, home, flow, mark) {
       op: s.op,
       flow,
       ...scrubbed ? { scrubbed } : {},
-      ...dynArgs.some(Boolean) ? { dynArgs } : {}
+      ...dynArgs.some(Boolean) ? { dynArgs } : {},
+      ...unresolvedDir ? { unresolvedDir: true } : {}
     },
     ok
   };
@@ -1521,6 +1524,14 @@ var OPAQUE_TOOLS = new Set(["git", "gh", "glab", "tea", "fj", "kubectl", "helm",
 var TEXT_HEADS = new Set(["echo", "printf", "man", "which", "type", "grep", "rg", "cat"]);
 var DATA_HEADS = new Set(["ls", "mkdir", "rmdir", "touch", "cp", "mv", "rm", "head", "tail", "wc", "tee", "curl", "basename", "dirname", "realpath", "readlink", "file", "stat", "du", "df", "cut", "uniq", "diff", "cmp"]);
 var FILE_CODE_HEADS = new Set(["sed", "vi", "vim", "nvim", "nano", "less", "more"]);
+var EDITOR_FLAGS = {
+  vi: new Set(["-R", "-n"]),
+  vim: new Set(["-R", "-o", "-O", "-p", "-d", "-M", "-m", "-n", "-b"]),
+  nvim: new Set(["-R", "-o", "-O", "-p", "-d", "-M", "-m", "-n", "-b"]),
+  nano: new Set(["-v", "--view"]),
+  less: new Set(["-R", "-M", "-m", "-N", "-S", "-X", "-F"]),
+  more: new Set(["-d", "-f", "-l", "-s", "-u"])
+};
 var SED_FLAGS = new Set(["-n", "--quiet", "--silent", "-E", "-r", "--regexp-extended"]);
 var STRUCTURES = {
   case: "a case statement",
@@ -1528,7 +1539,9 @@ var STRUCTURES = {
   coproc: "a coprocess",
   trap: "a trap",
   alias: "an alias",
-  function: "a function definition"
+  function: "a function definition",
+  hash: "a changed command hash table",
+  enable: "a changed shell builtin"
 };
 var FLOW_HEADS = new Set(["[", "[[", "test", "for", "true", "false", ":"]);
 var SINGLE_PIPE = /(?:^|[^|])\|(?:[^|]|$)/;
@@ -1537,7 +1550,7 @@ var MAX_FANOUT = 16;
 var MAX_QUEUE = 4000;
 var DECLARES = new Set(["declare", "typeset", "local", "readonly"]);
 var SUBST_TEXT = /[$<>]\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)|`[^`]*`/g;
-var SHELL_ENV = new Set(["IFS", "BASH_ENV", "ENV", "GIT_CONFIG_PARAMETERS"]);
+var SHELL_ENV = new Set(["IFS", "BASH_ENV", "ENV", "GIT_CONFIG_PARAMETERS", "PATH"]);
 var DYNAMIC = "built from a variable, substitution or glob";
 var PLAIN_WORD = /^[\w./+@%:,=~-]+$/;
 var KUBE_SWITCHERS = {
@@ -1769,11 +1782,11 @@ function markOpaque(w, s) {
   if (bare && (DATA_HEADS.has(s.name) || s.name === "brew" && s.argv[1] === "install"))
     return;
   const sedFiles = s.name === "sed" ? sedFileSlots(s) : new Set;
+  const editor = Object.hasOwn(EDITOR_FLAGS, s.name) && s.argv.slice(1).every((a, i) => !s.dyn[i + 1] && (!/^[+-]/.test(a) || EDITOR_FLAGS[s.name].has(a)));
   const words = s.argv.slice(1).map((a, i) => {
     if (s.dyn[i + 1])
       return a.replace(SUBST_TEXT, " ");
-    const code = a.startsWith("-") || a.startsWith("+") || /^[+-]/.test(s.argv[i]);
-    const file = s.name === "sed" ? sedFiles.has(i + 1) : !code;
+    const file = s.name === "sed" ? sedFiles.has(i + 1) : editor && !/^[+-]/.test(a);
     return bare && FILE_CODE_HEADS.has(s.name) && file && isDataWord(a) ? "" : a;
   });
   if (!PLAIN_WORD.test(s.argv[0]))
