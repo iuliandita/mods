@@ -91,7 +91,7 @@ var wanted = (cfg, n) => n !== null && cfg.mode === "on" && cfg.events.has(n.kin
 var quoteAppleScript = (s) => `"${s.replaceAll("\\", "\\\\").replaceAll('"', "\\\"")}"`;
 function notifierArgv(platform, n, sound) {
   if (platform === "linux")
-    return ["notify-send", "--app-name=mods", ...sound ? ["--hint=string:sound-name:message-new-instant"] : [], "--", clean(n.title, 60), n.body];
+    return ["env", "-u", "LD_LIBRARY_PATH", "-u", "LD_PRELOAD", "notify-send", "--app-name=mods", ...sound ? ["--hint=string:sound-name:message-new-instant"] : [], "--", clean(n.title, 60), n.body];
   if (platform === "darwin") {
     const script = `display notification ${quoteAppleScript(n.body)} with title ${quoteAppleScript(clean(n.title, 60))}${sound ? ' sound name "Glass"' : ""}`;
     return ["osascript", "-e", script];
@@ -103,12 +103,15 @@ async function deliver(run, platform, n, sound) {
   const argv = notifierArgv(platform, n, sound);
   if (!argv)
     return { ok: false, warning: `notify: warning: no notifier for ${platform}: only Linux (notify-send) and macOS (osascript) are supported; set mode to off` };
-  const bin = argv[0];
+  const bin = platform === "linux" ? "notify-send" : argv[0];
+  const notFound = `notify: warning: ${bin} not found: no notification was shown; install it or set mode to off`;
   try {
     const { exitCode } = await run(argv);
+    if (platform === "linux" && exitCode === 127)
+      return { ok: false, warning: notFound };
     return exitCode === 0 ? { ok: true } : { ok: false, warning: `notify: warning: ${bin} failed: it exited ${exitCode}; check the desktop notification service` };
   } catch (e) {
-    return NOT_FOUND.test(String(e)) ? { ok: false, warning: `notify: warning: ${bin} not found: no notification was shown; install it or set mode to off` } : { ok: false, warning: `notify: warning: ${bin} could not run: no notification was shown; check that it is installed and executable` };
+    return NOT_FOUND.test(String(e)) ? { ok: false, warning: notFound } : { ok: false, warning: `notify: warning: ${bin} could not run: no notification was shown; check that it is installed and executable` };
   }
 }
 

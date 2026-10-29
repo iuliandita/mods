@@ -48,7 +48,7 @@ test('codex notify setting: the JSON argument counts, agent-turn-complete only',
   const payload = JSON.stringify({ type: 'agent-turn-complete', cwd: '/work/api', 'last-assistant-message': 'secret text' })
   expect(await main(['notify', payload], io(''))).toBe(0)
   expect(await main(['notify', JSON.stringify({ type: 'something-else', cwd: '/w' })], io(''))).toBe(0)
-  expect(seen.runs).toEqual([['notify-send', '--app-name=mods', '--', 'api (Codex)', 'Finished']])
+  expect(seen.runs).toEqual([['env', '-u', 'LD_LIBRARY_PATH', '-u', 'LD_PRELOAD', 'notify-send', '--app-name=mods', '--', 'api (Codex)', 'Finished']])
   expect(JSON.stringify(seen.runs)).not.toContain('secret text')
 })
 

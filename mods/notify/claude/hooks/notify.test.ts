@@ -106,9 +106,9 @@ test('the title names the harness and the body the branch', async () => {
   expect(await withContext(claudeNotice('Stop', { cwd: '/h' })!, '/h', tree({}))).toEqual({ kind: 'finish', title: '~ (Claude Code)', body: 'Finished' })
 })
 
-test('Linux uses notify-send with the text after `--`; sound adds a hint', () => {
-  expect(notifierArgv('linux', notice({ title: '-rf' }), false)).toEqual(['notify-send', '--app-name=mods', '--', '-rf', 'Finished'])
-  expect(notifierArgv('linux', notice(), true)).toEqual(['notify-send', '--app-name=mods', '--hint=string:sound-name:message-new-instant', '--', 'my-repo', 'Finished'])
+test('Linux clears library overrides before notify-send with the text after `--`; sound adds a hint', () => {
+  expect(notifierArgv('linux', notice({ title: '-rf' }), false)).toEqual(['env', '-u', 'LD_LIBRARY_PATH', '-u', 'LD_PRELOAD', 'notify-send', '--app-name=mods', '--', '-rf', 'Finished'])
+  expect(notifierArgv('linux', notice(), true)).toEqual(['env', '-u', 'LD_LIBRARY_PATH', '-u', 'LD_PRELOAD', 'notify-send', '--app-name=mods', '--hint=string:sound-name:message-new-instant', '--', 'my-repo', 'Finished'])
 })
 
 test('macOS uses osascript with quoted string literals; quotes and backslashes cannot end the string', () => {
@@ -126,7 +126,7 @@ test('delivery: sent, or one warning line for a missing notifier, a failing one 
   expect(await deliver(ok, 'linux', notice(), false)).toEqual({ ok: true })
   expect(calls).toHaveLength(1)
 
-  const missing = await deliver(async () => Promise.reject(new Error('spawn notify-send ENOENT')), 'linux', notice(), false)
+  const missing = await deliver(async () => Promise.reject(new Error('spawn env ENOENT')), 'linux', notice(), false)
   expect(missing).toEqual({ ok: false, warning: 'notify: warning: notify-send not found: no notification was shown; install it or set mode to off' })
   const broken = await deliver(async () => Promise.reject(new Error('EACCES')), 'darwin', notice(), false)
   expect(broken.ok === false && broken.warning).toContain('notify: warning: osascript could not run')
@@ -136,4 +136,11 @@ test('delivery: sent, or one warning line for a missing notifier, a failing one 
   expect(none.ok === false && none.warning).toContain('no notifier for win32')
   expect(calls).toHaveLength(1)
   for (const r of [missing, broken, failing, none]) expect(r.ok === false && r.warning.split('\n')).toHaveLength(1)
+})
+
+test('Linux exit 127 reports a missing notify-send', async () => {
+  expect(await deliver(async () => ({ exitCode: 127 }), 'linux', notice(), false)).toEqual({
+    ok: false,
+    warning: 'notify: warning: notify-send not found: no notification was shown; install it or set mode to off',
+  })
 })
