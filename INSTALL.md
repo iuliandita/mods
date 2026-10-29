@@ -17,7 +17,7 @@ claude plugin install guard-rules@iuliandita-mods --scope user
 Install from a terminal. User scope can load in Desktop sessions, but loading is not equivalent
 to verified hook behavior. Each mod's manifest records actual surface coverage.
 
-## Codex and OpenCode
+## Host and backend setup
 
 `mods.json` lists the install command per host for each mod that supports it, and each mod's
 README describes the host setup. [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) shows what works
@@ -169,8 +169,10 @@ while it is installed.
 ```bash
 python3 -m pytest -q -m "not integration"
 bun test mods/*/host
+scripts/typecheck --hosts
 scripts/mods validate --no-claude
 scripts/mods generate --check
+python3 .github/stack/stack-check.py
 ```
 
 `generate` builds the Codex and OpenCode bundles with the Bun version in `.bun-version`

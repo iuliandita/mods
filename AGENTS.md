@@ -6,8 +6,8 @@ add paths and preferences but never relaxes the rules below.
 
 ## What this repo is
 
-A collection of Claude Code mods (plugins built on the hooks-module API). Each mod is its own
-plugin, installable on its own.
+A collection of mods for Claude Code (plugins built on the hooks-module API), some also for Codex
+and OpenCode. Each mod is its own plugin, installable on its own.
 
 ## Install contract (for agents)
 
@@ -44,7 +44,8 @@ not the remote one, so the source must carry the same mods.
 What an agent can rely on:
 
 - With `--json`, every command prints exactly one JSON object with `ok` (boolean) and `errors`
-  (a list of strings: empty when `ok` is true, non-empty when false). Failures exit 1. Usage,
+  (a list of strings: empty when `ok` is true, non-empty when false). Exit codes: 0 done, 1 failed, 2 usage
+  error (unknown command or flag), 3 a required tool (claude, or the pinned bun) is missing. Usage,
   `--root`, I/O, and `generate` catalog errors carry only these two keys.
 - Each command adds its own keys: `list` adds `claude` and `mods`; `install` adds `installed`
   and `uninstall` adds `uninstalled` (the plugin ids done so far, also on failure), plus `manual`
@@ -112,7 +113,8 @@ a terminal install at user scope loads in Desktop sessions too.
 - Security mods fail closed: a guard mod must report at least one gating hook, and every
   gating hook needs `.catch`.
 - Run before pushing: `python3 -m pytest -q -m "not integration"`, `bun test mods/*/host`,
-  `scripts/typecheck --hosts`, `scripts/mods validate`, and `scripts/mods generate --check`. Integration tests need the claude CLI and use a throwaway
+  `scripts/typecheck --hosts`, `scripts/mods validate`, `scripts/mods generate --check` and
+  `python3 .github/stack/stack-check.py`. Integration tests need the claude CLI and use a throwaway
   config dir; run them with `python3 -m pytest -q -m integration`.
 - After changing a mod's TypeScript, run `scripts/typecheck [mod]` and `claude plugin test
   mods/<name>/claude`. The type check needs the API types the engine lays beside a mod it has

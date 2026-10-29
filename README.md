@@ -1,6 +1,6 @@
 <h1><img src="assets/wordmark.png" alt="mods" width="360"></h1>
 
-Hooks and plugins for Claude Code, Codex, and OpenCode that you install one at a time: commit and infrastructure guards, secret handling, and session status panels.
+Hooks and plugins for Claude Code, Codex, and OpenCode that you install one at a time: commit and infrastructure guards, secret handling, session status panels, and desktop notifications.
 
 Each mod is a plugin built on its host's hooks or plugin API. Mods run with your permissions and are not sandboxed: read a mod before installing it. Each mod lists what leaves your machine (`egress`) in its README and in `mods.json`.
 
@@ -35,7 +35,6 @@ installed with `scripts/mods list`, and check the environment with `scripts/mods
 - `secret-box`: fills named placeholders from Linux Secret Service or macOS Keychain at execution time, with optional directory scopes. The helper scrubs text without a plaintext export command. Tool and directory coverage depend on the host; see [what it does not protect](mods/secret-box/README.md#what-it-does-not-protect). The mod makes no network or model calls; commands it runs may still send values.
 - `delegation-board`: a live pane of the session's subagents and teammates: type, model, effort, state, elapsed time and tokens; in Claude Desktop, a compact band above the prompt.
 - `statusline`: a two-row status line above the prompt in the terminal and Claude Desktop: model and effort, git state, context against your auto-compact window, 5h and 7d limits with pace, cache, cost and time. In a git repo with a GitHub or GitLab remote it runs `gh` or `glab` for PR and issue counts; `forge=off` turns that off.
-
 - `notify`: a desktop notification when the agent finishes or waits on a permission prompt or other input, titled with the project folder, with an optional sound. It starts `notify-send` on Linux or `osascript` on macOS and makes no network or model calls.
 
 `mods.json` has the full catalog: egress, modes, requirements, and the install command per mod.

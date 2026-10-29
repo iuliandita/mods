@@ -5,47 +5,31 @@
 ### Added
 
 - `notify` mod: a desktop notification when the agent finishes or waits on a permission prompt or other input, titled with the project folder, with an optional sound (off by default). Uses `notify-send` on Linux and `osascript` on macOS, warns once when none is available, and makes no network calls. Runs on Claude Code (hooks), Codex (hooks or its `notify` setting) and OpenCode (plugin events); untested on real hosts.
-
 - `secret-box` automatically uses macOS Keychain through `security`, with platform-specific catalog requirements; Linux keeps `secret-tool`.
-
 - `secret-box` option `secretScopes` limits named placeholders to configured directory globs on all three hosts.
-
 - `guard-rules` option `modeUnparsed` (`on`, `dry`, `off`) controls parser findings separately; `on` preserves existing behavior and `ask` remains unsupported.
 
 ### Changed
 
 - `secret-box` setup, platform requirements and protection limits are aligned across the root docs, security policy and catalog descriptions.
-
 - `secret-box` summarizes scrubbing, keyring and scope limits per host in a single README section.
-
 - `guard-rules` documents rule controls and common false positives in its README, with parser details on a linked page.
+- `scripts/mods list|install|uninstall --help` describe `--scope`; INSTALL.md, CONTRIBUTING.md and AGENTS.md list `stack-check.py` and the exit codes, and `docs/README.md` links every mod.
 
 ### Fixed
 
 - `guard-rules` disables exemptions for PATH tokens and `env -P`/`--path`, checks loop output through `done`, and recognizes `ssh`, `php`, `lua`, `tclsh`, `at`, `crontab` and `batch` as input executors.
-
 - `notify` runs Codex hooks in the background, caps notifier delivery at 250 ms on both Codex entry paths, and skips events with `agent_id`.
-
 - `guard-rules` removes editor/pager file exemptions, checks data-command inline input and PATH writes, and limits producer checks to named input executors; use a file-reading tool for tool-named editor paths.
-
 - `delegation-board` on OpenCode honors `mode` `off` from the user-level options file; the panel shows a notice and reads no sessions.
-
 - `statusline` clears the branch's PR badge when the repository or branch changes, so a failed lookup no longer shows the previous branch's PR.
-
 - `secret-box` on OpenCode allowlists message roles and content-part fields after a scrub failure, discards arbitrary keys and nested payloads, and withholds results and prompts entirely.
-
 - `secret-box exec` always scrubs its output (`--scrub` is still accepted); the helper reply is raw UTF-8, so large non-ASCII saved files fit the 4 MiB limit.
-
 - `scripts/mods uninstall` always prints the Codex and OpenCode steps for retired mods, treats "not installed" in Claude Code as a skip and a missing `claude` CLI as a note, and keeps the steps in the payload when the Claude uninstall really fails.
-
 - `guard-rules` checks literal pipeline producer words in command runners, executable `man` options and command-bearing environment values; computed pipeline output remains a documented limit.
-
 - `guard-rules` allowlists editor flags, disables data exemptions after command-resolution changes, and checks dynamic `git -C` directories even with `modeUnparsed=off`.
-
-- `secret-box` removes the plaintext `values` command; hooks use batched `scrub` calls instead. Directory and Bash-only placeholder limits are documented per host.
-
+- Breaking: `secret-box` removes the plaintext `values` command; hooks use batched `scrub` calls instead. Scripts that read values with `secret-box values` have no replacement by design; use `exec` to run a command with a placeholder. Directory and Bash-only placeholder limits are documented per host.
 - `guard-rules` narrows data exemptions for scripts, path-qualified commands and editor options, and checks git writes after unresolved directory changes independently of `modeUnparsed`.
-
 - `guard-rules` treats file arguments and known data commands as data while keeping command runners guarded.
 - `guard-rules` follows both plain and scrubbed `secret-box exec` wrappers when checking commands.
 

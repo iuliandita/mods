@@ -85,11 +85,21 @@ def _parser() -> argparse.ArgumentParser:
         help="list mods and their install state (installed means installed at any scope unless "
         "--scope is given and claude reports a scope)",
     )
-    ls.add_argument("--scope", choices=("user", "project", "local"), default=None)
+    ls.add_argument(
+        "--scope",
+        choices=("user", "project", "local"),
+        default=None,
+        help="only count installs at this scope (default: any scope)",
+    )
 
     i = add("install", help="install mods")
     i.add_argument("names", nargs="+")
-    i.add_argument("--scope", choices=("user", "project", "local"), default="user")
+    i.add_argument(
+        "--scope",
+        choices=("user", "project", "local"),
+        default="user",
+        help="Claude plugin scope to install at (default: user)",
+    )
     i.add_argument("--local", action="store_true", help="include mods from local/ (not with --source)")
     i.add_argument(
         "--source",
@@ -99,7 +109,12 @@ def _parser() -> argparse.ArgumentParser:
 
     u = add("uninstall", help="uninstall mods")
     u.add_argument("names", nargs="+")
-    u.add_argument("--scope", choices=("user", "project", "local"), default="user")
+    u.add_argument(
+        "--scope",
+        choices=("user", "project", "local"),
+        default="user",
+        help="scope the plugin was installed at (default: user)",
+    )
 
     add("doctor", help="check the environment")
 
