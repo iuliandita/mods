@@ -221,7 +221,7 @@ export function parseCurrentContext(text: string): string | null {
 // '' when none sets one, null when a file cannot be read or its value cannot be told.
 async function fileContext(paths: string[], dir: string, env: Env): Promise<string | null> {
   for (const path of paths) {
-    if (/[$`]/.test(path)) return null
+    if (hasVariable(path)) return null
     const text = await env.read(resolvePath(dir, path, env.home))
     if (text === null) return null
     const name = parseCurrentContext(text)

@@ -72,7 +72,7 @@ function resolvePath(base, p, home) {
   return "/" + out.join("/");
 }
 function hasVariable(p) {
-  return p.includes("$") || p.includes("`");
+  return p.includes("$") || p.includes("`") || /\{\{secret:[^}]*\}\}/.test(p);
 }
 
 // mods/guard-rules/claude/hooks/words.ts
@@ -2224,7 +2224,7 @@ function parseCurrentContext(text) {
 }
 async function fileContext(paths, dir, env) {
   for (const path of paths) {
-    if (/[$`]/.test(path))
+    if (hasVariable(path))
       return null;
     const text = await env.read(resolvePath(dir, path, env.home));
     if (text === null)

@@ -185,7 +185,7 @@ separately, use a file-reading tool, or run the command yourself.
   backslash escape; anything else (escapes, anchors, tags, block or flow values, multi-line or duplicate keys) is
   unclassified. A mention of `current-context` outside the recognized root line (even nested or in a comment),
   an escaped key spelling, or CR, NEL, LS or PS line breaks also makes the file unknown; CRLF is supported.
-  A Terraform workspace or kube context given through a variable or substitution is unclassified, and
+  A Terraform workspace or kube context given through a variable, substitution or secret placeholder is unclassified, and
   the directory name no longer relaxes it.
 - `kubectl config use` and the krew plugin verbs `kubectl ctx|kubectx|switch|konfig NAME` (also the `kubectl-ctx`
   binary) are context switches, and any `kubectl config` verb outside `view`, `get-contexts`,
@@ -209,8 +209,8 @@ separately, use a file-reading tool, or run the command yourself.
   `terragrunt`), `oc` and other tools that act on the cluster themselves,
   `git branch -m` renaming the current branch to a protected name, `git update-ref HEAD <rev>` without
   `--no-deref`, `git branch -f main HEAD`, `git fetch . feature:main`, `git reset --hard` while on a protected
-  branch, `git remote add/set-url` earlier in a command, a secret placeholder in the value of a context or workspace
-  variable, a command word built from fragments when the text names no tool (`a=gi; b=t; $a$b push`), a `cd` inside `bash -c` leaking out, `printf ... | git commit -F -`, `git commit -F file` message
+  branch, `git remote add/set-url` earlier in a command,
+  a command word built from fragments when the text names no tool (`a=gi; b=t; $a$b push`), a `cd` inside `bash -c` leaking out, `printf ... | git commit -F -`, `git commit -F file` message
   files, `gh api`, a script file run by a shell or `source` (`bash script.sh`, `. ./x.sh`), `fish -c`, `csh -c` or
   `tcsh -c` scripts, `git pull` creating a merge commit, git aliases (`-c alias.x=...` or from your git config),
   `git worktree add` followed by a commit in the new worktree, `git tag -u`, assignments right after a wrapper

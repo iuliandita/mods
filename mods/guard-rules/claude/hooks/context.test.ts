@@ -24,6 +24,26 @@ const cfg = () => parseConfig({})
 const KUBE = '/h/.kube/config'
 const denied = async (command: string, e: Env) => (await evaluate(command, cfg(), e)).enforced
 
+test('context: secret placeholders are unknown in direct targets and followed switches', async () => {
+  for (const command of [
+    'kubectl --context {{secret:dev_context}} apply -f x',
+    'helm --kube-context {{secret:dev_context}} upgrade x ./c',
+    'HELM_KUBECONTEXT={{secret:dev_context}} helm upgrade x ./c',
+    'TF_WORKSPACE={{secret:dev_workspace}} terraform apply',
+    'export TF_WORKSPACE={{secret:dev_workspace}} && tofu apply',
+    'terraform workspace select {{secret:dev_workspace}} && terraform apply',
+    'tofu workspace new {{secret:dev_workspace}} && tofu apply',
+    'kubectl config use-context {{secret:dev_context}} && kubectl apply -f x',
+    'kubectl config set current-context {{secret:dev_context}} && helm upgrade x ./c',
+    'kubectl --kubeconfig {{secret:dev_config}} apply -f x',
+  ]) {
+    const v = await denied(command, env({ dir: '/w/dev', workspace: 'dev' }))
+    expect(v.some((f) => f.rule === 'context' && f.message.includes('(custom target)')), command).toBe(true)
+  }
+  expect(await denied('kubectl --context dev_context apply -f x', env())).toEqual([])
+  expect(await denied('TF_WORKSPACE=dev_workspace terraform apply', env())).toEqual([])
+})
+
 test('context: removed, cleared and empty target variables never reuse inherited relaxed lookups', async () => {
   for (const command of [
     'unset KUBECONFIG && kubectl apply -f x',
