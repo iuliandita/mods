@@ -1,0 +1,70 @@
+name: stack-sync
+
+on:
+  schedule:
+    - cron: "41 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stack-sync
+  cancel-in-progress: false
+
+jobs:
+  stack-sync:
+    name: stack-sync
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    env:
+      CANON_URL: https://raw.githubusercontent.com/iuliandita/agents/develop/.github/stack
+      ISSUE_TITLE: Stack canon is behind agents
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Compare vendored files with agents
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o /tmp/canon.json "${CANON_URL}/canon.json"
+          curl -fsSL --retry 3 -o /tmp/stack-check.py "${CANON_URL}/stack-check.py"
+          upstream_canon="$(sha256sum /tmp/canon.json | cut -d' ' -f1)"
+          upstream_check="$(sha256sum /tmp/stack-check.py | cut -d' ' -f1)"
+          vendored_canon="$(sed -n 's/^canon.json: sha256://p' .github/stack/SOURCE)"
+          vendored_check="$(sed -n 's/^stack-check.py: sha256://p' .github/stack/SOURCE)"
+          if [ -z "$vendored_canon" ] || [ -z "$vendored_check" ]; then
+            echo "error: stack-sync: .github/stack/SOURCE has no recorded hashes; regenerate it with stack-check.py --print-source" >&2
+            exit 1
+          fi
+          if [ "$upstream_canon" = "$vendored_canon" ] && [ "$upstream_check" = "$vendored_check" ]; then
+            echo "note: vendored stack files match agents develop"
+            exit 0
+          fi
+          {
+            echo "The vendored stack files differ from agents \`develop\`."
+            echo
+            echo "| File | Vendored sha256 | agents develop sha256 |"
+            echo "|---|---|---|"
+            echo "| \`canon.json\` | \`${vendored_canon}\` | \`${upstream_canon}\` |"
+            echo "| \`stack-check.py\` | \`${vendored_check}\` | \`${upstream_check}\` |"
+            echo
+            echo "To re-vendor:"
+            echo
+            echo "1. Copy \`canon.json\` and \`stack-check.py\` unchanged from \`.github/stack/\` in iuliandita/agents at the commit you want."
+            echo "2. Run \`python3 .github/stack/stack-check.py --print-source <40-hex commit> > .github/stack/SOURCE\`."
+            echo "3. Run \`python3 .github/stack/stack-check.py\`, fix any new findings, and open a PR."
+          } > /tmp/issue-body.md
+          number="$(gh issue list --state open --search "\"${ISSUE_TITLE}\" in:title" --json number,title --jq "map(select(.title == \"${ISSUE_TITLE}\")) | .[0].number // empty")"
+          if [ -n "$number" ]; then
+            gh issue edit "$number" --body-file /tmp/issue-body.md
+            echo "note: updated issue #${number}"
+          else
+            gh issue create --title "$ISSUE_TITLE" --body-file /tmp/issue-body.md
+          fi
