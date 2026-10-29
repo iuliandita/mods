@@ -1,6 +1,6 @@
 {
   "name": "guard-rules",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Blocks AI attribution in commits and PRs, direct commits to protected branches, commits under the wrong git identity, and mutating kubectl, helm and terraform calls on protected or unclassified environments.",
   "private": true,
   "type": "module",

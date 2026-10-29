@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `guard-rules` invalidates stale kube context lookups after more documented switchers and cloud CLI aliases, and checks only the `oc config` verb for read exemptions.
+
 ## [0.3.2] - 2026-10-29
 
 Patch prerelease, tagged on `develop`. Only the `notify` plugin changed (now 0.3.3); the other plugins stay at 0.3.1.
