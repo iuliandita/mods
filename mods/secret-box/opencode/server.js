@@ -267,6 +267,8 @@ async function scrubRemote(helper, value, fallback = "text") {
     switch (fallback) {
       case "messages":
         return withholdMessages(value);
+      case "system":
+        return [{ type: "text", text: WITHHELD }];
       case "result":
         return { output: WITHHELD, content: [{ type: "text", text: WITHHELD }] };
       case "prompt":
@@ -320,11 +322,16 @@ async function setup(ctx, deps) {
     if (e.error !== undefined)
       e.error = await scrubRemote(deps.helper, e.error, "error");
   });
-  await ctx.session.hook("context", async (e) => {
+  const scrubRequest = async (e) => {
     if (mode() !== "on")
       return;
     e.messages = await scrubRemote(deps.helper, e.messages, "messages");
-  });
+    if (e.system !== undefined)
+      e.system = await scrubRemote(deps.helper, e.system, "system");
+  };
+  for (const name of ["context", "compaction", "generate", "title"]) {
+    await ctx.session.hook(name, scrubRequest);
+  }
   await ctx.session.hook("prompt", async (e) => {
     if (mode() !== "on")
       return;

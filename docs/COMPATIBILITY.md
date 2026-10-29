@@ -90,7 +90,7 @@ Why the differences:
 | Placeholder checks | `Bash` only | `Bash` only; excludes `write_stdin` and other non-Bash calls | `shell` and `bash` only |
 | Scrub the command's own output | the helper filters stdout/stderr, then the hook rewrites the tool result | the helper filters its own stdout and stderr | `execute.after` rewrites the result, and the helper filters too |
 | Scrub a tool result that is not a placeholder command | rewrites the tool result | **not possible**: `PostToolUse` cannot redact output | `execute.after` rewrites every tool's result and error |
-| Scrub every conversation row and the prompt | `session.append` and `session.send` | **not possible**: no hook changes the conversation or the prompt | session `context` and `prompt` hooks |
+| Scrub every conversation row and the prompt | `session.append` and `session.send` | **not possible**: no hook changes the conversation or the prompt | outgoing messages/system in `context`, `compaction`, `generate`, `title`; typed `prompt` |
 | `/secret-box` status command | yes | no documented way | not ported; use `secret-box names` |
 | If the mod fails | denies a placeholder command | denies when the hook runs and fails inside its own code; a hook that cannot start lets the command through with the placeholder unfilled | denies a placeholder command |
 
@@ -107,6 +107,11 @@ nested payloads. The fallbacks match the OpenCode 2.2.1 types: tool inputs are e
 boolean `providerExecuted` flags are preserved, results keep `output` and text `content`, errors
 keep their Error prototype, and prompts keep `text`, `files`, `agents` and `skills`. These shapes
 are covered by adapter tests, not new authenticated host verification.
+The four request hooks and `!` shell-output projection were checked against the published
+`@opencode/plugin`, `@opencode/schema` and `@opencode/ai` 2.2.1 types and installed binary. All
+share the same message scrubber and fallback; failed system scrubs become a text notice.
+Stored history and output files, opaque media/provider payloads, later hook additions, tool
+definitions, request options and transport headers are not covered by these request checks.
 Each scrub reads current values, so new secrets need no reload and removed or rotated
 values are unknown to later scrubs, including saved-file checks. A wrapped command retains its
 initial values while filtering its own stdout and stderr.

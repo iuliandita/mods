@@ -213,7 +213,8 @@ test('codex: a missing helper blocks a placeholder command only', async () => {
   expect((await hook(bash('echo hi'), missing)).out).toBeNull()
 })
 
-type Hooks = { before?: (e: any) => Promise<void> | void; after?: (e: any) => Promise<void> | void; context?: (e: any) => Promise<void> | void; prompt?: (e: any) => Promise<void> | void }
+type RequestHook = 'context' | 'compaction' | 'generate' | 'title'
+type Hooks = { before?: (e: any) => Promise<void> | void; after?: (e: any) => Promise<void> | void; prompt?: (e: any) => Promise<void> | void } & Partial<Record<RequestHook, (e: { messages: unknown; system?: unknown }) => Promise<void> | void>>
 
 async function plugin(over: { helper?: string } = {}): Promise<Hooks> {
   const h: Hooks = {}
@@ -221,12 +222,55 @@ async function plugin(over: { helper?: string } = {}): Promise<Hooks> {
     {
       location: { directory: '/projects' },
       tool: { hook: async (name: string, cb: any) => void (name === 'execute.before' ? (h.before = cb) : (h.after = cb)) } as any,
-      session: { hook: async (name: string, cb: any) => void (name === 'context' ? (h.context = cb) : (h.prompt = cb)) } as any,
+      session: { hook: async (name: RequestHook | 'prompt', cb: any) => void (h[name] = cb) } as any,
     },
     { helper, options, ...over },
   )
   return h
 }
+
+test('opencode scrubs messages and system content for every model request and withholds both on failure', async () => {
+  withMode()
+  for (const helperPath of [helper, join(root, 'missing')]) {
+    const h = await plugin({ helper: helperPath })
+    for (const name of ['context', 'compaction', 'generate', 'title'] as const) {
+      const event = { messages: [{ role: 'user', content: [{ type: 'text', text: SECRET }] }],
+        system: [{ type: 'text', text: SECRET, [SECRET]: SECRET }], options: { maxTokens: 1000 } }
+      await h[name]!(event)
+      expect(JSON.stringify(event)).not.toContain(SECRET)
+      expect(event.messages[0]!.content[0]!.text).toBe(helperPath === helper ? '{{secret:API_KEY}}' : '[secret-box: this content was withheld because scrubbing failed]')
+      expect(event.system[0]!.text).toBe(event.messages[0]!.content[0]!.text)
+      expect(event.options).toEqual({ maxTokens: 1000 })
+    }
+  }
+})
+
+test('opencode compaction scrubs user ! shell output without execute.after or prompt', async () => {
+  withMode()
+  const h = await plugin()
+  const shell = spawnSync('printf', ['%s', SECRET], { encoding: 'utf8' })
+  expect(shell.status).toBe(0)
+  // OpenCode 2.2.1 projects a stored shell row into this user-message text.
+  const prefix = 'The following shell command was executed by the user:\n\nCommand:\nprint-token\n\nOutput:\n'
+  const event = { messages: [{ role: 'user', content: [{ type: 'text', text: prefix + shell.stdout }] }] }
+  expect(JSON.stringify(event)).toContain(SECRET)
+  await h.compaction!(event)
+  expect(event.messages[0]!.content[0]!.text).toBe(prefix + '{{secret:API_KEY}}')
+  expect(JSON.stringify(event)).not.toContain(SECRET)
+})
+
+test('opencode request scrubbing honors off and dry on every model request', async () => {
+  for (const mode of ['off', 'dry']) {
+    withMode(mode)
+    const h = await plugin({ helper: join(root, 'missing') })
+    for (const name of ['context', 'compaction', 'generate', 'title'] as const) {
+      const event = { messages: [{ role: 'user', content: [{ type: 'text', text: SECRET }] }], system: [{ type: 'text', text: SECRET }] }
+      const original = structuredClone(event)
+      await h[name]!(event)
+      expect(event).toEqual(original)
+    }
+  }
+})
 
 test('scope globs match whole normalized directories and invalid options fail closed', () => {
   for (const [paths, cwd, allowed] of [

@@ -48,7 +48,10 @@ This is not a security boundary. These limits apply in mode `on`; `off` and `dry
 - **OpenCode:** A failed scrub replaces result content, errors and prompt text with notices,
   clears prompt attachments, and keeps the object shapes required by OpenCode 2.2.1. Messages retain only
   allowlisted roles and content-part fields; unchecked keys and nested payloads are discarded.
-  Result and conversation hooks do not rewrite saved output files on disk.
+  The `context`, `compaction`, `generate` and `title` hooks scrub outgoing messages and system
+  content, including `!` shell output when it is sent to a model. They do not rewrite saved
+  history or output files, inspect opaque media/provider payloads, or cover content added by
+  later hooks. Tool definitions, request options and transport headers are not scrubbed.
 - **Current values:** Each scrub reads current stored values, so new values need no reload.
   Removed or rotated values are no longer known to later scrubs, including saved-file checks.
   A wrapped command retains its initial values while filtering its own stdout and stderr.
@@ -136,7 +139,10 @@ Install steps are in [INSTALL.md](../../INSTALL.md); what differs from Claude Co
   you typed) stays. The hook answers `allow`; the sandbox still applies to the rewritten command.
   Trust the hook once with `/hooks`.
 - OpenCode 2.x: the same rewrite in `execute.before`, plus scrubbing of every tool result and error, of the
-  messages the model sees again, and of the prompt as typed. If a scrub fails (locked keyring, timeout,
+  prompt as typed, and of outgoing messages and system content in `context`, `compaction`,
+  `generate` and `title`. All four OpenCode 2.2.1 request hooks share the same scrubber and failure
+  fallback; `!` shell output is checked when included in these requests, even though it bypasses
+  `execute.after` and `prompt`. Failed system checks become a single text notice. If a scrub fails (locked keyring, timeout,
   reply over 4 MiB), results keep `output` and text `content` notices, errors keep their Error
   prototype with a notice message, and prompts keep notice `text` with empty `files`, `agents`
   and `skills`. Messages are rebuilt with
