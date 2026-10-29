@@ -17,6 +17,12 @@ claude plugin install guard-rules@iuliandita-mods --scope user
 Install from a terminal. User scope can load in Desktop sessions, but loading is not equivalent
 to verified hook behavior. Each mod's manifest records actual surface coverage.
 
+## Codex and OpenCode
+
+`mods.json` lists the install command per host for each mod that supports it, and each mod's
+README describes the host setup. [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) shows what works
+where.
+
 ## Clone CLI and scopes
 
 ```bash
