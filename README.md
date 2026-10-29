@@ -51,6 +51,8 @@ Other Claude surfaces remain unverified.
 tests and remains unverified on a real host. Windows is unsupported for `secret-box`.
 On OpenCode 2.2.1, `secret-box` scrubs outgoing conversation and system content for primary,
 compaction, generate and title requests; stored history and output files are not rewritten.
+`notify` handles OpenCode 2.2.1 completion events and keeps legacy idle events without duplicate
+finish notices per execution; its permission and form events are covered by adapter tests.
 [What works on which host, and why](docs/COMPATIBILITY.md).
 
 ## Private mods

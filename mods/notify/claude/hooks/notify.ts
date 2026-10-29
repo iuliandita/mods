@@ -68,7 +68,7 @@ export function codexNotice(input: { hook_event_name?: unknown; type?: unknown; 
 
 // OpenCode: events of the server plugin. Subagent sessions (those created with a parent) are left out by the caller.
 export function opencodeNotice(type: string, cwd: unknown): Notice | null {
-  if (type === 'session.idle') return make('finish', cwd, REASON.finish)
+  if (type === 'session.execution.succeeded' || type === 'session.idle') return make('finish', cwd, REASON.finish)
   if (type === 'permission.asked') return make('input', cwd, REASON.permission)
   if (type === 'form.created') return make('input', cwd, REASON.question)
   return null

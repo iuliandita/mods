@@ -2,7 +2,7 @@ import { deliver, opencodeNotice, wanted, type Runner } from '../claude/hooks/no
 import { nodeRunner, readConfig } from './run'
 
 // The parts of the OpenCode v2 plugin context this adapter uses, so the bundle needs no host package.
-type Event = { type: string; data?: { sessionID?: string; parentID?: string; form?: { sessionID?: string } } }
+type Event = { type: string; data?: { sessionID?: string; parentID?: string; form?: { sessionID?: string }; status?: { type?: string } } }
 type Context = {
   location: { directory: string }
   event: { subscribe(options?: { signal?: AbortSignal }): AsyncIterable<Event> }
@@ -17,6 +17,7 @@ export async function setup(ctx: Context, deps: Deps = {}): Promise<() => void> 
   const platform = deps.platform ?? process.platform
   const warn = deps.warn ?? ((s: string) => console.error(s))
   const children = new Set<string>()
+  const finished = new Set<string>()
   const stop = new AbortController()
   const said = new Set<string>()
   const say = (line: string): void => {
@@ -32,9 +33,23 @@ export async function setup(ctx: Context, deps: Deps = {}): Promise<() => void> 
       return
     }
     const session = e.data?.sessionID ?? e.data?.form?.sessionID
+    if (session && e.type === 'session.deleted') {
+      children.delete(session)
+      finished.delete(session)
+      return
+    }
+    if (session && (e.type === 'session.execution.started' || (e.type === 'session.status' && e.data?.status?.type === 'busy'))) {
+      finished.delete(session)
+      return
+    }
     if (session && children.has(session)) return
     const notice = opencodeNotice(e.type, ctx.location.directory)
     if (!notice) return
+    // Both completion names can describe the same turn; a new execution resets it.
+    if (notice.kind === 'finish') {
+      if (!session || finished.has(session)) return
+      finished.add(session)
+    }
     // Read per event, so a change to the options file needs no restart.
     const { config, warning } = readConfig(deps.options)
     if (warning) say(warning)

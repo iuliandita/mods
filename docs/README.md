@@ -6,6 +6,6 @@
 - [Statusline: segments, options and forge egress](../mods/statusline/README.md)
 - [Delegation-board: the pane, options and per-host support](../mods/delegation-board/README.md)
 - [Secret-box: backend setup, batched scrubbing, OpenCode request coverage, directory scopes and tool limits](../mods/secret-box/README.md)
-- [Notify: events per host, options and the missing-notifier warning](../mods/notify/README.md)
+- [Notify: events per host, OpenCode 2.2.1 completion, options and the missing-notifier warning](../mods/notify/README.md)
 - [Source boundaries and checks](../CONTRIBUTING.md)
 - [Security reporting](../SECURITY.md)

@@ -10,7 +10,8 @@ program, `notify-send` or `osascript`, and makes no network or model calls.
 
 - Claude Code: untested. The hooks are covered by automated tests with a mocked engine only.
 - Codex and OpenCode: untested. The Codex events come from the hook schemas in Codex CLI 0.165.0
-  and the OpenCode events from the 2.0.29 plugin and client types; nothing was run on a real host.
+  and the OpenCode events from the published 2.2.1 event schema; adapter tests do not verify
+  desktop delivery in an authenticated host session.
 - Desktop, VS Code and headless: untested. A notification needs a desktop session, so a headless or
   remote session shows none.
 - Linux uses `notify-send` (libnotify), macOS uses `osascript`. Other platforms get one warning.
@@ -29,7 +30,7 @@ For Codex and OpenCode see [Codex and OpenCode](#codex-and-opencode) and
 
 | Event | Claude Code | Codex | OpenCode |
 | --- | --- | --- | --- |
-| `finish`: the agent stopped | `Stop` hook | Background `Stop` hook; or the `notify` setting (`agent-turn-complete`) | `session.idle` |
+| `finish`: the agent stopped | `Stop` hook | Background `Stop` hook; or the `notify` setting (`agent-turn-complete`) | `session.execution.succeeded` (2.2.1); `session.idle` for older versions |
 | `input`: permission needed | `Notification` with type `permission_prompt` | Background `PermissionRequest` hook | `permission.asked` |
 | `input`: waiting for input | `Notification` with type `idle_prompt` or `elicitation_dialog` | not available | `form.created` |
 
@@ -79,6 +80,12 @@ Install steps are in [INSTALL.md](../../INSTALL.md); what each host can do is in
 - OpenCode 2.x: a server plugin listens to the event stream; list the package in `plugins` in
   `opencode.json`. OpenCode's terminal UI has its own attention notifications; this plugin does not
   change them.
+  The published `@opencode/ai` 2.2.1 package depends on `@opencode/schema` 2.2.1, whose
+  [event types](https://unpkg.com/@opencode/schema@2.2.1/dist/event-manifest.d.ts) retain
+  `permission.asked` (`data.sessionID`) and `form.created` (`data.form.sessionID`). Finish
+  notifications are deduplicated per session until `session.execution.started` or the older
+  `session.status` busy event. Receiving both completion names notifies once; the next execution
+  can notify again. Failed executions are not mapped to a finish notice.
 
 ## Limits
 

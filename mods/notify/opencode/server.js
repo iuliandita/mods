@@ -32,7 +32,7 @@ var NOTIFICATION_TYPES = new Map([
 ]);
 var make = (kind, cwd, body) => ({ kind, title: projectName(cwd), body });
 function opencodeNotice(type, cwd) {
-  if (type === "session.idle")
+  if (type === "session.execution.succeeded" || type === "session.idle")
     return make("finish", cwd, REASON.finish);
   if (type === "permission.asked")
     return make("input", cwd, REASON.permission);
@@ -123,6 +123,7 @@ async function setup(ctx, deps = {}) {
   const platform = deps.platform ?? process.platform;
   const warn = deps.warn ?? ((s) => console.error(s));
   const children = new Set;
+  const finished = new Set;
   const stop = new AbortController;
   const said = new Set;
   const say = (line) => {
@@ -137,11 +138,25 @@ async function setup(ctx, deps = {}) {
       return;
     }
     const session = e.data?.sessionID ?? e.data?.form?.sessionID;
+    if (session && e.type === "session.deleted") {
+      children.delete(session);
+      finished.delete(session);
+      return;
+    }
+    if (session && (e.type === "session.execution.started" || e.type === "session.status" && e.data?.status?.type === "busy")) {
+      finished.delete(session);
+      return;
+    }
     if (session && children.has(session))
       return;
     const notice = opencodeNotice(e.type, ctx.location.directory);
     if (!notice)
       return;
+    if (notice.kind === "finish") {
+      if (!session || finished.has(session))
+        return;
+      finished.add(session);
+    }
     const { config, warning } = readConfig(deps.options);
     if (warning)
       say(warning);
