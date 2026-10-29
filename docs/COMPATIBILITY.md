@@ -131,6 +131,11 @@ Each scrub reads current values, so new secrets need no reload and removed or ro
 values are unknown to later scrubs, including saved-file checks. A wrapped command retains its
 initial values while filtering its own stdout and stderr.
 
+Claude Code saved-file scrubbing rechecks kind, link status, resolved path, size and modification
+time immediately before writing and skips changed files. The engine API exposes no inode,
+no-follow write or rename: same-metadata replacements and swaps after the check can still race
+the write. These checks have engine-mock coverage, not new real-host verification.
+
 What was run on the real hosts, with a throwaway file-backed store: on Codex 0.162.1 a placeholder
 command ran through the helper and printed the placeholder, not the value, and the sandbox still
 blocked a write in a read-only session after the hook answered `allow`; in the interactive UI an
