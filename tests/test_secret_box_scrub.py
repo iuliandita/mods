@@ -87,7 +87,7 @@ STREAM = (
 def test_stream_equals_whole_sub_for_every_split_and_random_chunks():
     sb = load_module()
     whole = sb.Scrubber(SCRUB_PAIRS)
-    expect = whole.re.sub(lambda m: whole.repl[m.group()], STREAM)
+    expect, _ = whole.scrub(STREAM)
     assert b"tok_AbC123xyz" not in expect and b"{{secret:alpha}}" in expect
 
     def stream(chunks):
@@ -107,6 +107,32 @@ def test_shared_form_goes_to_first_name_sorted():
     sb = load_module()
     s = sb.Scrubber([("zeta", "same-value-1"), ("alpha", "same-value-1")])
     assert s.feed(b"same-value-1") + s.flush() == b"{{secret:alpha}}"
+
+
+@pytest.mark.parametrize("pairs,text,expected", [
+    ([("first", "abcdef"), ("second", "defxyz")], "x abcdefxyz y", "x {{secret:first}} y"),
+    ([("first", "abcdefghij"), ("second", "cdefgh")], "abcdefghij", "{{secret:first}}"),
+    ([("first", "abcdef"), ("second", "uvwxyz")], "abcdefuvwxyz", "{{secret:first}}{{secret:second}}"),
+    ([("first", "abcdef"), ("second", "defghi"), ("third", "ghijkl")], "abcdefghijkl", "{{secret:first}}"),
+    ([("first", "ababab")], "ababababab", "{{secret:first}}"),
+])
+def test_overlapping_spans_in_batch_and_every_stream_split(tmp_path, pairs, text, expected):
+    sb = load_module()
+    data = text.encode()
+    for cut in range(len(data) + 1):
+        scrub = sb.Scrubber(pairs)
+        assert scrub.feed(data[:cut]) + scrub.feed(data[cut:]) + scrub.flush() == expected.encode()
+    scrub = sb.Scrubber(pairs)
+    assert b"".join(scrub.feed(bytes([b])) for b in data) + scrub.flush() == expected.encode()
+    store = tmp_path / "store.json"
+    store.write_text(json.dumps(dict(pairs)))
+    reply = subprocess.run(
+        [sys.executable, str(BIN), "scrub"], input=json.dumps([text]), text=True,
+        env=dict(os.environ, SECRET_BOX_TEST="1", SECRET_BOX_BACKEND=f"file:{store}"),
+        capture_output=True, check=True,
+    )
+    names = ["first", "second"] if "{{secret:second}}" in expected else ["first"]
+    assert json.loads(reply.stdout)["results"] == [{"text": expected, "names": names}]
 
 
 VALUE = "tok_AbC/12+xyz=Q"
