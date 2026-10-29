@@ -109,6 +109,23 @@ Set it in the plugin's config menu or in `pluginConfigs` in your settings.
 | Option | Default | Meaning |
 |---|---|---|
 | `mode` | `on` | `off` does nothing; `dry` only shows a toast for what it would rewrite or scrub; `on` enforces |
+| `secretScopes` | empty | JSON object mapping secret names to arrays of absolute directory globs; unlisted names remain unrestricted |
+
+For example, set `secretScopes` to `{"api.token":["/projects/api/**"]}`. On Codex and OpenCode,
+the same option in the user-level JSON file also accepts an object:
+
+```json
+{"mode":"on","secretScopes":{"api.token":["/projects/api/**"]}}
+```
+
+Globs match the whole directory reported by the host, including a tool's `workdir` on Codex and
+OpenCode. `*` and `?` stay within a path segment; a `**` segment matches zero or more directories.
+Use absolute paths, without `.` or `..` segments; bracket and brace patterns are unsupported.
+An empty array denies that secret everywhere. In mode `on`, an out-of-scope placeholder is denied
+before loading or running anything; malformed options deny all placeholder commands. Mode `dry`
+reports the reason and leaves the command unchanged. These scopes check the call's starting
+directory, not `cd` inside the script, symlink targets or the destination of a network request.
+They do not restrict direct keyring access or the helper when run outside the hooks.
 
 ## Limits
 

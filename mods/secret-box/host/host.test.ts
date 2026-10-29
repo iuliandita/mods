@@ -8,6 +8,7 @@ import { main, type Io } from './cli'
 import { setup } from './opencode'
 import { runsValues } from '../claude/hooks/commands'
 import { loadValues } from './core'
+import { scopeDenied } from '../claude/hooks/scopes'
 
 const SECRET = 'tok_AbC123xyz-Qq9'
 
@@ -97,7 +98,7 @@ test('codex: off leaves the command alone, dry only reports, an unreadable optio
   expect(dry.systemMessage).toContain('API_KEY')
   expect(dry.hookSpecificOutput).toBeUndefined()
   writeFileSync(options, '{ broken')
-  expect((await hook(bash('echo {{secret:API_KEY}}'))).out.hookSpecificOutput.permissionDecision).toBe('allow')
+  expect((await hook(bash('echo {{secret:API_KEY}}'))).out.hookSpecificOutput.permissionDecision).toBe('deny')
 })
 
 test('codex: a missing helper blocks a placeholder command only', async () => {
@@ -114,6 +115,7 @@ async function plugin(over: { helper?: string } = {}): Promise<Hooks> {
   const h: Hooks = {}
   await setup(
     {
+      location: { directory: '/projects' },
       tool: { hook: async (name: string, cb: any) => void (name === 'execute.before' ? (h.before = cb) : (h.after = cb)) } as any,
       session: { hook: async (name: string, cb: any) => void (name === 'context' ? (h.context = cb) : (h.prompt = cb)) } as any,
     },
@@ -121,6 +123,39 @@ async function plugin(over: { helper?: string } = {}): Promise<Hooks> {
   )
   return h
 }
+
+test('scope globs match whole normalized directories and invalid options fail closed', () => {
+  for (const [paths, cwd, allowed] of [
+    [['/projects/api/**'], '/projects/api', true], [['/projects/api/**'], '/projects/api/src', true],
+    [['/projects/api/**'], '/projects/api-other', false], [['/projects/*/src'], '/projects/api/src', true],
+    [['/projects/*/src'], '/projects/api/deep/src', false], [['/projects/ap?'], '/projects/api/', true],
+    [['/projects/api'], '/projects/api/../other', false], [[], '/projects/api', false],
+    [['/projects/api/**'], '', false],
+  ] as const) {
+    expect(scopeDenied({ API_KEY: paths }, ['API_KEY'], cwd) === null).toBe(allowed)
+  }
+  expect(scopeDenied('{"API_KEY":["/projects/api/**"]}', ['API_KEY', 'UNSCOPED'], '/projects/api')).toBeNull()
+  expect(scopeDenied({ API_KEY: [] }, ['UNSCOPED'], '/other')).toBeNull()
+  for (const raw of ['{', '[]', null, { API_KEY: 'all' }, { API_KEY: ['relative'] }, { API_KEY: ['/projects/../*'] }]) {
+    expect(scopeDenied(raw, ['API_KEY'], '/projects/api')).toContain('secretScopes is invalid')
+  }
+})
+
+test('both ports enforce scopes using the tool workdir and deny unreadable scope settings', async () => {
+  writeFileSync(options, JSON.stringify({ secretScopes: { API_KEY: ['/projects/api/**'] } }))
+  const h = await plugin()
+  for (const [workdir, allowed] of [['api', true], ['api/src', true], ['other', false], ['api/../other', false]] as const) {
+    const command = 'echo {{secret:API_KEY}}'
+    const result = await hook(JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Bash', cwd: '/projects', tool_input: { command, workdir } }))
+    expect(result.out.hookSpecificOutput.permissionDecision).toBe(allowed ? 'allow' : 'deny')
+    const call = h.before!({ tool: 'shell', id: workdir, input: { command, workdir } })
+    if (allowed) await call
+    else await expect(call).rejects.toThrow('API_KEY is not allowed in this directory; add the path to secretScopes')
+  }
+  expect((await hook(bash('echo {{secret:API_KEY}}'))).out.hookSpecificOutput.permissionDecision).toBe('deny')
+  writeFileSync(options, '{ broken')
+  await expect(h.before!({ tool: 'shell', id: 'broken', input: { command: 'echo {{secret:API_KEY}}' } })).rejects.toThrow('could not be read')
+})
 
 test('opencode: a shell command with a placeholder is rewritten, its result and the conversation are scrubbed', async () => {
   withMode()

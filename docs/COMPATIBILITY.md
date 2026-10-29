@@ -84,6 +84,7 @@ Why the differences:
 | | Claude Code | Codex | OpenCode |
 | --- | --- | --- | --- |
 | Fill a placeholder in a command | rewrites the Bash command | `PreToolUse` replaces the command with `secret-box exec --scrub -- '...'` | `execute.before` changes the shell input the same way |
+| Optional `secretScopes` directory globs | checks the session directory | checks the hook directory and tool `workdir` | checks the project directory and tool `workdir` |
 | Scrub the command's own output | rewrites the tool result | the helper filters its own stdout and stderr | `execute.after` rewrites the result, and the helper filters too |
 | Scrub a tool result that is not a placeholder command | rewrites the tool result | **not possible**: `PostToolUse` cannot redact output | `execute.after` rewrites every tool's result and error |
 | Scrub every conversation row and the prompt | `session.append` and `session.send` | **not possible**: no hook changes the conversation or the prompt | session `context` and `prompt` hooks |

@@ -4,6 +4,12 @@
   "description": "Keeps secret values out of the chat: write {{secret:NAME}} in a Bash command and the value is filled in at execution time from the OS keyring, and any known value that still reaches the conversation is replaced with its placeholder.",
   "author": { "name": "iuliandita" },
   "userConfig": {
+    "secretScopes": {
+      "type": "string",
+      "title": "Secret scopes",
+      "description": "Optional JSON object mapping secret names to arrays of absolute directory globs. * and ? match within a segment; ** matches directories. Unlisted secrets are unrestricted; an empty array denies a secret everywhere.",
+      "default": ""
+    },
     "mode": {
       "type": "string",
       "title": "Mode",

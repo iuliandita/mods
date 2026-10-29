@@ -1,14 +1,16 @@
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { loadOptions } from '../../../host-lib/options'
 import { runsValues, VALUES_DENIED } from '../claude/hooks/commands'
+import { scopeDenied } from '../claude/hooks/scopes'
 import { createBox, helperExists, helperMissing, parseMode, placeholderNames, rewrite, scrubValue, type Mode } from './core'
 
 // The parts of the OpenCode v2 plugin context this adapter uses, so the bundle needs no host package.
 type ToolBefore = { tool: string; id: string; input: unknown }
 type ToolAfter = { tool: string; id: string; status: 'completed' | 'error'; result?: unknown; error?: unknown }
 type Context = {
+  location: { directory: string }
   tool: {
     hook(name: 'execute.before', callback: (e: ToolBefore) => Promise<void> | void): Promise<unknown>
     hook(name: 'execute.after', callback: (e: ToolAfter) => Promise<void> | void): Promise<unknown>
@@ -36,15 +38,21 @@ export async function setup(ctx: Context, deps: Deps): Promise<void> {
 
   await ctx.tool.hook('execute.before', async (e) => {
     if (!SHELL_TOOLS.has(e.tool.toLowerCase()) || mode() === 'off') return
-    const input = e.input as { command?: unknown } | null
+    const input = e.input as { command?: unknown; workdir?: unknown } | null
     if (typeof input?.command !== 'string') return
     if (mode() === 'on' && runsValues(input.command)) throw new Error(VALUES_DENIED)
     const names = placeholderNames(input.command)
     if (names.length === 0) return
+    const loaded = loadOptions('secret-box', deps.options)
+    const cwd = typeof input.workdir === 'string' && input.workdir !== '' ? resolve(ctx.location.directory, input.workdir) : ctx.location.directory
+    const scope = loaded.error
+      ? 'secret-box: error: secretScopes could not be read: the options file is invalid; fix secret-box.json'
+      : scopeDenied(loaded.options.secretScopes, names, cwd)
     if (mode() === 'dry') {
-      console.error(`secret-box (dry run): would resolve ${names.join(', ')} at execution time`)
+      console.error(scope ?? `secret-box (dry run): would resolve ${names.join(', ')} at execution time`)
       return
     }
+    if (scope) throw new Error(scope)
     if (!helperExists(deps.helper)) throw new Error(helperMissing(deps.helper))
     input.command = rewrite(deps.helper, input.command)
     reload.add(e.id)
