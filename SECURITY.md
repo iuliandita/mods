@@ -37,3 +37,8 @@ wrapped command retains its initial values while filtering its own stdout and st
 may leave large or inaccessible saved outputs unchanged, Codex filters only a wrapped command's own
 output, and OpenCode does not rewrite saved files. Keychain command tests use mocks; real macOS
 access and host integration remain unverified. See [what secret-box does not protect](mods/secret-box/README.md#what-it-does-not-protect).
+
+`notify` makes no network or model calls. It starts one local program (`notify-send` or
+`osascript`) with the project folder name and a fixed reason as text, never message text or
+commands, and without a shell. It reads options only from the plugin options or the user-level
+`notify.json`. Its hooks never block the agent; a failing notifier is a warning line.

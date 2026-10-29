@@ -17,6 +17,18 @@
       "category": "Developer Tools"
     },
     {
+      "name": "notify",
+      "source": {
+        "source": "local",
+        "path": "./mods/notify/codex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    },
+    {
       "name": "secret-box",
       "source": {
         "source": "local",

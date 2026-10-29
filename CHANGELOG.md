@@ -4,6 +4,8 @@
 
 ### Added
 
+- `notify` mod: a desktop notification when the agent finishes or waits on a permission prompt or other input, titled with the project folder, with an optional sound (off by default). Uses `notify-send` on Linux and `osascript` on macOS, warns once when none is available, and makes no network calls. Runs on Claude Code (hooks), Codex (hooks or its `notify` setting) and OpenCode (plugin events); untested on real hosts.
+
 - `secret-box` automatically uses macOS Keychain through `security`, with platform-specific catalog requirements; Linux keeps `secret-tool`.
 
 - `secret-box` option `secretScopes` limits named placeholders to configured directory globs on all three hosts.

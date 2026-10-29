@@ -18,6 +18,7 @@ Versions checked: Claude Code 2.1.296 (`guard-rules`, `secret-box`) and 2.1.301
 | `secret-box` | **works** (terminal verified) | **works**, partly: placeholders and the command's own output, see below | **works** |
 | `delegation-board` | **works** (terminal verified) | **not possible**: hooks cannot draw anything | **works**: a panel of child sessions, opened with `/board` |
 | `statusline` | **works** (terminal verified) | **not possible**: the status line only takes built-in items | **works**, reduced: one line, no rate-limit bars |
+| `notify` | **untested**: hook tests with a mocked engine only | **untested**: finish and permission events, see below | **untested**: idle, permission and form events, see below |
 
 ## Claude terminal verification
 
@@ -172,6 +173,25 @@ Why the differences:
   records per session.
 - **The keymap layer is global.** A layer in the default mode was accepted but its command never
   reached the palette.
+
+## notify
+
+| | Claude Code | Codex | OpenCode |
+| --- | --- | --- | --- |
+| Agent finished | `classic.Stop` hook | `Stop` hook, or the `notify` setting (`agent-turn-complete`, completion only) | `session.idle` on the plugin's event stream |
+| Permission needed | `classic.Notification`, type `permission_prompt` | `PermissionRequest` hook | `permission.asked` |
+| Waiting for input | `classic.Notification`, types `idle_prompt` and `elicitation_dialog` | **not available** | `form.created` |
+| Subagents | not notified | not notified (`SubagentStop` is not hooked) | not notified when seen created with a parent; sessions that existed before the plugin loaded are not told apart |
+| Options | plugin options | `~/.config/iuliandita-mods/notify.json` | the same file, read per event |
+| Notifier | `notify-send` (Linux), `osascript` (macOS) | the same | the same |
+| Missing notifier | one warning toast per session | one stderr line per hook run | one log line per distinct warning |
+
+Nothing here was run on a real host. The Claude events are checked against the installed API types
+and tests with a mocked engine; the Codex events against the hook schemas shipped in Codex CLI 0.165.0
+(`stop.command.input`, `permission-request.command.input`) and the `agent-turn-complete` payload of
+the `notify` setting; the OpenCode events against the `@opencode/plugin` and `@opencode/client` 2.0.29
+types. The Codex hook command ends in `exit 0`, so it cannot block the agent. Notifications show the
+project folder name and a fixed reason only, never message text or commands.
 
 ## How a mod gets a host
 
