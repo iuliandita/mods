@@ -20,6 +20,8 @@
 
 ### Fixed
 
+- `delegation-board` on OpenCode honors `mode` `off` from the user-level options file; the panel shows a notice and reads no sessions.
+
 - `statusline` clears the branch's PR badge when the repository or branch changes, so a failed lookup no longer shows the previous branch's PR.
 
 - `secret-box` on OpenCode keeps object keys and the `role` and `type` values when a scrub fails, so messages stay readable; `exec` always scrubs its output (`--scrub` is still accepted); the helper reply is raw UTF-8, so large non-ASCII saved files fit the 4 MiB limit.

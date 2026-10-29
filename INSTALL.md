@@ -134,8 +134,8 @@ Terminal UI mods (`statusline`, `delegation-board`) are listed in `plugins` in
 ```
 
 Hook-adapter options for both hosts live in `~/.config/iuliandita-mods/<mod>.json` (see the
-mod's README), never in a repository. OpenCode terminal UI plugins do not read those files or
-Claude plugin options. Remove their `cli.json` entries and restart OpenCode to disable them;
+mod's README), never in a repository. OpenCode terminal UI plugins do not read Claude plugin
+options; `delegation-board` reads only `mode` from its file there, `statusline` reads none. Remove their `cli.json` entries and restart OpenCode to disable them;
 remove hook-plugin entries from `opencode.json` to uninstall those. Preserve the clone and
 user-level configuration when updating or rolling back a path-based install.
 

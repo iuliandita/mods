@@ -151,9 +151,10 @@ and its [command parser](https://github.com/apple-oss-distributions/Security/blo
 | Open the board | `/board` | | `/board`, or **Delegation board** in the command palette (`ctrl+p`) |
 | Setup | plugin install | | `plugins` in `~/.config/opencode/cli.json` (the global file; there is no project-level terminal config) |
 
-The OpenCode terminal plugins do not read the Claude options or the user-level JSON option
-files used by the hook adapters. Remove their entries from `cli.json` and restart OpenCode
-to disable them. They make no model or forge calls of their own.
+The OpenCode terminal plugins do not read the Claude options. `statusline` reads no option file;
+`delegation-board` reads only `mode` from the user-level `delegation-board.json` (`off` draws a
+notice and reads no sessions). Remove their entries from `cli.json` and restart OpenCode to
+remove them. They make no model or forge calls of their own.
 
 What was run on the real host (OpenCode 2.0.29): the statusline line drew above the prompt in and
 out of a git repository, showed the branch, and redrew while a turn ran; after a real subagent run
