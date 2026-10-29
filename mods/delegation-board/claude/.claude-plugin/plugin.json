@@ -1,6 +1,6 @@
 {
   "name": "delegation-board",
-  "version": "0.1.0",
+  "version": "0.3.1",
   "description": "A live pane of the session's subagents and teammates: type, model, effort, state, elapsed time, tokens, an optional cost estimate and the task description. It only observes; nothing leaves the machine.",
   "author": { "name": "iuliandita" },
   "types": "./types/index.d.ts",

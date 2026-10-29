@@ -27,6 +27,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
@@ -49,6 +50,7 @@ jobs:
       - run: scripts/mods generate --check
       - run: scripts/typecheck --hosts
       - run: scripts/mods validate --no-claude
+      - run: python3 scripts/check-plugin-versions.py
       - run: python3 .github/stack/stack-check.py
 
   test:

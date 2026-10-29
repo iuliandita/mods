@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- All five current plugins use version 0.3.1 in every host manifest so marketplace updates pick up their changes since v0.2.0. Lint now rejects shipped plugin changes without an increased version since the latest collection tag.
+
 ## [0.3.0] - 2026-10-29
 
 Third collection prerelease, tagged on `develop`. Individual plugin versions are unchanged.
