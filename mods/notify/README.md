@@ -29,13 +29,13 @@ For Codex and OpenCode see [Codex and OpenCode](#codex-and-opencode) and
 
 | Event | Claude Code | Codex | OpenCode |
 | --- | --- | --- | --- |
-| `finish`: the agent stopped | `Stop` hook | `Stop` hook; or the `notify` setting (`agent-turn-complete`) | `session.idle` |
-| `input`: permission needed | `Notification` with type `permission_prompt` | `PermissionRequest` hook | `permission.asked` |
+| `finish`: the agent stopped | `Stop` hook | Background `Stop` hook; or the `notify` setting (`agent-turn-complete`) | `session.idle` |
+| `input`: permission needed | `Notification` with type `permission_prompt` | Background `PermissionRequest` hook | `permission.asked` |
 | `input`: waiting for input | `Notification` with type `idle_prompt` or `elicitation_dialog` | not available | `form.created` |
 
 Nothing else is promised. Other notification types (a finished login, say) are ignored. Subagents
 are left out: Claude Code's `Stop` does not fire for them and a call with an `agent_id` is skipped,
-Codex's `SubagentStop` is not hooked, and OpenCode sessions created with a parent are skipped once
+Codex skips events carrying `agent_id` and does not hook `SubagentStop`, and OpenCode sessions created with a parent are skipped once
 the plugin has seen them created (a subagent that already existed when the plugin loaded is not
 recognized). `idle_prompt` arrives some time after a finish on Claude Code, so with both events on
 a long wait can notify twice; set `events` to `finish` to avoid that.
@@ -67,8 +67,11 @@ stderr on every call. `scripts/mods doctor` lists the notifier for your platform
 Install steps are in [INSTALL.md](../../INSTALL.md); what each host can do is in
 [docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md).
 
-- Codex: the plugin hooks `Stop` and `PermissionRequest` and runs `bin/notify.mjs hook`, which always
-  exits 0 so it cannot stop the agent. Trust the hooks once with `/hooks`, or Codex skips them.
+- Codex: the plugin hooks `Stop` and `PermissionRequest` with `async: true` and runs
+  `bin/notify.mjs hook` in the background, so notification delivery does not delay approval prompts.
+  See [Codex background hooks](https://developers.openai.com/codex/hooks#run-hooks-in-the-background).
+  Delivery has a 250 ms process timeout on both Codex entry paths and still exits 0 on failure.
+  Trust the hooks once with `/hooks`, or Codex skips them.
   Codex's own `notify` setting covers completion only. To use it instead of the plugin hooks, add
   `notify = ["node", "<clone>/mods/notify/codex/bin/notify.mjs", "notify"]` to `~/.codex/config.toml`;
   Codex appends its JSON payload as the last argument. Do not use both, or a finish notifies twice.
@@ -83,6 +86,8 @@ Install steps are in [INSTALL.md](../../INSTALL.md); what each host can do is in
 - Remote sessions notify on the machine the agent runs on, not on your desktop.
 - The title is the last folder of the session directory. Control characters are replaced with
   spaces and the name is cut at 60 characters.
+- Codex cancels unfinished background hooks when the session ends. A slow notifier can time out
+  before showing a notification; the legacy `notify` setting waits up to the delivery timeout.
 
 ## Development
 

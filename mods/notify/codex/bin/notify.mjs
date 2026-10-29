@@ -32,6 +32,8 @@ var NOTIFICATION_TYPES = new Map([
 ]);
 var make = (kind, cwd, body) => ({ kind, title: projectName(cwd), body });
 function codexNotice(input) {
+  if (input.agent_id)
+    return null;
   if (input.hook_event_name === "Stop" || input.type === "agent-turn-complete")
     return make("finish", input.cwd, REASON.finish);
   if (input.hook_event_name === "PermissionRequest")
@@ -93,8 +95,8 @@ function loadOptions(mod, path = optionsPath(mod)) {
 }
 
 // mods/notify/host/run.ts
-var nodeRunner = (argv) => new Promise((resolve, reject) => {
-  execFile(argv[0], argv.slice(1), { timeout: 5000, windowsHide: true }, (error) => {
+var runner = (timeout, killSignal = "SIGTERM") => (argv) => new Promise((resolve, reject) => {
+  execFile(argv[0], argv.slice(1), { timeout, killSignal, windowsHide: true }, (error) => {
     if (!error)
       return resolve({ exitCode: 0 });
     const code = error.code;
@@ -105,6 +107,8 @@ var nodeRunner = (argv) => new Promise((resolve, reject) => {
     resolve({ exitCode: 1 });
   });
 });
+var nodeRunner = runner(5000);
+var codexRunner = runner(250, "SIGKILL");
 function readConfig(path) {
   const loaded = loadOptions("notify", path);
   return {
@@ -157,7 +161,7 @@ try {
     err: (s) => void process.stderr.write(s.endsWith(`
 `) ? s : s + `
 `),
-    run: nodeRunner,
+    run: codexRunner,
     platform: process.platform
   });
 } catch (e) {
