@@ -3,7 +3,7 @@ import { INFRA_TOOLS, parseGh, parseGit, parseInfra, type Call, type InfraTool }
 import { tokenize, type Simple } from './lex'
 import { basename } from './paths'
 import { applyAssign, applyCd, applyDeclare, applyExport, applyPopd, applyPushd, applySet, applyUnset, dirOf, move, newProcState, UNSET, type ProcState } from './state'
-import { IDENTITY_ENV, mayName, READ_ENV, toolWords } from './words'
+import { IDENTITY_ENV, isDataWord, mayName, READ_ENV, toolWords } from './words'
 import { SHELLS, shellScript, unwrap } from './wrappers'
 
 // `opaque` lists constructs the guard does not model anywhere in the command (unparsed when the text names a
@@ -16,6 +16,9 @@ export type Parsed = { calls: Call[]; ok: boolean; opaque: string[]; local: Loca
 const OPAQUE_TOOLS = new Set(['git', 'gh', 'glab', 'tea', 'fj', 'kubectl', 'helm', 'terraform', 'tofu', ...SHELLS])
 // `cat` only copies its input, so a commit message heredoc (`"$(cat <<'EOF' ...)"`) that names a tool stays data.
 const TEXT_HEADS = new Set(['echo', 'printf', 'man', 'which', 'type', 'grep', 'rg', 'cat'])
+const DATA_HEADS = new Set(['ls', 'mkdir', 'rmdir', 'touch', 'cp', 'mv', 'rm', 'head', 'tail', 'wc', 'tee', 'curl', 'basename', 'dirname', 'realpath', 'readlink', 'file', 'stat', 'du', 'df', 'cut', 'uniq', 'diff', 'cmp'])
+// These can execute code, so only plain filename/path words are data; their scripts still name tools.
+const FILE_CODE_HEADS = new Set(['sed', 'vi', 'vim', 'nvim', 'nano', 'less', 'more'])
 // Shell constructs the guard does not follow: code defined here and run later, or a branch it does not model.
 const STRUCTURES: Record<string, string> = {
   case: 'a case statement',
@@ -266,9 +269,16 @@ function markSwitch(w: Walk, s: Step): void {
 
 function markOpaque(w: Walk, s: Step): void {
   if (FLOW_HEADS.has(s.name) || (TEXT_HEADS.has(s.name) && !(s.name === 'rg' && s.argv.some((a) => a === '--pre' || a.startsWith('--pre='))))) return
+  if (DATA_HEADS.has(s.name) || (s.name === 'brew' && s.argv[1] === 'install')) return
   // Substitutions are followed as calls of their own, so their text is not this command's words. A command word
   // that is not a plain name or path (`"git push" origin main`) counts among them.
-  const words = s.argv.slice(1).map((a, i) => (s.dyn[i + 1] ? a.replace(SUBST_TEXT, ' ') : a))
+  const words = s.argv.slice(1).map((a, i) => {
+    if (s.dyn[i + 1]) return a.replace(SUBST_TEXT, ' ')
+    // Option operands such as `vim -c /usr/bin/git` are code, even when they resemble paths.
+    const code = a.startsWith('-') || a.startsWith('+') || s.argv[i] === '-c' || s.argv[i] === '--cmd'
+      || (s.name === 'sed' && (s.argv[i] === '-e' || !s.argv.slice(1, i + 1).some((w) => !w.startsWith('-'))))
+    return FILE_CODE_HEADS.has(s.name) && !code && isDataWord(a) ? '' : a
+  })
   if (!PLAIN_WORD.test(s.argv[0]!)) words.push(s.argv[0]!)
   const tools = toolWords([...words, ...(s.cmd.input ?? [])].join(' '), { shells: true })
   if (tools.length) w.local.push({ why: `${s.name} with ${tools.join(', ')} among its words`, tools })

@@ -91,6 +91,9 @@ function liftAssigns(words) {
 }
 var TOOLS = ["git", "gh", "glab", "tea", "fj", "kubectl", "helm", "terraform", "tofu"];
 var SHELL_NAMES = ["bash", "sh", "zsh", "dash", "ksh"];
+function isDataWord(word) {
+  return /^[\w@%+,=:~./-]+$/.test(word) && (word.includes("/") || /\.[A-Za-z0-9][\w-]*$/.test(word));
+}
 var TOOL_WORD = new RegExp(`(?<![\\w.-])(${TOOLS.join("|")})(?![\\w-])`, "gi");
 var RUN_WORD = new RegExp(`(?<![\\w.-])(${[...TOOLS, ...SHELL_NAMES].join("|")})(?![\\w-])`, "g");
 function toolWords(text, opts = {}) {
@@ -1516,6 +1519,8 @@ function shellScript(argv) {
 // mods/guard-rules/claude/hooks/extract.ts
 var OPAQUE_TOOLS = new Set(["git", "gh", "glab", "tea", "fj", "kubectl", "helm", "terraform", "tofu", ...SHELLS]);
 var TEXT_HEADS = new Set(["echo", "printf", "man", "which", "type", "grep", "rg", "cat"]);
+var DATA_HEADS = new Set(["ls", "mkdir", "rmdir", "touch", "cp", "mv", "rm", "head", "tail", "wc", "tee", "curl", "basename", "dirname", "realpath", "readlink", "file", "stat", "du", "df", "cut", "uniq", "diff", "cmp"]);
+var FILE_CODE_HEADS = new Set(["sed", "vi", "vim", "nvim", "nano", "less", "more"]);
 var STRUCTURES = {
   case: "a case statement",
   select: "a select loop",
@@ -1731,7 +1736,14 @@ function markSwitch(w, s) {
 function markOpaque(w, s) {
   if (FLOW_HEADS.has(s.name) || TEXT_HEADS.has(s.name) && !(s.name === "rg" && s.argv.some((a) => a === "--pre" || a.startsWith("--pre="))))
     return;
-  const words = s.argv.slice(1).map((a, i) => s.dyn[i + 1] ? a.replace(SUBST_TEXT, " ") : a);
+  if (DATA_HEADS.has(s.name) || s.name === "brew" && s.argv[1] === "install")
+    return;
+  const words = s.argv.slice(1).map((a, i) => {
+    if (s.dyn[i + 1])
+      return a.replace(SUBST_TEXT, " ");
+    const code = a.startsWith("-") || a.startsWith("+") || s.argv[i] === "-c" || s.argv[i] === "--cmd" || s.name === "sed" && (s.argv[i] === "-e" || !s.argv.slice(1, i + 1).some((w) => !w.startsWith("-")));
+    return FILE_CODE_HEADS.has(s.name) && !code && isDataWord(a) ? "" : a;
+  });
   if (!PLAIN_WORD.test(s.argv[0]))
     words.push(s.argv[0]);
   const tools = toolWords([...words, ...s.cmd.input ?? []].join(" "), { shells: true });

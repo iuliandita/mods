@@ -19,6 +19,11 @@ export function liftAssigns(words: string[]): { assigns: Record<string, string>;
 
 export const TOOLS = ['git', 'gh', 'glab', 'tea', 'fj', 'kubectl', 'helm', 'terraform', 'tofu']
 export const SHELL_NAMES = ['bash', 'sh', 'zsh', 'dash', 'ksh']
+
+// Only a literal path or filename, never inline code or a command string containing spaces.
+export function isDataWord(word: string): boolean {
+  return /^[\w@%+,=:~./-]+$/.test(word) && (word.includes('/') || /\.[A-Za-z0-9][\w-]*$/.test(word))
+}
 const TOOL_WORD = new RegExp(`(?<![\\w.-])(${TOOLS.join('|')})(?![\\w-])`, 'gi')
 const RUN_WORD = new RegExp(`(?<![\\w.-])(${[...TOOLS, ...SHELL_NAMES].join('|')})(?![\\w-])`, 'g')
 
