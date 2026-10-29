@@ -168,13 +168,14 @@ Code, or run it in your own terminal. On Codex and OpenCode, use the context CLI
 - A path-qualified data command such as `/usr/bin/ls terraform`. Data exemptions require a bare command
   name; [the exact list and sed options](docs/limits.md) are documented separately. Data commands still check
   heredoc and here-string input, even without an executable consumer (`tee <<< 'git notes'`).
-- A PATH write (including `printf -v`, `read`, `mapfile`, declarations and `unset`), `source`/`.`,
+- Any PATH token (including loop variables, `getopts`, `wait -p` and `{PATH}`), `env -P`/`--path`, `source`/`.`,
   `hash`, `alias`, `enable` or a function definition alongside tool words disables exemptions for the whole
   command. Harmless setup such as `PATH=/usr/bin ls terraform`, `read PATH; cat docs/git`, or
   `source .venv/bin/activate && git status` is conservative too. Run the setup separately.
-  PATH references in arithmetic and harmless PATH operands to these builtins are also conservative;
+  Harmless PATH reads alongside tool words are also conservative; text-only commands such as `echo PATH=$PATH` pass.
+  PATH references in arithmetic are conservative too;
   clearing the environment before a data command (`env -i ls terraform`) disables its exemption.
-- An input executor receiving group output: braces, `if`/`fi` and subshell producers conservatively check
+- An input executor receiving group output: braces, `if`/`fi`, loop/`done` and subshell producers conservatively check
   the whole enclosing command's literal words, so unrelated tool names can also trigger a finding.
 - A `sed` command with unsupported options or an `e` anywhere in its script, even harmless text
   such as `sed -e s/name/title/ docs/git`. All its words stay checked; see the [supported options](docs/limits.md).

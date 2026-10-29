@@ -70,6 +70,32 @@ function fakeEnv(w: World = {}): Env & { probes: (Record<string, string> | undef
 const heredoc = (msg: string) => `git commit -m "$(cat <<'EOF'\n${msg}\nEOF\n)"`
 
 export const ROWS: Row[] = [
+  // #113: PATH tokens disable exemptions regardless of the command that writes them.
+  ...[
+    'tee /usr/bin/git push origin main',
+    'curl /usr/bin/kubectl --context prod-eu delete ns x',
+    'head /usr/bin/terraform apply -auto-approve',
+    'tee /usr/bin/helm --kube-context prod-eu uninstall x',
+    'tee /usr/bin/gh pr merge 1',
+    'tee /usr/bin/git commit -m "Co-Authored-By: Example <dev@example.com>"',
+  ].map((body): Row => [`for PATH in /tmp/bin; do ${body}; done`, 'U']),
+  ...[
+    'getopts a PATH;',
+    'wait -p PATH;',
+    'exec {PATH}>/dev/null;',
+    'true {PATH}>/dev/null;',
+    'env -P /tmp/bin',
+    'env --path /tmp/bin',
+    'env --path=/tmp/bin',
+    'env -P/tmp/bin',
+  ].map((setup): Row => [`${setup} tee /usr/bin/git push origin main`, 'U']),
+  ['while :; do echo git push origin main; break; done | xargs env', 'U'],
+  ...['ssh localhost', 'php', 'lua', 'tclsh', 'at', 'crontab', 'batch'].map((runner): Row =>
+    [`echo git push origin main | ${runner}`, 'U']),
+  ['echo PATH=$PATH', 'A'],
+  ['grep -rn PATH= .', 'A'],
+  [`printf 'PATH is %s\\n' "$PATH"`, 'A'],
+  ['git diff', 'A'],
   ['xargs git push', 'A', { options: { modeUnparsed: 'off' } }],
   ['xargs git push', 'A', { options: { modeUnparsed: 'dry' } }],
   ['git push origin main', 'D:protected-branch', { options: { modeUnparsed: 'off' } }],
