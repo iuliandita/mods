@@ -73,8 +73,8 @@ def test_install_passes_scope_and_names(
 SHAPES = [
     (["list"], False, 0, {"claude", "mods"}),
     (["list"], True, 1, {"claude", "mods"}),
-    (["doctor"], False, 0, {"claude", "mods", "notes", "source"}),
-    (["doctor"], True, 1, {"claude", "mods", "notes", "source"}),
+    (["doctor"], False, 0, {"claude", "mods", "notes", "source", "codex_hooks"}),
+    (["doctor"], True, 1, {"claude", "mods", "notes", "source", "codex_hooks"}),
     (["validate", "--no-claude"], False, 0, {"problems"}),
     (["validate", "--no-claude"], True, 1, {"problems"}),
     (["install", "alpha"], False, 0, {"installed"}),

@@ -137,7 +137,9 @@ Install steps are in [INSTALL.md](../../INSTALL.md); what differs from Claude Co
   of the command's own output. Codex hooks cannot rewrite results or the conversation, so nothing
   else is scrubbed: a value that reaches the chat by another route (a file the model reads, a prompt
   you typed) stays. The hook answers `allow`; the sandbox still applies to the rewritten command.
-  Trust the hook once with `/hooks`.
+  After every install or update, open `/hooks` and trust the changed hook again. Codex fails
+  open until then, including under `codex exec`: placeholder commands run without the hook.
+  `scripts/mods doctor --json` reports hook trust and fails for an untrusted or disabled guard.
 - OpenCode 2.x: the same rewrite in `execute.before`, plus scrubbing of every tool result and error, of the
   prompt as typed, and of outgoing messages and system content in `context`, `compaction`,
   `generate` and `title`. All four OpenCode 2.2.1 request hooks share the same scrubber and failure

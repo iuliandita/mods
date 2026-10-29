@@ -1,6 +1,6 @@
 # Documentation
 
-- [Install, update, scopes and recovery](../INSTALL.md)
+- [Install, update, scopes, Codex hook trust checks and recovery](../INSTALL.md)
 - [Host compatibility: Claude Code, Codex, OpenCode](COMPATIBILITY.md)
 - [Guard-rules: rule controls and common false positives](../mods/guard-rules/README.md), with [parser limits](../mods/guard-rules/docs/limits.md)
 - [Statusline: segments, options and forge egress](../mods/statusline/README.md)

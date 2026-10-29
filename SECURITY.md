@@ -15,7 +15,10 @@ harness behavior and user-provided private mods are outside this collection's co
 
 Host coverage differs: Codex does not recheck `write_stdin`, and its secret-box adapter scrubs
 only commands routed through the helper. Guard failures block when its hook runs, but an
-untrusted Codex hook is skipped. See [host compatibility](docs/COMPATIBILITY.md) for the verified
+untrusted or modified Codex hook is skipped, including under `codex exec`. After every plugin
+update, review and trust changed hooks again with `/hooks`; guards fail open until then.
+`scripts/mods doctor` reports hook trust and fails for untrusted or disabled guards.
+See [host compatibility](docs/COMPATIBILITY.md) for the verified
 cases and limits.
 
 `secret-box` uses Linux Secret Service or macOS Keychain without network or model calls. In

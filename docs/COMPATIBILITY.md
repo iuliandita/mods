@@ -67,8 +67,10 @@ Why the differences:
 - **Codex lets a failed hook through.** With the hook exiting 1, Codex reported "PreToolUse
   Failed" and ran the command, so only exit code 2 blocks. The plugin's hook command maps any
   other failure (no `node`, a missing bundle, a crash) to 2, and the guard answers within 15
-  seconds, inside the hook's 30 second timeout. The hook also needs your trust once (`/hooks` in
-  Codex) or it is skipped.
+  seconds, inside the hook's 30 second timeout. After every install or update, review and trust
+  changed hooks again with `/hooks`; Codex fails open until then, including under `codex exec`.
+  `scripts/mods doctor` reports each installed collection hook and fails for an untrusted or
+  disabled guard.
 - **Codex does not hook `write_stdin`.** Its docs say input written to a running terminal session
   does not run `PreToolUse` again, so a shell started in one call and fed commands in later calls
   is not checked.

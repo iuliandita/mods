@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from modslib import claude
+from modslib.codex import RETRUST, hook_trust
 from modslib.catalog import CatalogError, Mod, ToolMissing, load_all, load_mods
 from modslib.generate import (
     GITHUB_SOURCE,
@@ -67,6 +68,7 @@ def install_mods(
     if include_local and source is not None:
         return _fail("--local cannot be combined with --source: local mods always install from this clone; drop one of them")
     done: list[str] = []
+    manual: list[str] = []
     try:
         mods = {m.name: m for m in load_all(root, include_local=include_local)}
         unknown = [n for n in names if n not in mods]
@@ -84,11 +86,13 @@ def install_mods(
             claude.ensure_marketplace(market, where)
             result = claude.install(f"{name}@{market}", scope)
             if result.get("outcome") != "ok":
-                return _fail(f"{name}: {result.get('message', 'install failed')}", done=done)
+                return _fail(f"{name}: {result.get('message', 'install failed')}", done=done, manual=manual)
             done.append(f"{name}@{market}")
+            if "codex" in mod.hosts and RETRUST not in manual:
+                manual.append(RETRUST)
     except (CatalogError, claude.ClaudeError, OSError) as exc:
-        return _fail(str(exc), done=done, code=exit_code(exc))
-    return 0, {"ok": True, "errors": [], "installed": done}
+        return _fail(str(exc), done=done, code=exit_code(exc), manual=manual)
+    return 0, {"ok": True, "errors": [], "installed": done, **({"manual": manual} if manual else {})}
 
 
 def uninstall_mods(root: Path, names: list[str], *, scope: str) -> tuple[int, dict]:
@@ -199,11 +203,21 @@ def doctor(root: Path) -> tuple[int, dict]:
         }
         for m in mods
     ]
-    return (0 if not errors else (3 if not found["found"] else 1)), {
+    codex_hooks: list[dict] = []
+    trust_failed = False
+    try:
+        codex_hooks, trust_errors = hook_trust(root)
+        errors += trust_errors
+        trust_failed = bool(trust_errors)
+    except CatalogError as exc:
+        errors.append(str(exc))
+        trust_failed = True
+    return (0 if not errors else (3 if not found["found"] and not trust_failed else 1)), {
         "ok": not errors,
         "errors": errors,
         "claude": found,
         "mods": rows,
+        "codex_hooks": codex_hooks,
         "notes": list(NOTES),
         "source": GITHUB_SOURCE,
     }

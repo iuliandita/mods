@@ -6,6 +6,7 @@
         "hooks": [
           {
             "type": "command",
+            "statusMessage": "guard-rules PreToolUse",
             "command": "node \"$PLUGIN_ROOT/bin/guard-rules.mjs\" hook; rc=$?; if [ \"$rc\" -ne 0 ] && [ \"$rc\" -ne 2 ]; then echo \"guard-rules: the hook failed to run (exit $rc), so the call was blocked (fail closed).\" >&2; exit 2; fi; exit \"$rc\"",
             "timeout": 30
           }

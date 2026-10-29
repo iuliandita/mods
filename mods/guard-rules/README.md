@@ -111,7 +111,9 @@ why is in [docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md).
   as a best-effort filter, not a boundary.
 - Codex lets a failing hook through unless it exits 2. The plugin's hook command turns any other
   failure (no `node`, a missing bundle, a crash) into a block, and the guard answers within 15
-  seconds. Trust the hook once with `/hooks`, or Codex skips it.
+  seconds. After every install or update, open `/hooks` and trust the changed hook again.
+  Codex fails open until then, including under `codex exec`: commands run without the guard.
+  `scripts/mods doctor --json` reports hook trust and fails for an untrusted or disabled guard.
 - Codex does not run its hook for text typed into an already-running terminal session
   (`write_stdin`), so a shell started first and fed commands later is not checked.
 - The hook also refuses shell commands that name `~/.config/iuliandita-mods` or

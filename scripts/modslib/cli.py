@@ -116,7 +116,7 @@ def _parser() -> argparse.ArgumentParser:
         help="scope the plugin was installed at (default: user)",
     )
 
-    add("doctor", help="check the environment")
+    add("doctor", help="check the environment and installed Codex hook trust (read only)")
 
     v = add("validate", help="run the CI gates")
     v.add_argument("--no-claude", action="store_true", help="skip checks that need the claude CLI")
@@ -146,6 +146,8 @@ def _text_for(payload: dict) -> str:
         for m in payload["mods"]:
             missing = [r["bin"] for r in m["requires"] if not r["found"]]
             lines.append(f"{m['name']}: " + (f"missing {', '.join(missing)}" if missing else "ok"))
+        for hook in payload.get("codex_hooks", []):
+            lines.append(f"codex {hook['mod']} {hook['event']}: {hook['status']}" + (" (disabled)" if not hook['enabled'] else ""))
         return "\n".join(lines)
     if payload.get("errors"):
         return ""
