@@ -21,7 +21,10 @@ class Retired:
         """What the installer cannot do for the hosts it never installed into."""
         steps: list[str] = []
         if self.has_codex:
-            steps.append(f"codex: run `codex plugin remove {self.plugin_id}`")
+            steps.append(
+                f"codex: run `codex plugin remove {self.plugin_id}`; leftover "
+                f'[hooks.state."{self.plugin_id}:..."] entries in ~/.codex/config.toml are harmless and can be deleted'
+            )
         if self.has_opencode:
             steps.append(
                 f"opencode: remove the entry ending in mods/{self.name}/opencode from plugins in opencode.json"

@@ -145,7 +145,9 @@ and `trusted_content_hash`; legacy plugin baselines live under `.hook-trust/`. D
 these inputs to a temporary directory and queries the installed Codex `hooks/list` API there.
 It starts no agent turn or hook and writes no live Codex configuration. Discovery errors,
 an unavailable API, or a ten-second inventory timeout fail the check; inspect `/hooks`.
-Remove with `codex plugin remove guard-rules@iuliandita-mods`.
+Doctor reports only plugins Codex has installed. Remove with
+`codex plugin remove guard-rules@iuliandita-mods`; that leaves the plugin's `[hooks.state]`
+entries in `config.toml`, which are harmless and can be deleted by hand.
 
 OpenCode 2.x has no marketplace: clone this repository and add the package to `opencode.json`
 (`~/.config/opencode/opencode.json` for all projects):

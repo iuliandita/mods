@@ -121,7 +121,7 @@ def hook_trust(cwd: Path) -> tuple[list[dict], list[str]]:
                 mod = plugin.split("@", 1)[0]
                 rows.append({"mod": mod, "event": hook["eventName"], "status": status, "enabled": hook["enabled"]})
                 if mod in ("guard-rules", "secret-box") and (status != "trusted" or not hook["enabled"]):
-                    errors.append(f"{mod}: error: Codex {hook['eventName']} hook is {status}" + (" and disabled" if not hook["enabled"] else "") + "; open /hooks in Codex and enable and trust it again")
+                    errors.append(f"{mod}: Codex {hook['eventName']} hook is {status}" + (" and disabled" if not hook["enabled"] else "") + "; open /hooks in Codex and enable and trust it again")
         return rows, errors
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise CatalogError("mods: error: Codex hook trust could not be checked: inventory unavailable or invalid; run codex, inspect /hooks, and retry doctor") from exc
