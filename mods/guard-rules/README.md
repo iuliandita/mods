@@ -31,6 +31,11 @@ fix the command and retry.
 
 Commands wrapped by the secret-box mod (`secret-box exec [--scrub] -- '...'`) are unwrapped and checked like `bash -c`.
 
+An earlier kubeconfig switch or file write can make a context lookup stale. Supported writers and output flags
+are listed in the [parser limits](docs/limits.md). A writer or redirect path built from a variable makes later
+Kubernetes and Terraform mutations unclassified; reads still pass. Run setup separately when the target is known
+only at execution time.
+
 Hooks only, no UI. Portability to other Claude surfaces is expected, but only terminal behavior
 is verified; Desktop, VS Code and headless behavior remain untested.
 Egress: none (no network, no model calls).

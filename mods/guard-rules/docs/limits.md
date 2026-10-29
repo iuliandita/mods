@@ -197,6 +197,12 @@ separately, use a file-reading tool, or run the command yourself.
   `ibmcloud ks cluster config`, `civo kubernetes config`) and writes to a kubeconfig or
   `.terraform/environment` (a redirect, `cp`, `mv`, `tee`, `sed -i` and similar): after one, later mutating kube or
   Terraform calls in the same command are unclassified and denied, while reads (`kubectl get`, `terraform plan`) pass.
+  File writers include `cp`, `mv`, `ln`, `install`, `rsync`, `tee`, `truncate`, `dd of=PATH`, `scp`, `sponge`,
+  `sed`/`perl`/`yq`/`sops` with in-place flags, `gawk -i inplace`, and output options for `curl` (`-o`, `--output`),
+  `wget` (`-O`, `--output-document`), `sops` (`--output`), `gpg` and `age` (`-o`, `--output`). Attached long
+  values and short target/output values are checked too. Operand paths remain conservative, including sources
+  for writers other than `dd`. A writer or redirect target containing a variable, substitution or secret
+  placeholder makes both kube context and Terraform workspace lookups unknown; variables are not resolved.
 - Not handled: `rm .terraform/environment`, kubeconfig writers outside that list (a script editing the file,
   `terragrunt`), `oc` and other tools that act on the cluster themselves, the guard's own lookups after
   `export -n KUBECONFIG`, `git branch -m` renaming the current branch to a protected name, `git update-ref HEAD <rev>` without
