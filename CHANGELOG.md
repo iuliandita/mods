@@ -12,6 +12,8 @@
 
 ### Changed
 
+- `secret-box` summarizes scrubbing, keyring and scope limits per host in a single README section.
+
 - `guard-rules` documents rule controls and common false positives in its README, with parser details on a linked page.
 
 ### Fixed
