@@ -52,7 +52,41 @@ def test_exec_value_in_env_not_argv(tmp_path):
     cmdline, printed = p.stdout.splitlines()
     assert value not in cmdline
     assert "SECRET_BOX_0" in cmdline
-    assert printed == value
+    assert printed == "{{secret:tok}}"
+
+
+@pytest.mark.parametrize("flag", [[], ["--scrub"]])
+def test_exec_always_scrubs_its_output(tmp_path, flag):
+    value = "s3cr3t-value-xyz"
+    script = "printf '%s' {{secret:tok}}; printf '%s' \"$SECRET_BOX_0\" >&2"
+    p = run(tmp_path, "exec", *flag, "--", script, secrets={"tok": value})
+    assert p.returncode == 0, p.stderr
+    assert p.stdout == "{{secret:tok}}" and p.stderr == "{{secret:tok}}"
+
+
+def test_exec_rejects_other_options(tmp_path):
+    p = run(tmp_path, "exec", "--noscrub", "--", "echo hi", secrets={})
+    assert p.returncode == 1 and "usage: secret-box exec [--scrub] -- SCRIPT" in p.stderr
+
+
+def test_scrub_reply_is_raw_utf8_with_lone_surrogates_escaped(tmp_path):
+    store = tmp_path / "store.json"
+    store.write_text(json.dumps({"tok": "s3cr3t-value-xyz"}))
+    env = dict(os.environ, SECRET_BOX_TEST="1", SECRET_BOX_BACKEND=f"file:{store}")
+    texts = ["汉字 s3cr3t-value-xyz", "lone \ud800 surrogate"]
+    p = subprocess.run(
+        [sys.executable, str(BIN), "scrub"], input=json.dumps(texts).encode(), env=env, capture_output=True
+    )
+    assert p.returncode == 0, p.stderr
+    assert "汉字".encode() in p.stdout
+    assert b"\\ud800" in p.stdout
+    reply = json.loads(p.stdout)
+    assert [r["text"] for r in reply["results"]] == ["汉字 {{secret:tok}}", "lone \ud800 surrogate"]
+    big = "汉" * 700_000
+    p = subprocess.run(
+        [sys.executable, str(BIN), "scrub"], input=json.dumps([big]).encode(), env=env, capture_output=True
+    )
+    assert p.returncode == 0 and len(p.stdout) < 4 * 1024 * 1024 // 1.5
 
 
 def test_exec_passes_exit_code(tmp_path):
