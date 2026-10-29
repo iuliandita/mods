@@ -21,6 +21,7 @@ bun test mods/*/host
 scripts/typecheck --hosts
 scripts/mods validate --no-claude
 scripts/mods generate --check
+python3 .github/stack/stack-check.py
 ```
 
 With the pinned Claude CLI, also run
