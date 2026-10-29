@@ -29,7 +29,7 @@
     },
     {
       "matchManagers": [
-        "pip"
+        "pip_requirements"
       ],
       "semanticCommitType": "deps",
       "semanticCommitScope": "dev"
