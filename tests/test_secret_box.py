@@ -3,6 +3,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -108,6 +109,86 @@ def test_parse_names_reads_attribute_lines_from_either_stream():
     sb = load_module()
     out = "[/1]\nlabel = t\nattribute.service = s\nattribute.name = b-two\n\n[/2]\nattribute.name = a-one\n"
     assert sb.parse_names(out) == ["a-one", "b-two"]
+
+
+@pytest.mark.parametrize("value", ["printable-secret", 'quotes " and \\ and $()', "unicode-\u00fc-\U0001f600\t\n", "deadbeef", ""])
+def test_keychain_roundtrip_uses_stdin_and_lists_only_its_prefix(monkeypatch, value):
+    sb = load_module()
+    store = {}
+    seen = []
+
+    def security(argv, *, input=None, capture_output, text):
+        assert argv[0] == "/usr/bin/security"
+        seen.append((argv, input))
+        args = shlex.split(input) if argv[1:] == ["-i"] else argv[1:]
+        command = args[0]
+        if command == "dump-keychain":
+            attrs = [f'    "svce"<blob>="{s}"' for s in [*store, "other-service:private", sb.KeychainBackend.PREFIX + "bad name"]]
+            return subprocess.CompletedProcess(argv, 0, "\n".join(attrs), "")
+        service = args[args.index("-s") + 1]
+        assert args[args.index("-a") + 1] == "api.token"
+        if command == "add-generic-password":
+            assert "-U" in args
+            assert argv == ["/usr/bin/security", "-i"]
+            store[service] = args[args.index("-w") + 1]
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        if command == "find-generic-password":
+            assert "-w" in args
+            return subprocess.CompletedProcess(argv, 0 if service in store else 44, store.get(service, "") + "\n", "")
+        assert command == "delete-generic-password"
+        del store[service]
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(sb.subprocess, "run", security)
+    backend = sb.KeychainBackend()
+    assert backend.get("api.token") is None
+    backend.set("api.token", "old-value")
+    backend.set("api.token", value)
+    assert backend.get("api.token") == value
+    assert backend.names() == ["api.token"]
+    backend.remove("api.token")
+    assert backend.names() == []
+    assert all(argv == ["/usr/bin/security", "-i"] for argv, stdin in seen if stdin is not None)
+
+
+@pytest.mark.parametrize("operation", ["get", "set", "remove", "names"])
+def test_keychain_errors_do_not_echo_backend_output(monkeypatch, operation):
+    sb = load_module()
+    backend = sb.KeychainBackend()
+    monkeypatch.setattr(backend, "_run", lambda *a, **kw: subprocess.CompletedProcess([], 36, "private-value", "private-value"))
+    args = {"get": ["x"], "set": ["x", "private-value"], "remove": ["x"], "names": []}
+    with pytest.raises(sb.SecretBoxError) as error:
+        getattr(backend, operation)(*args[operation])
+    assert "private-value" not in str(error.value)
+    assert "exited 36" in str(error.value)
+
+
+def test_keychain_rejects_bad_format_and_overlong_input(monkeypatch):
+    sb = load_module()
+    backend = sb.KeychainBackend()
+    monkeypatch.setattr(backend, "_run", lambda *a, **kw: subprocess.CompletedProcess([], 0, "unversioned-value\n", ""))
+    with pytest.raises(sb.SecretBoxError, match="invalid format"):
+        backend.get("x")
+    with pytest.raises(sb.SecretBoxError, match="too long"):
+        backend.set("x", "x" * 4096)
+
+
+@pytest.mark.parametrize("platform,expected", [("linux", "LibsecretBackend"), ("darwin", "KeychainBackend"), ("win32", None)])
+def test_backend_platform_selection_and_test_override(monkeypatch, tmp_path, platform, expected):
+    sb = load_module()
+    monkeypatch.delenv("SECRET_BOX_BACKEND", raising=False)
+    monkeypatch.setattr(sb.sys, "platform", platform)
+    if expected is None:
+        with pytest.raises(sb.SecretBoxError, match="unsupported platform"):
+            sb.get_backend()
+    else:
+        assert type(sb.get_backend()).__name__ == expected
+    monkeypatch.setenv("SECRET_BOX_BACKEND", f"file:{tmp_path / 'store.json'}")
+    monkeypatch.delenv("SECRET_BOX_TEST", raising=False)
+    with pytest.raises(sb.SecretBoxError, match="test-only"):
+        sb.get_backend()
+    monkeypatch.setenv("SECRET_BOX_TEST", "1")
+    assert isinstance(sb.get_backend(), sb.FileBackend)
 
 
 @pytest.mark.parametrize(

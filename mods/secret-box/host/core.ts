@@ -11,7 +11,7 @@ export const parseMode = (v: unknown): Mode => (v === 'off' || v === 'dry' ? v :
 export { placeholderNames }
 
 export const LOAD_FAILED =
-  'secret-box: the stored secrets could not be loaded, so the command was blocked before it ran (fail closed). Check that secret-tool works and the keyring is unlocked (run "secret-box names" in a terminal), or set mode to off or dry in ~/.config/iuliandita-mods/secret-box.json.'
+  'secret-box: the stored secrets could not be loaded, so the command was blocked before it ran (fail closed). Check that the keyring backend works and is unlocked (run "secret-box names" in a terminal), or set mode to off or dry in ~/.config/iuliandita-mods/secret-box.json.'
 
 export const helperMissing = (helper: string): string => `secret-box: the helper ${helper} was not found, so the command was blocked (fail closed). Reinstall the plugin.`
 

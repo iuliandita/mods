@@ -14,7 +14,7 @@ function wrapperOf($: Engine): string {
 }
 
 const LOAD_FAILED = (wrapper: string) =>
-  `secret-box: the stored secrets could not be loaded, so the command was blocked before it ran (fail closed). Check that secret-tool works and the keyring is unlocked (run "${quote(wrapper)} names" in a terminal), or set mode to off or dry in the plugin options. The placeholders were left as written and no value was read.`
+  `secret-box: the stored secrets could not be loaded, so the command was blocked before it ran (fail closed). Check that the keyring backend works and is unlocked (run "${quote(wrapper)} names" in a terminal), or set mode to off or dry in the plugin options. The placeholders were left as written and no value was read.`
 
 const RETRY_MS = 30_000
 // The engine rejects an $.fs.read over 4 MiB.
@@ -154,7 +154,7 @@ function status($: Engine, s: State, reloaded: boolean | null): string {
   const short = known ? names.filter((n) => (known.get(n) as string).length < MIN_LEN) : []
   const lines = [`secret-box: mode ${s.mode}`]
   if (s.mode === 'off') lines.push('secrets: not loaded (mode is off)')
-  else if (known === null) lines.push('secrets: could not be loaded (check secret-tool and that the keyring is unlocked)')
+  else if (known === null) lines.push('secrets: could not be loaded (check the keyring backend and that it is unlocked)')
   else lines.push(`secrets: ${names.length ? names.join(', ') : 'none stored'}${reloaded === false ? ' (reload failed, showing the last load)' : ''}`)
   if (short.length) lines.push(`not scrubbed (shorter than ${MIN_LEN} characters): ${short.join(', ')}`)
   lines.push(`wrapper: ${wrapper}`, `add one with: ${quote(wrapper)} set NAME   (in a terminal; use {{secret:NAME}} in commands)`)

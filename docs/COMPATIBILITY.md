@@ -113,8 +113,16 @@ Why the differences:
 - **Codex hooks run as `allow`** so the replaced command is used. The documented rule is that
   `updatedInput` is accepted only with `allow`.
 
-The helper that reads the keyring (`bin/secret-box`) is a plain script. The Linux keyring backend is
-the only one so far.
+The helper that reads the keyring (`bin/secret-box`) is a plain Python script. It automatically
+uses `secret-tool` on Linux or `/usr/bin/security` on macOS; Windows is unsupported. Both backends
+keep the same helper commands. The macOS backend lists names from service-prefix metadata,
+stores a versioned UTF-8/base64 envelope, and sends set commands over stdin instead of argv.
+Its encoded set command must be under 4096 bytes. Backend tests mock `security`; real macOS
+Keychain access, prompts and host integration remain unverified. The `requires_by_platform`
+catalog field lets `scripts/mods doctor` check only the current platform's backend binary.
+
+The Keychain command behavior follows Apple's [security manual](https://github.com/apple-oss-distributions/Security/blob/main/SecurityTool/macOS/security.1)
+and its [command parser](https://github.com/apple-oss-distributions/Security/blob/main/SecurityTool/macOS/security.c).
 
 ## delegation-board and statusline
 
