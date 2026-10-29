@@ -9,6 +9,7 @@ fix the command and retry.
   equivalent `glab` (`mr`, `issue`, `release`), `tea` (`pulls`, `issues`, `releases`) and `fj`
   (`pr`, `issue`, `release`) commands (heredoc bodies included). A body file named in a `gh` or
   `glab` call (`-F`, `--body-file`, `--notes-file`, `--description-file`) is read and scanned too.
+  Both raw text and decoded argument words are scanned, including adjacent quotes, ANSI-C escapes and backslash splits.
 - **protected branches** (default `develop,main`): no `git commit`, `merge`, `cherry-pick`,
   `revert`, `am` or `rebase` while on one, and no `git push` that targets one (`origin main`,
   `HEAD:main`, `--all`, the matching refspec `:`, a wildcard destination, an implicit push from

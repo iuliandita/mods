@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- `guard-rules` scans decoded argument words for attribution and retains unparsed findings for encoded tool names, including when state combinations exceed the parser limit.
 - `guard-rules` tracks Terraform argument injection and cloud target overrides, HOME changes and alternate git common directories; injected Terraform arguments no longer bypass mutation checks.
 - `guard-rules` treats secret placeholders in context and workspace values as unknown targets, including switches earlier in the command.
 - `guard-rules` leaves ambiguous kubeconfig keys and unsupported line breaks unclassified instead of falling through to a relaxed context in a later file.

@@ -137,6 +137,38 @@ test('attribution: PR bodies, annotated tags and --trailer are scanned, lightwei
   expect((await evaluate(`gh constructor create --body ${TRAILER}`, cfg(), e)).enforced).toEqual([])
 })
 
+test('attribution: decoded words catch split trailers and escaped newlines without matching prose', async () => {
+  const messages = [
+    'Co-Authored-By:A',
+    '"Co-Authored-""By: A"',
+    String.raw`$'Co-Authored\x2dBy: A'`,
+    String.raw`Co-Authored-\By:A`,
+    String.raw`$'subject\012\012Co-Authored-By: A'`,
+  ]
+  for (const message of messages) {
+    for (const command of [`git commit -m ${message}`, `gh pr create --body ${message}`]) {
+      expect((await evaluate(command, cfg(), fakeEnv())).enforced.map((v) => v.rule), command).toEqual(['attribution'])
+      const dry = await evaluate(command, cfg({ modeAttribution: 'dry' }), fakeEnv())
+      expect(dry.enforced, command).toEqual([])
+      expect(dry.dry.map((v) => v.rule), command).toEqual(['attribution'])
+      expect((await evaluate(command, cfg({ modeAttribution: 'off' }), fakeEnv())).enforced, command).toEqual([])
+    }
+  }
+  expect((await evaluate('git commit -m "docs: explain Co-Authored-""By: trailers"', cfg(), fakeEnv())).enforced).toEqual([])
+})
+
+test('unparsed: decoded calls retain opaque syntax and fan-out reasons for both tool families', async () => {
+  const fanout = ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL', 'EMAIL'].map((key) => `export ${key}=a; export ${key}=b;`).join(' ')
+  for (const tool of [String.raw`$'\x67it' status`, String.raw`$'\x67h' pr list`, String.raw`$'\x6bubectl' get pods`]) {
+    for (const prefix of ['f() { :; };', fanout]) {
+      const command = `${prefix} ${tool}`
+      const v = await evaluate(command, cfg(), fakeEnv())
+      expect(v.enforced.map((x) => x.rule), command).toContain('unparsed')
+      expect(v.enforced[0]?.message, command).toContain(prefix === fanout ? 'more than 16 combinations' : 'a function definition')
+    }
+  }
+})
+
 test('protected branch: commits on develop or main are denied; feature, detached, unborn and aborts pass', async () => {
   for (const sub of ['commit -m x', 'merge feature', 'rebase main']) {
     const v = await evaluate(`git ${sub}`, cfg(), fakeEnv({ branch: 'develop' }))

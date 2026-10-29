@@ -33,7 +33,7 @@ the parsed lookup check, independently of `modeUnparsed`.
 
 ### When a command is unparsed
 
-These constructs make the whole command unparsed when its text names `git`, `gh`, `glab`, `tea`, `fj`, `kubectl`,
+These constructs make the whole command unparsed when a parsed call or its text names `git`, `gh`, `glab`, `tea`, `fj`, `kubectl`,
 `helm`, `terraform` or `tofu` anywhere (in any case, so `$GIT` counts):
 
 - a dynamic command word after unwrapping (`$GIT push`, `"$(which git)" push`, `${G:-git} commit`);
@@ -143,7 +143,7 @@ separately, use a file-reading tool, or run the command yourself.
 - It fails closed: if the guard itself errors, the command is blocked and the reason says so and how to switch the
   rules off. A git lookup that fails or times out (10 s) denies the command, while a non-repository or a detached
   HEAD is allowed.
-- Whenever a command contains a message-bearing call, the whole command text is scanned. A fixture or `grep`
+- Whenever a command contains a message-bearing call, the whole command text and decoded argument words are scanned. A fixture or `grep`
   containing a trailer in the same command as a commit can be denied; split the command.
 - Branch switches are parsed getopt style (`-bmain`, `-qb main`, `--create=x`, `--orphan x`); for `git switch` the
   word after `--` is the branch, and `git checkout` switches only when nothing follows `--`. An option the guard
@@ -215,8 +215,6 @@ separately, use a file-reading tool, or run the command yourself.
   `tcsh -c` scripts, `git pull` creating a merge commit, git aliases (`-c alias.x=...` or from your git config),
   `git worktree add` followed by a commit in the new worktree, `git tag -u`, assignments right after a wrapper
   (`sudo FOO=1 git ...`), and push configuration set only through `GIT_CONFIG_*` variables.
-- An unquoted `-m Co-Authored-By:A` and octal `$'\012'` newlines do not match the attribution patterns (the scan
-  reads the command text; `$'...'` is decoded only for parsing).
 - Body files not read: stdin (`-F -`), a path built from a variable, a file the guard cannot read (it is skipped),
   and a file that an earlier part of the same command writes other than by a heredoc in the command text.
 

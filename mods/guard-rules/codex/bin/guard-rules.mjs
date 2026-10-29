@@ -3028,9 +3028,13 @@ function unparsedViolations(command, parsed, guarded, cfg) {
   const cap = (mode) => cfg.unparsed === "dry" && mode === "on" ? "dry" : mode;
   const tools = new Map;
   const plain = command.replace(/["'\\]/g, "").replace(/\$\{\w*:?[-=+?]/g, " ");
-  if (parsed.opaque.length)
+  if (parsed.opaque.length) {
+    const why = parsed.opaque[0];
     for (const t of toolWords(plain, { anyCase: true }))
-      tools.set(t, parsed.opaque[0]);
+      tools.set(t, why);
+    for (const call of parsed.calls)
+      tools.set(call.kind === "infra" ? call.tool : call.kind === "gh" ? call.cli : "git", why);
+  }
   for (const l of parsed.local)
     for (const t of l.tools)
       if (!tools.has(t))
@@ -3082,6 +3086,11 @@ async function evaluate(command, cfg, rawEnv) {
   }
   if (cfg.attribution !== "off" && parsed.calls.some(isMessageCall)) {
     all.push(...attributionViolations(command, cfg));
+    for (const word of tokenize(command).cmds.flatMap((c) => c.argv))
+      all.push(...attributionViolations(word, cfg));
+    for (const call of parsed.calls)
+      for (const word of call.args)
+        all.push(...attributionViolations(word, cfg));
     for (const call of parsed.calls) {
       if (call.kind !== "gh" || !isMessageCall(call))
         continue;
