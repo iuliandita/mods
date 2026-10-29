@@ -1,6 +1,6 @@
 {
   "name": "notify",
-  "summary": "Desktop notification when the agent finishes or waits on a permission prompt or other input, with the project folder as title and an optional sound. Uses notify-send on Linux and osascript on macOS; makes no network or model calls.",
+  "summary": "Desktop notification when the agent finishes or waits on a permission prompt or other input, titled with the repo and harness, the branch in the text, and an optional sound. Uses notify-send on Linux and osascript on macOS; makes no network or model calls.",
   "kind": "notify",
   "egress": ["none"],
   "modes": ["off", "on"],

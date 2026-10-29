@@ -1,6 +1,6 @@
 import type { EngineInterface as Engine, Register } from 'claude-code'
 
-import { deliver, parseConfig, platformFromUname, wanted, claudeNotice, type Config, type Notice } from './notify'
+import { deliver, parseConfig, platformFromUname, wanted, withContext, claudeNotice, type Config, type Fs, type Pending } from './notify'
 
 const TIMEOUT_MS = 5_000
 
@@ -19,7 +19,36 @@ async function platformOf($: Engine, s: State): Promise<string> {
 }
 
 // A failure shows once per session as a toast and never reaches the session.
-async function show($: Engine, s: State, cfg: Config, notice: Notice): Promise<void> {
+// The engine's file access, for the repo and branch lookup.
+const engineFs = ($: Engine): Fs => ({
+  async read(path) {
+    try {
+      const text: unknown = await $.fs.read(path)
+      return typeof text === 'string' ? text : null
+    } catch {
+      return null
+    }
+  },
+  async exists(path) {
+    try {
+      await $.fs.stat(path)
+      return true
+    } catch {
+      return false
+    }
+  },
+})
+
+async function homeOf($: Engine): Promise<string | null> {
+  try {
+    return (await $.env.get('HOME')) ?? null
+  } catch {
+    return null
+  }
+}
+
+async function show($: Engine, s: State, cfg: Config, pending: Pending): Promise<void> {
+  const notice = await withContext(pending, await homeOf($), engineFs($))
   const result = await deliver((argv) => $.process.run(argv, { timeoutMs: TIMEOUT_MS }), await platformOf($, s), notice, cfg.sound)
   if (result.ok || s.warned) return
   s.warned = true

@@ -1,9 +1,10 @@
 # notify
 
 Shows a desktop notification when the agent finishes a turn and when it waits on you: a permission
-prompt or another input request. The title is the project folder name and the body is a short fixed
-reason, such as "Finished" or "Needs your permission". Message text and commands are never put in a
-notification. A sound is optional and off by default. Egress is `none`: the mod starts one local
+prompt or another input request. The title is the repo folder name and the harness, such as
+`mods (Codex)`; the body is a short fixed reason and the branch, such as "Finished on develop" or
+"Needs your permission on feature/x". Message text and commands are never put in a notification.
+A sound is optional and off by default. Egress is `none`: the mod starts one local
 program, `notify-send` or `osascript`, and makes no network or model calls.
 
 ## Compatibility status
@@ -94,8 +95,12 @@ Install steps are in [INSTALL.md](../../INSTALL.md); what each host can do is in
 - It tells you something happened; it does not check that you saw it. A focused terminal still gets
   the notification.
 - Remote sessions notify on the machine the agent runs on, not on your desktop.
-- The title is the last folder of the session directory. Control characters are replaced with
-  spaces and the name is cut at 60 characters.
+- The folder in the title is the nearest parent of the session directory that has a `.git` folder
+  or file, so worktrees and submodules count; the search stops at your home folder. With no repo
+  it is the session directory's last folder, and `~` for the home folder itself. The branch comes
+  from reading `.git/HEAD` (a detached HEAD shows the first 7 characters of the commit); if that
+  cannot be read, the body has no branch. No git command is run on any host. Control characters
+  are replaced with spaces and each name is cut at 60 characters.
 - Codex cancels unfinished background permission hooks when the session ends. The finish hook
   waits up to its one-second cap; the notifier and the legacy `notify` setting's delivery each
   have a 250 ms process timeout. A slow notifier can still time out before showing anything.

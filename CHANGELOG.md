@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `notify` titles a notification `<repo> (<harness>)`, such as `mods (Codex)`, and adds ` on <branch>` to the text, such as `Finished on develop`. The repo is the nearest parent folder with a `.git`; the branch is read from `.git/HEAD` without running git. The plugin is at 0.3.2.
+
 ## [0.3.1] - 2026-10-29
 
 Patch prerelease, tagged on `develop`. All five current plugins are now at version 0.3.1.

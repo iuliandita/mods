@@ -5,6 +5,9 @@ export type Mode = 'off' | 'on'
 export type Kind = 'finish' | 'input'
 export type Config = { mode: Mode; events: ReadonlySet<Kind>; sound: boolean }
 export type Notice = { kind: Kind; title: string; body: string }
+export type Harness = 'Claude Code' | 'Codex' | 'OpenCode'
+// What an event maps to before the repo and branch are looked up.
+export type Pending = { kind: Kind; harness: Harness; cwd: unknown; reason: string }
 
 const KINDS: readonly Kind[] = ['finish', 'input']
 
@@ -29,9 +32,67 @@ export function clean(s: string, max: number): string {
   return [...s.replace(/[\p{Cc}\p{Cf}]/gu, ' ').replace(/\s+/g, ' ').trim()].slice(0, max).join('')
 }
 
-export function projectName(cwd: unknown): string {
-  if (typeof cwd !== 'string') return 'agent'
-  return clean(cwd.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1) ?? '', 60) || 'agent'
+const folderName = (path: string): string => path.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1) ?? ''
+
+// File access for the lookup, injected so the Claude engine, plain Node and tests can each supply their own.
+// `read` gives the text of a small file or null; `exists` is true for a file or directory.
+export type Fs = { read(path: string): Promise<string | null>; exists(path: string): Promise<boolean> }
+
+const MAX_DEPTH = 64
+const trimSlash = (p: string): string => (p.length > 1 ? p.replace(/\/+$/, '') : p)
+
+function normalize(path: string): string {
+  const out: string[] = []
+  for (const part of path.split('/')) {
+    if (part === '..') out.pop()
+    else if (part !== '' && part !== '.') out.push(part)
+  }
+  return '/' + out.join('/')
+}
+
+// The branch from the text of a HEAD file: a branch name, the first 7 characters of a detached commit, or null.
+export function branchFromHead(text: string | null): string | null {
+  const head = (text ?? '').trim()
+  const ref = /^ref:\s*refs\/heads\/(.+)$/.exec(head)
+  if (ref) return clean(ref[1] as string, 60) || null
+  return /^[0-9a-f]{40}([0-9a-f]{24})?$/i.test(head) ? head.slice(0, 7) : null
+}
+
+async function branchOf(fs: Fs, dir: string): Promise<string | null> {
+  let head = await fs.read(`${dir}/.git/HEAD`)
+  if (head === null) {
+    const link = /^gitdir:\s*(.+)$/m.exec((await fs.read(`${dir}/.git`)) ?? '')
+    if (link) {
+      const target = (link[1] as string).trim()
+      head = await fs.read(`${normalize(target.startsWith('/') ? target : `${dir}/${target}`)}/HEAD`)
+    }
+  }
+  return branchFromHead(head)
+}
+
+// The repo folder name (the nearest parent with a `.git` file or folder, below the home folder) or, with no repo,
+// the working folder name (`~` for home itself), and the branch when it can be read. A read that fails gives no
+// branch and never an error. No process is started.
+export async function resolvePlace(cwd: unknown, home: string | null, fs: Fs): Promise<{ place: string; branch: string | null }> {
+  if (typeof cwd !== 'string') return { place: 'agent', branch: null }
+  const start = trimSlash(cwd)
+  const homeDir = home === null || home === '' ? null : trimSlash(home)
+  if (homeDir !== null && start === homeDir) return { place: '~', branch: null }
+  try {
+    let dir = start
+    for (let i = 0; i < MAX_DEPTH && dir.startsWith('/') && dir !== '/' && dir !== homeDir; i++) {
+      if (await fs.exists(`${dir}/.git`)) return { place: clean(folderName(dir), 60) || 'agent', branch: await branchOf(fs, dir).catch(() => null) }
+      dir = dir.slice(0, dir.lastIndexOf('/')) || '/'
+    }
+  } catch {
+    // an unreadable tree falls back to the working folder name
+  }
+  return { place: clean(folderName(start), 60) || 'agent', branch: null }
+}
+
+export async function withContext(p: Pending, home: string | null, fs: Fs): Promise<Notice> {
+  const { place, branch } = await resolvePlace(p.cwd, home, fs)
+  return { kind: p.kind, title: `${place} (${p.harness})`, body: branch ? `${p.reason} on ${branch}` : p.reason }
 }
 
 const REASON = {
@@ -47,34 +108,34 @@ const NOTIFICATION_TYPES = new Map<string, string>([
   ['elicitation_dialog', REASON.question],
 ])
 
-const make = (kind: Kind, cwd: unknown, body: string): Notice => ({ kind, title: projectName(cwd), body })
+const make = (kind: Kind, harness: Harness, cwd: unknown, reason: string): Pending => ({ kind, harness, cwd, reason })
 
 // Claude Code: the Stop hook, and the Notification hook by its type. Other types (a finished login, say) and
 // the message text itself are not shown: a message can name a command.
-export function claudeNotice(event: 'Stop' | 'Notification', input: { cwd?: unknown; notification_type?: unknown; agent_id?: unknown }): Notice | null {
+export function claudeNotice(event: 'Stop' | 'Notification', input: { cwd?: unknown; notification_type?: unknown; agent_id?: unknown }): Pending | null {
   if (input.agent_id) return null
-  if (event === 'Stop') return make('finish', input.cwd, REASON.finish)
+  if (event === 'Stop') return make('finish', 'Claude Code', input.cwd, REASON.finish)
   const body = NOTIFICATION_TYPES.get(String(input.notification_type))
-  return body ? make('input', input.cwd, body) : null
+  return body ? make('input', 'Claude Code', input.cwd, body) : null
 }
 
 // Codex: the Stop and PermissionRequest hooks (stdin), or the `notify` setting's agent-turn-complete payload.
-export function codexNotice(input: { hook_event_name?: unknown; type?: unknown; cwd?: unknown; agent_id?: unknown }): Notice | null {
+export function codexNotice(input: { hook_event_name?: unknown; type?: unknown; cwd?: unknown; agent_id?: unknown }): Pending | null {
   if (input.agent_id) return null
-  if (input.hook_event_name === 'Stop' || input.type === 'agent-turn-complete') return make('finish', input.cwd, REASON.finish)
-  if (input.hook_event_name === 'PermissionRequest') return make('input', input.cwd, REASON.permission)
+  if (input.hook_event_name === 'Stop' || input.type === 'agent-turn-complete') return make('finish', 'Codex', input.cwd, REASON.finish)
+  if (input.hook_event_name === 'PermissionRequest') return make('input', 'Codex', input.cwd, REASON.permission)
   return null
 }
 
 // OpenCode: events of the server plugin. Subagent sessions (those created with a parent) are left out by the caller.
-export function opencodeNotice(type: string, cwd: unknown): Notice | null {
-  if (type === 'session.execution.succeeded' || type === 'session.idle') return make('finish', cwd, REASON.finish)
-  if (type === 'permission.asked') return make('input', cwd, REASON.permission)
-  if (type === 'form.created') return make('input', cwd, REASON.question)
+export function opencodeNotice(type: string, cwd: unknown): Pending | null {
+  if (type === 'session.execution.succeeded' || type === 'session.idle') return make('finish', 'OpenCode', cwd, REASON.finish)
+  if (type === 'permission.asked') return make('input', 'OpenCode', cwd, REASON.permission)
+  if (type === 'form.created') return make('input', 'OpenCode', cwd, REASON.question)
   return null
 }
 
-export const wanted = (cfg: Config, n: Notice | null): n is Notice => n !== null && cfg.mode === 'on' && cfg.events.has(n.kind)
+export const wanted = <T extends { kind: Kind }>(cfg: Config, n: T | null): n is T => n !== null && cfg.mode === 'on' && cfg.events.has(n.kind)
 
 const quoteAppleScript = (s: string): string => `"${s.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`
 

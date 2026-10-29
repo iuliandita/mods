@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -32,13 +32,13 @@ function world(over: Partial<Io> & { runner?: 'ok' | 'missing' | 'fail' } = {}) 
 
 const hook = (name: string, cwd = '/work/my-repo') => JSON.stringify({ hook_event_name: name, cwd, session_id: 's' })
 
-test('codex hook: Stop is a finish notice and PermissionRequest an input notice, titled with the folder', async () => {
+test('codex hook: Stop is a finish notice and PermissionRequest an input notice, titled with the folder and harness', async () => {
   withOptions({})
   const { seen, io } = world()
   expect(await main(['hook'], io(hook('Stop')))).toBe(0)
   expect(await main(['hook'], io(hook('PermissionRequest')))).toBe(0)
   expect(await main(['hook'], io(hook('PreToolUse')))).toBe(0)
-  expect(seen.runs.map((a) => a.slice(-2))).toEqual([['my-repo', 'Finished'], ['my-repo', 'Needs your permission']])
+  expect(seen.runs.map((a) => a.slice(-2))).toEqual([['my-repo (Codex)', 'Finished'], ['my-repo (Codex)', 'Needs your permission']])
   expect(seen.err).toEqual([])
 })
 
@@ -48,8 +48,19 @@ test('codex notify setting: the JSON argument counts, agent-turn-complete only',
   const payload = JSON.stringify({ type: 'agent-turn-complete', cwd: '/work/api', 'last-assistant-message': 'secret text' })
   expect(await main(['notify', payload], io(''))).toBe(0)
   expect(await main(['notify', JSON.stringify({ type: 'something-else', cwd: '/w' })], io(''))).toBe(0)
-  expect(seen.runs).toEqual([['notify-send', '--app-name=mods', '--', 'api', 'Finished']])
+  expect(seen.runs).toEqual([['notify-send', '--app-name=mods', '--', 'api (Codex)', 'Finished']])
   expect(JSON.stringify(seen.runs)).not.toContain('secret text')
+})
+
+test('codex reads the repo and branch from the real file tree, with no git process', async () => {
+  withOptions({})
+  const repo = join(root, 'proj')
+  mkdirSync(join(repo, '.git'), { recursive: true })
+  mkdirSync(join(repo, 'src'))
+  writeFileSync(join(repo, '.git', 'HEAD'), 'ref: refs/heads/feature/x\n')
+  const { seen, io } = world()
+  await main(['hook'], io(hook('PermissionRequest', join(repo, 'src'))))
+  expect(seen.runs.map((a) => a.slice(-2))).toEqual([['proj (Codex)', 'Needs your permission on feature/x']])
 })
 
 test('codex skips subagent hooks and notify-setting events', async () => {
@@ -196,7 +207,7 @@ test('opencode: success, permission and form events notify; legacy idle does not
   push({ type: 'session.execution.failed', data: { sessionID: 'main' } })
   await settle()
   expect(runs.map((a) => a.at(-1))).toEqual(['Finished', 'Needs your permission', 'Needs your input'])
-  expect(runs.every((a) => a.at(-2) === 'my-repo')).toBe(true)
+  expect(runs.every((a) => a.at(-2) === 'my-repo (OpenCode)')).toBe(true)
   cleanup()
   await settle()
   expect(isAborted()).toBe(true)

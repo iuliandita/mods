@@ -24,10 +24,10 @@ function world(on: On, notifier: 'ok' | 'missing' | 'fail' = 'ok', uname = 'Linu
 
 const sent = (seen: { runs: string[][] }) => seen.runs.filter((a) => a[0] !== 'uname')
 
-test('Stop shows a finish notice titled with the project folder', async ($, on) => {
+test('Stop shows a finish notice titled with the project folder and harness', async ($, on) => {
   const seen = world(on)
   await $.classic.Stop({ cwd: '/work/my-repo', stop_hook_active: false })
-  expect(sent(seen)).toEqual([['notify-send', '--app-name=mods', '--', 'my-repo', 'Finished']])
+  expect(sent(seen)).toEqual([['notify-send', '--app-name=mods', '--', 'my-repo (Claude Code)', 'Finished']])
   expect(seen.toasts).toEqual([])
 })
 
@@ -36,7 +36,7 @@ test('Notification shows an input notice by its type; other types and subagents 
   await $.classic.Notification({ cwd: '/work/my-repo', message: 'Claude needs your permission to use Bash', notification_type: 'permission_prompt' })
   await $.classic.Notification({ cwd: '/work/my-repo', message: 'logged in', notification_type: 'auth_success' })
   await $.classic.Stop({ cwd: '/work/my-repo', stop_hook_active: false, agent_id: 'sub' })
-  expect(sent(seen)).toEqual([['notify-send', '--app-name=mods', '--', 'my-repo', 'Needs your permission']])
+  expect(sent(seen)).toEqual([['notify-send', '--app-name=mods', '--', 'my-repo (Claude Code)', 'Needs your permission']])
   expect(JSON.stringify(seen.runs)).not.toContain('Bash')
 })
 
@@ -86,4 +86,13 @@ test('a Stop that another hook blocks is not a finish', async ($, on) => {
   const seen = world(on, 'ok', 'Linux\n', 'keep going')
   await $.classic.Stop({ cwd: '/w/r', stop_hook_active: false })
   expect(sent(seen)).toEqual([])
+})
+
+test('the title and body use the repo folder and branch read through the engine', async ($, on) => {
+  const seen = world(on)
+  on('env.get', () => ({ value: '/h' }) as never)
+  on('fs.stat', (_$, e) => ((e as { path: string }).path === '/h/code/mods/.git' ? ({ value: { kind: 'dir' } } as never) : ({ deny: 'ENOENT' } as never)))
+  on('fs.read', (_$, e) => ((e as { path: string }).path === '/h/code/mods/.git/HEAD' ? ({ value: 'ref: refs/heads/develop\n' } as never) : ({ deny: 'ENOENT' } as never)))
+  await $.classic.Stop({ cwd: '/h/code/mods/mods/notify', stop_hook_active: false })
+  expect(sent(seen)).toEqual([['notify-send', '--app-name=mods', '--', 'mods (Claude Code)', 'Finished on develop']])
 })
