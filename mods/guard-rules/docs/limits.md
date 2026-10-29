@@ -183,7 +183,9 @@ separately, use a file-reading tool, or run the command yourself.
   non-literal key), makes the identity unknown and denies under an identity rule.
 - The kubeconfig `current-context` is read only from a root-level key whose value is plain or quoted without a
   backslash escape; anything else (escapes, anchors, tags, block or flow values, multi-line or duplicate keys) is
-  unclassified. A Terraform workspace or kube context given through a variable or substitution is unclassified, and
+  unclassified. A mention of `current-context` outside the recognized root line (even nested or in a comment),
+  an escaped key spelling, or CR, NEL, LS or PS line breaks also makes the file unknown; CRLF is supported.
+  A Terraform workspace or kube context given through a variable or substitution is unclassified, and
   the directory name no longer relaxes it.
 - `kubectl config use` and the krew plugin verbs `kubectl ctx|kubectx|switch|konfig NAME` (also the `kubectl-ctx`
   binary) are context switches, and any `kubectl config` verb outside `view`, `get-contexts`,
