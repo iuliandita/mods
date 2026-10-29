@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- CI installs the pinned Claude Code CLI from a checked-in lockfile with `npm ci --ignore-scripts`, so the package integrity is verified; the version pin now lives in `.github/ci/claude-code/package.json`.
 - `doctor` no longer doubles the `error:` prefix on Codex hook trust errors; INSTALL.md and the retired-mod steps say leftover Codex `hooks.state` entries for removed plugins are harmless.
 - `secret-box` rechecks saved output metadata and link status immediately before writing, skips changed files, and documents the remaining race window in the engine API.
 - `secret-box` merges overlapping known-value matches in the hooks and helper, including across streamed output chunks, so overlapping values leave no exposed tail.

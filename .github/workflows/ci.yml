@@ -8,10 +8,6 @@ on:
 permissions:
   contents: read
 
-env:
-  # Fixed CI baseline; mod.json verified_on records each mod's manual runtime check separately.
-  CLAUDE_CODE_VERSION: "2.1.296"
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -97,12 +93,13 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
-      # Pinned independently of the per-mod manual runtime verification versions.
-      - run: npm install -g --ignore-scripts @anthropic-ai/claude-code@"${CLAUDE_CODE_VERSION}" # zizmor: ignore[adhoc-packages] exact pinned version
-      # install.cjs is run by hand: --ignore-scripts skips the install script and the native binary
-      # needs it; integrity relies on the registry's per-version signature, not a lockfile
-      - run: node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs"
-      - run: claude --version | grep -F "$CLAUDE_CODE_VERSION"
+      # CI baseline lives in .github/ci/claude-code (package.json pin, package-lock.json integrity);
+      # mod.json verified_on records each mod's manual runtime check separately.
+      - run: npm ci --ignore-scripts --prefix .github/ci/claude-code
+      # install.cjs is run by hand: --ignore-scripts skips the install script and the native binary needs it
+      - run: node .github/ci/claude-code/node_modules/@anthropic-ai/claude-code/install.cjs
+      - run: echo "$GITHUB_WORKSPACE/.github/ci/claude-code/node_modules/.bin" >> "$GITHUB_PATH"
+      - run: claude --version | grep -F "$(node -p "require('./.github/ci/claude-code/package.json').dependencies['@anthropic-ai/claude-code']")"
       - run: pip install -r requirements-dev.txt
       - run: python -m pytest -q -m integration
       - run: scripts/mods validate
