@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import sys
 from pathlib import Path
 
 from modslib import claude
@@ -170,7 +171,7 @@ def doctor(root: Path) -> tuple[int, dict]:
     rows = [
         {
             "name": m.name,
-            "requires": [{"bin": b, "found": shutil.which(b) is not None} for b in m.requires],
+            "requires": [{"bin": b, "found": shutil.which(b) is not None} for b in (*m.requires, *m.requires_by_platform.get(sys.platform, []))],
         }
         for m in mods
     ]

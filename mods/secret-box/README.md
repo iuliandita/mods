@@ -24,15 +24,15 @@ placeholder.
 
 Hooks only, no UI. Portability to other Claude surfaces is expected, but only terminal behavior
 is verified; Desktop, VS Code and headless behavior remain untested.
-Egress: none (no network, no model calls). One backend in this version: libsecret through
-`secret-tool` (Linux). macOS, Windows and other backends are not supported yet.
+Egress: none (no network, no model calls). The helper selects libsecret through `secret-tool`
+on Linux and Keychain through `/usr/bin/security` on macOS. Windows is unsupported.
 
 ## Compatibility status
 
 - Claude Code: verified on 2.1.296 in the terminal.
 - Desktop, VS Code and headless: untested.
 - Mode: `on` by default; available modes are `off`, `dry` and `on`.
-- Egress: none. Requirements: `secret-tool`, `python3` and `bash` (Linux Secret Service).
+- Egress: none. Requirements: `python3`, `bash`, and either `secret-tool` on Linux or `security` on macOS.
 
 These facts match `mod.json`. See [installation and recovery](../../INSTALL.md) and
 [contributor checks](../../CONTRIBUTING.md) for scope and validation limits.
@@ -42,8 +42,19 @@ These facts match `mod.json`. See [installation and recovery](../../INSTALL.md) 
     claude plugin marketplace add iuliandita/mods
     claude plugin install secret-box@iuliandita-mods
 
-Needs `secret-tool` (package `libsecret-tools` on Debian and Ubuntu, `libsecret` on Arch and Fedora),
-Python 3, `bash`, and an unlocked keyring (GNOME Keyring, KWallet's Secret Service, or similar).
+Needs Python 3 and `bash`. On Linux, install `secret-tool` (package `libsecret-tools` on Debian
+and Ubuntu, `libsecret` on Arch and Fedora) and unlock a Secret Service keyring (GNOME Keyring,
+KWallet's Secret Service, or similar). On macOS, use the built-in `/usr/bin/security` and an
+unlocked default Keychain. Backend selection is automatic; the commands below are the same.
+
+macOS stores each item under service `claude-mods-secret-box:NAME` and account `NAME` in the
+default keychain. Listing reads metadata from the keychain search list and filters that service
+prefix, without requesting password data or maintaining a separate index. Values use a versioned
+UTF-8/base64 envelope so `security -w` returns Unicode and control characters without its ambiguous
+hex conversion. Set sends the command through `security -i` on stdin, keeping values and their
+encoded forms out of process arguments. Its encoded command must be shorter than 4096 bytes;
+longer input is rejected before storage. Keychain may ask you to approve access. The backend is
+covered by mocked command tests; a real macOS Keychain session remains unverified.
 
 ## Add a secret
 
@@ -79,7 +90,7 @@ no longer has them.
 ## Codex and OpenCode
 
 Install steps are in [INSTALL.md](../../INSTALL.md); what differs from Claude Code and why is in
-[docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md). Only the Linux keyring backend exists.
+[docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md). Both use the platform-selected backend.
 
 - Codex: a `PreToolUse` hook on `Bash` replaces a placeholder command with the helper running it
   (`secret-box exec --scrub -- '...'`). The helper fills the values in and filters known values out

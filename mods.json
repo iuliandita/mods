@@ -77,10 +77,17 @@
       ],
       "default_mode": "on",
       "requires": [
-        "secret-tool",
         "python3",
         "bash"
       ],
+      "requires_by_platform": {
+        "linux": [
+          "secret-tool"
+        ],
+        "darwin": [
+          "security"
+        ]
+      },
       "surfaces": {
         "terminal": "verified",
         "desktop": "untested",

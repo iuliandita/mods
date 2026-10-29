@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 KINDS = ("guard", "band", "pane", "rewrite", "statusline")
@@ -16,7 +16,7 @@ REQUIRED = (
     "name", "summary", "kind", "egress", "modes", "default_mode",
     "requires", "surfaces", "verified_on",
 )
-OPTIONAL = ("shared", "inject", "hosts", "host_files")
+OPTIONAL = ("shared", "inject", "hosts", "host_files", "requires_by_platform")
 SHARED_RE = re.compile(r"^[a-z][a-z0-9-]*\.ts$")
 INJECT_RE = re.compile(r"^([a-z][a-z0-9-]*)\.inject\.ts$")
 HOST_FILE_RE = re.compile(r"^[a-z][a-z0-9-]*(/[a-z][a-z0-9._-]*)+$")
@@ -68,6 +68,7 @@ class Mod:
     inject: tuple[str, ...] = ()
     hosts: tuple[str, ...] = ()
     host_files: tuple[str, ...] = ()
+    requires_by_platform: dict[str, list[str]] = field(default_factory=dict)
 
     @property
     def plugin_dir(self) -> Path:
@@ -85,6 +86,7 @@ class Mod:
             "modes": list(self.modes),
             "default_mode": self.default_mode,
             "requires": list(self.requires),
+            **({"requires_by_platform": self.requires_by_platform} if self.requires_by_platform else {}),
             "surfaces": dict(self.surfaces),
             "verified_on": self.verified_on,
             **({"hosts": list(self.hosts)} if self.hosts else {}),
@@ -136,6 +138,17 @@ def _problems(path: Path, data: object, shared: Path) -> list[str]:
     requires = data["requires"]
     if not (isinstance(requires, list) and all(isinstance(r, str) for r in requires)):
         errs.append(f"{where}: requires must be a list of binary names")
+    platform_requires = data.get("requires_by_platform", {})
+    if not (
+        isinstance(platform_requires, dict)
+        and all(
+            key in ("linux", "darwin")
+            and isinstance(bins, list)
+            and all(isinstance(b, str) and b and "/" not in b for b in bins)
+            for key, bins in platform_requires.items()
+        )
+    ):
+        errs.append(f"{where}: requires_by_platform must map linux or darwin to lists of binary names")
     surfaces = data["surfaces"]
     if not (
         isinstance(surfaces, dict)
@@ -292,6 +305,7 @@ def parse_mod(path: Path, *, is_local: bool, shared: Path) -> Mod:
         modes=tuple(data["modes"]),
         default_mode=data["default_mode"],
         requires=tuple(data["requires"]),
+        requires_by_platform=dict(data.get("requires_by_platform", {})),
         surfaces=dict(data["surfaces"]),
         verified_on=data["verified_on"],
         path=path,
