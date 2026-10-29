@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-29
+
+Patch prerelease, tagged on `develop`. Only the `notify` plugin changed (now 0.3.3); the other plugins stay at 0.3.1.
+
+Codex users: updating changes the `notify` hook content, so trust the hooks again in `/hooks` after the update. `scripts/mods doctor` reports hooks that are still untrusted.
+
 ### Fixed
 
 - `notify` clears `LD_LIBRARY_PATH` and `LD_PRELOAD` for Linux notifications so a host's bundled libraries do not break `notify-send`. Missing notifiers still warn without failing the session. The plugin is at 0.3.3.
@@ -187,7 +193,8 @@ First collection prerelease. Individual plugin versions remain independent of th
   timer afterwards; `delegation-board` resets on `/clear` and prints a text table when its pane
   is not placed (Claude Desktop).
 
-[Unreleased]: https://github.com/iuliandita/mods/compare/v0.3.1...develop
+[Unreleased]: https://github.com/iuliandita/mods/compare/v0.3.2...develop
+[0.3.2]: https://github.com/iuliandita/mods/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/iuliandita/mods/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/iuliandita/mods/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/iuliandita/mods/compare/v0.1.0...v0.2.0
