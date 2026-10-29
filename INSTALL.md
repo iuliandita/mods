@@ -4,6 +4,9 @@ Mods run unsandboxed with your permissions. Read the selected mod's README, requ
 `mod.json` surface status, and declared egress before installing. A local source loads the
 checkout's current code, so do development in a separate checkout or worktree.
 
+The v0.x prerelease installs from `develop`, the default branch. `main` becomes the stable
+release channel at v1.0.0.
+
 ## Marketplace installation
 
 ```bash

@@ -1,7 +1,7 @@
 # Contributing
 
 Open an issue before starting a bug fix or a substantial change, and reference it in the PR
-(`Closes #NN` for a completed fix). Keep changes small and preserve unrelated local settings.
+(`Closes #NN` for a completed fix). Branch from `develop`, keep changes small, and preserve unrelated local settings.
 Report suspected vulnerabilities through [SECURITY.md](SECURITY.md), not a public issue.
 
 ## Sources and generated files
@@ -15,9 +15,15 @@ Mods run unsandboxed with user permissions. Review egress and source changes exp
 
 ## Checks and documentation
 
-Run `python3 -m pytest -q -m "not integration"`, `bun test mods/*/host`,
-`scripts/typecheck --hosts`, `scripts/mods validate --no-claude`, and
-`scripts/mods generate --check`. With the pinned Claude CLI, also run
+```sh
+python3 -m pytest -q -m "not integration"
+bun test mods/*/host
+scripts/typecheck --hosts
+scripts/mods validate --no-claude
+scripts/mods generate --check
+```
+
+With the pinned Claude CLI, also run
 `scripts/mods validate` and `python3 -m pytest -q -m integration` using a temporary config root.
 After TypeScript changes, run `scripts/typecheck <mod>` and
 `claude plugin test mods/<mod>/claude`. Typechecking requires API types from an authenticated
@@ -28,3 +34,16 @@ There is no automated docs-impact engine here. Review [INSTALL.md](INSTALL.md), 
 READMEs, manifests, egress, requirements, scopes and recovery steps in the PR. Changes to guards
 need a corpus regression case. Surface portability is expected only until a real session verifies
 it; do not turn terminal coverage into a claim about Desktop, VS Code or headless sessions.
+
+## Releases
+
+Feature and fix PRs target `develop` and are squash-merged. The version bump follows the
+conventional-commit titles since the last tag: `feat` is minor, `fix` and `deps` are patch,
+`!` or `BREAKING CHANGE:` is major; `docs`, `chore`, `ci`, `test`, and `style` alone do not release.
+
+1. On `develop`, bump the collection version and move the Unreleased changelog entries under
+   the new version by PR. Collection tags do not set individual plugin versions.
+2. During the v0.x prerelease phase, tag `develop` as `v<version>` and push the tag.
+3. Starting with v1.0.0, open a PR from `develop` to `main` and merge it with a merge commit,
+   never a squash. Tag the merge on `main` as `v<version>` and push the tag. The release workflow
+   checks the tag and publishes notes from the changelog.
