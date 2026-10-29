@@ -8,6 +8,8 @@ import { helperExists, helperMissing, parseMode, placeholderNames, rewrite, scru
 // The parts of the OpenCode v2 plugin context this adapter uses, so the bundle needs no host package.
 type ToolBefore = { tool: string; id: string; input: unknown }
 type ToolAfter = { tool: string; id: string; status: 'completed' | 'error'; result?: unknown; error?: unknown }
+type RequestHook = 'context' | 'compaction' | 'generate' | 'title'
+type ModelRequest = { messages: unknown; system?: unknown }
 type Context = {
   location: { directory: string }
   tool: {
@@ -15,7 +17,7 @@ type Context = {
     hook(name: 'execute.after', callback: (e: ToolAfter) => Promise<void> | void): Promise<unknown>
   }
   session: {
-    hook(name: 'context', callback: (e: { messages: unknown }) => Promise<void> | void): Promise<unknown>
+    hook(name: RequestHook, callback: (e: ModelRequest) => Promise<void> | void): Promise<unknown>
     hook(name: 'prompt', callback: (e: { prompt: unknown }) => Promise<void> | void): Promise<unknown>
   }
 }
@@ -59,11 +61,15 @@ export async function setup(ctx: Context, deps: Deps): Promise<void> {
     if (e.error !== undefined) e.error = await scrubRemote(deps.helper, e.error, 'error')
   })
 
-  // Every row the model sees again, and the prompt as typed.
-  await ctx.session.hook('context', async (e) => {
+  // OpenCode 2.2.1 routes each kind of model request through its own hook.
+  const scrubRequest = async (e: ModelRequest) => {
     if (mode() !== 'on') return
     e.messages = await scrubRemote(deps.helper, e.messages, 'messages')
-  })
+    if (e.system !== undefined) e.system = await scrubRemote(deps.helper, e.system, 'system')
+  }
+  for (const name of ['context', 'compaction', 'generate', 'title'] as const) {
+    await ctx.session.hook(name, scrubRequest)
+  }
   await ctx.session.hook('prompt', async (e) => {
     if (mode() !== 'on') return
     e.prompt = await scrubRemote(deps.helper, e.prompt, 'prompt')

@@ -18,6 +18,7 @@
 
 ### Fixed
 
+- `secret-box` scrubs outgoing messages and system content for OpenCode 2.2.1 compaction, generate and title requests as well as primary context, including user `!` shell output, with shared failure withholding.
 - `secret-box` keeps OpenCode 2.2.1 tool-call inputs, provider execution flags, result objects, Error instances and typed prompts usable after a scrub failure, and checks non-enumerable Error fields during scrubbing.
 - `guard-rules` disables exemptions for PATH tokens and `env -P`/`--path`, checks loop output through `done`, and recognizes `ssh`, `php`, `lua`, `tclsh`, `at`, `crontab` and `batch` as input executors.
 - `notify` runs Codex hooks in the background, caps notifier delivery at 250 ms on both Codex entry paths, and skips events with `agent_id`.

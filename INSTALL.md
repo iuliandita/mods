@@ -146,6 +146,10 @@ options; `delegation-board` reads only `mode` from its file there, `statusline` 
 remove hook-plugin entries from `opencode.json` to uninstall those. Preserve the clone and
 user-level configuration when updating or rolling back a path-based install.
 
+On OpenCode 2.2.1, `secret-box` scrubs messages and system content for primary, compaction,
+generate and title requests, including user `!` shell output sent to a model. Stored history
+and output files are not rewritten; see the mod's [limits](mods/secret-box/README.md#what-it-does-not-protect).
+
 After a Codex install the hook command is
 `node <plugin>/bin/guard-rules.mjs`; the same file in a clone (`mods/guard-rules/codex/bin/`) is
 the command line tool for OpenCode users too.

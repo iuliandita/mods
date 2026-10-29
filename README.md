@@ -47,6 +47,8 @@ Other Claude surfaces remain unverified.
 `guard-rules`, `secret-box` and `notify` run on Claude Code, Codex and OpenCode. `statusline` and `delegation-board` run on Claude Code and, as terminal UI plugins, on OpenCode.
 `secret-box` selects its backend by platform; macOS Keychain access is implemented with mocked
 tests and remains unverified on a real host. Windows is unsupported for `secret-box`.
+On OpenCode 2.2.1, `secret-box` scrubs outgoing conversation and system content for primary,
+compaction, generate and title requests; stored history and output files are not rewritten.
 [What works on which host, and why](docs/COMPATIBILITY.md).
 
 ## Private mods

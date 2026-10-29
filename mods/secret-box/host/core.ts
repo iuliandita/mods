@@ -129,7 +129,7 @@ export function scrubValue<T>(value: T, scrub: Scrubber): { value: T; names: str
   return { value: out, names: [...names], changed }
 }
 
-type Fallback = 'text' | 'messages' | 'result' | 'error' | 'prompt'
+type Fallback = 'text' | 'messages' | 'system' | 'result' | 'error' | 'prompt'
 
 export async function scrubRemote(helper: string, value: unknown, fallback: Fallback = 'text'): Promise<unknown> {
   try {
@@ -138,6 +138,7 @@ export async function scrubRemote(helper: string, value: unknown, fallback: Fall
   } catch {
     switch (fallback) {
       case 'messages': return withholdMessages(value)
+      case 'system': return [{ type: 'text', text: WITHHELD }]
       case 'result': return { output: WITHHELD, content: [{ type: 'text', text: WITHHELD }] }
       case 'prompt': return { text: WITHHELD, files: [], agents: [], skills: [] }
       case 'error': {
