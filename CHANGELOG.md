@@ -2,6 +2,38 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-29
+
+Second collection prerelease, tagged on `develop`. Individual plugin versions are unchanged.
+
+### Breaking
+
+- `scripts/mods` usage errors (unknown command or flag, bad arguments) now exit 2 instead of 1.
+  Scripts that test for exit 1 should accept 2 as well.
+- A missing `claude` CLI or pinned `bun` now exits 3 instead of 1. Install the tool, or treat 3
+  as "required tool missing".
+- Human-readable errors now go to stderr with an `error:` prefix and a next step, not to stdout.
+  Scripts that parse error text from stdout should read stderr or use `--json`, which still
+  prints `ok` and `errors` on stdout.
+
+### Changed
+
+- `scripts/mods --help` lists Environment and Exit codes sections.
+- README has a logo, a status line and the shared section layout.
+- Changelog uses Keep a Changelog headings and compare links.
+
+### CI
+
+- Job ids are `lint`, `test` and `integration`; a new `security` workflow runs a secret scan
+  and a workflow audit.
+- A `release` workflow publishes GitHub release notes from this changelog on tag push; `v0.*`
+  tags must be on `develop`.
+- The shared stack canon is vendored and checked in `lint`; a weekly `stack-sync` workflow
+  opens an issue on drift.
+- Release process is documented in CONTRIBUTING.md.
+
+### Docs
+
 - Recorded Claude Code 2.1.301 terminal smoke checks for `prompt-gate`, `skill-pick`,
   `delegation-board` and `statusline` in the compatibility docs and generated catalog.
   Other Claude surfaces remain unverified.
@@ -87,5 +119,6 @@ First collection prerelease. Individual plugin versions remain independent of th
   timer afterwards; `delegation-board` resets on `/clear` and prints a text table when its pane
   is not placed (Claude Desktop).
 
-[Unreleased]: https://github.com/iuliandita/mods/compare/v0.1.0...develop
+[Unreleased]: https://github.com/iuliandita/mods/compare/v0.2.0...develop
+[0.2.0]: https://github.com/iuliandita/mods/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/iuliandita/mods/releases/tag/v0.1.0
