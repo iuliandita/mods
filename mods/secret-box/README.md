@@ -1,9 +1,9 @@
 # secret-box
 
-Keeps secret values out of the chat. You store a secret once, in your OS keyring, from a terminal.
-After that the model writes `{{secret:NAME}}` in a Bash command, the value is filled in only when
-the command runs, and any known value that still reaches the conversation is replaced with its
-placeholder.
+Resolves named placeholders from Linux Secret Service or macOS Keychain when a command runs.
+Store a secret from your terminal, then use `{{secret:NAME}}` in commands. Optional directory
+scopes restrict placeholder use, and known values are scrubbed where the host's hooks allow it.
+See [what it does not protect](#what-it-does-not-protect) for the limits on each host.
 
 - **placeholders**: a Bash command containing `{{secret:NAME}}` (`NAME` is letters, digits, `.`, `_`
   and `-`) is rewritten to run through the bundled `secret-box exec` helper. The helper puts the value
@@ -11,16 +11,16 @@ placeholder.
   The program the command runs (curl, say) sees the value in its own argv if the command puts it
   there, so prefer stdin or config forms (`curl -K -`, `--data @-`). A command without a placeholder
   is not touched, so other guards still see it as written.
-- **scrubbing**: each stored value, and its JSON-escaped, URL-encoded and base64 forms (including
+- **scrubbing on Claude Code**: each stored value, and its JSON-escaped, URL-encoded and base64 forms (including
   base64 of text around it, like `user:<value>`), are replaced with `{{secret:NAME}}` in every row the conversation keeps (your prompts, command output, the model's
   text, tool results, hook context, notes, attachments such as @-mentioned files and file-change
   diffs, other agents' messages, compaction summaries, notices) and in messages sent to other
   agents. Values shorter than 6
   characters are never scrubbed; `secret-box set` warns about them.
-- **fails closed** for placeholder commands only: if the stored values cannot be loaded, a Bash call
+- **placeholder failures**: if the stored values cannot be loaded, a Bash call
   with a placeholder is denied before it runs, and the reason tells the model what to check.
-  Scrubbing is best-effort: when loading fails it is off (one toast says so) and is retried at most
-  every 30 seconds.
+  Scrubbing is best-effort: a failed first load leaves it off (one toast says so), with retries at
+  most every 30 seconds. A failed reload retains the last successful values.
 
 Hooks only, no UI. Portability to other Claude surfaces is expected, but only terminal behavior
 is verified; Desktop, VS Code and headless behavior remain untested.

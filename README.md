@@ -32,7 +32,7 @@ installed with `scripts/mods list`, and check the environment with `scripts/mods
 ### Catalog
 
 - `guard-rules`: blocks AI attribution in commits and PRs, direct commits to protected branches, commits under the wrong git identity, and mutating kubectl, helm and terraform calls on protected or unclassified environments.
-- `secret-box`: keeps secret values out of the chat; a secret placeholder in a Bash command is filled in at execution time from the OS keyring.
+- `secret-box`: fills named placeholders from Linux Secret Service or macOS Keychain at execution time, with optional directory scopes. Scrubbing coverage depends on the host; see [what it does not protect](mods/secret-box/README.md#what-it-does-not-protect). The mod makes no network or model calls; commands it runs may still send values.
 - `delegation-board`: a live pane of the session's subagents and teammates: type, model, effort, state, elapsed time and tokens; in Claude Desktop, a compact band above the prompt.
 - `statusline`: a two-row status line above the prompt in the terminal and Claude Desktop: model and effort, git state, context against your auto-compact window, 5h and 7d limits with pace, cache, cost and time. In a git repo with a GitHub or GitLab remote it runs `gh` or `glab` for PR and issue counts; `forge=off` turns that off.
 
@@ -43,6 +43,8 @@ behavior and versions. Other Claude surfaces remain unverified.
 ## Compatibility
 
 `guard-rules` and `secret-box` run on Claude Code, Codex and OpenCode. `statusline` and `delegation-board` run on Claude Code and, as terminal UI plugins, on OpenCode.
+`secret-box` selects its backend by platform; macOS Keychain access is implemented with mocked
+tests and remains unverified on a real host. Windows is unsupported for `secret-box`.
 [What works on which host, and why](docs/COMPATIBILITY.md).
 
 ## Private mods

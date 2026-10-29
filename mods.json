@@ -65,7 +65,7 @@
     },
     {
       "name": "secret-box",
-      "summary": "Keeps secret values out of the chat: write {{secret:NAME}} in a Bash command and the value is filled in at execution time from the OS keyring, and any known value that still reaches the conversation is replaced with its placeholder.",
+      "summary": "Resolves {{secret:NAME}} placeholders from Linux Secret Service or macOS Keychain at execution time, with optional directory scopes and host-specific output scrubbing.",
       "kind": "guard",
       "egress": [
         "none"

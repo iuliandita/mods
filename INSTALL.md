@@ -23,6 +23,21 @@ to verified hook behavior. Each mod's manifest records actual surface coverage.
 README describes the host setup. [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) shows what works
 where.
 
+For `secret-box`, install Python 3 and `bash`, plus `secret-tool` on Linux (with an unlocked
+Secret Service keyring). macOS uses the built-in `/usr/bin/security` and an unlocked Keychain;
+backend selection is automatic. Windows is unsupported. `scripts/mods doctor --json` checks
+common binaries plus the current platform's `requires_by_platform` entries. Missing backend
+binaries appear in the mod's `requires` results; the JSON envelope and exit codes are unchanged.
+Real macOS Keychain access and prompts remain unverified.
+
+Store values with `secret-box set NAME` in your own terminal, never in the chat. Run
+`secret-box names` to check backend access without printing values. In mode `on`, model shell
+calls to the internal `values` command are denied on all three hosts. Configure optional
+`secretScopes` directory globs in the Claude plugin options or the user-level
+`~/.config/iuliandita-mods/secret-box.json` file on Codex and OpenCode. Unlisted names remain
+unrestricted; malformed settings deny placeholder commands. See the mod's
+[options](mods/secret-box/README.md#options) and [limits](mods/secret-box/README.md#what-it-does-not-protect).
+
 ## Clone CLI and scopes
 
 ```bash

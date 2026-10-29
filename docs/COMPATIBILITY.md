@@ -85,11 +85,17 @@ Why the differences:
 | --- | --- | --- | --- |
 | Fill a placeholder in a command | rewrites the Bash command | `PreToolUse` replaces the command with `secret-box exec --scrub -- '...'` | `execute.before` changes the shell input the same way |
 | Optional `secretScopes` directory globs | checks the session directory | checks the hook directory and tool `workdir` | checks the project directory and tool `workdir` |
+| Model calls to internal `values` | denies literal Bash calls and visible wrappers in mode `on` | the same pre-run check | the same pre-run check |
 | Scrub the command's own output | rewrites the tool result | the helper filters its own stdout and stderr | `execute.after` rewrites the result, and the helper filters too |
 | Scrub a tool result that is not a placeholder command | rewrites the tool result | **not possible**: `PostToolUse` cannot redact output | `execute.after` rewrites every tool's result and error |
 | Scrub every conversation row and the prompt | `session.append` and `session.send` | **not possible**: no hook changes the conversation or the prompt | session `context` and `prompt` hooks |
 | `/secret-box` status command | yes | no documented way | not ported; use `secret-box names` |
 | If the mod fails | denies a placeholder command | denies when the hook runs and fails inside its own code; a hook that cannot start lets the command through with the placeholder unfilled | denies a placeholder command |
+
+The [per-host limits summary](../mods/secret-box/README.md#what-it-does-not-protect) covers failed
+loads, saved output, short values and child-process access. Scope and `values` checks are covered
+by automated tests, not new real-host verification. They do not restrict arbitrary scripts or
+other keyring clients, and scopes check only the call's starting directory.
 
 What was run on the real hosts, with a throwaway file-backed store: on Codex 0.162.1 a placeholder
 command ran through the helper and printed the placeholder, not the value, and the sandbox still
