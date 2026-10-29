@@ -146,8 +146,10 @@ Install steps are in [INSTALL.md](../../INSTALL.md); what differs from Claude Co
   reply over 4 MiB), results keep `output` and text `content` notices, errors keep their Error
   prototype with a notice message, and prompts keep notice `text` with empty `files`, `agents`
   and `skills`. Messages are rebuilt with
-  only known roles and content-part fields from `@opencode/ai` 2.2.1. Tool calls use empty object
-  inputs; calls and results retain only boolean `providerExecuted` values and paired replacement IDs.
+  only known roles and content-part fields from `@opencode/ai` 2.2.1. Provider-executed tool calls
+  and results become plain text notices so the Anthropic adapter can accept the history without
+  unchecked server-tool payloads. Client tool calls use empty object inputs; client calls and results
+  retain paired replacement IDs and an explicit `providerExecuted: false`.
   Text, reasoning and tool
   payloads are withheld; media, compaction and unknown parts become text notices. Unknown roles
   become `user`. Arbitrary keys, metadata and nested `role`/`type` values are discarded.

@@ -6,7 +6,7 @@ import { join } from 'node:path'
 
 import { main, type Io } from './cli'
 import { setup } from './opencode'
-import { request } from './core'
+import { request, WITHHELD } from './core'
 import { parseReply, scrubBatch } from '../claude/hooks/remote'
 import { scopeDenied } from '../claude/hooks/scopes'
 
@@ -134,10 +134,27 @@ test('opencode fallback allowlists message structure and withholds nested discri
   expect<unknown>(prompt.prompt).toEqual({ text: expect.stringContaining('withheld'), files: [], agents: [], skills: [] })
 })
 
-test('opencode fallback keeps tool pairing and boolean provider execution without unchecked fields', async () => {
+test('opencode fallback replaces provider-executed tool calls and results with plain text notices', async () => {
   withMode()
   const h = await plugin({ helper: join(root, 'missing') })
-  for (const providerExecuted of [true, false, SECRET, undefined]) {
+  for (const name of ['context', 'compaction', 'generate', 'title'] as const) {
+    const ctx = { messages: [{ role: 'assistant', content: [
+      { type: 'tool-call', id: SECRET, name: 'web_search', input: { query: SECRET }, providerExecuted: true, [SECRET]: SECRET },
+      { type: 'tool-result', id: SECRET, name: 'web_search', result: { type: 'json', value: { [SECRET]: SECRET } }, providerExecuted: true, [SECRET]: SECRET },
+    ] }] }
+    await h[name]!(ctx)
+    expect<unknown>(ctx.messages).toEqual([{ role: 'assistant', content: [
+      { type: 'text', text: WITHHELD },
+      { type: 'text', text: WITHHELD },
+    ] }])
+    expect(JSON.stringify(ctx)).not.toContain(SECRET)
+  }
+})
+
+test('opencode fallback keeps client tool pairing and only a false provider execution flag', async () => {
+  withMode()
+  const h = await plugin({ helper: join(root, 'missing') })
+  for (const providerExecuted of [false, SECRET, undefined]) {
     const ctx = { messages: [
       { role: 'assistant', content: [{ type: 'tool-call', id: SECRET, name: SECRET, input: SECRET, providerExecuted }] },
       { role: 'tool', content: [{ type: 'tool-result', id: SECRET, name: SECRET, result: SECRET, providerExecuted }] },

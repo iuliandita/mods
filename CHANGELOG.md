@@ -18,6 +18,7 @@
 
 ### Fixed
 
+- `secret-box` replaces provider-executed OpenCode tool calls and results with plain text notices after a scrub failure, so Anthropic accepts the history without unchecked server-tool payloads.
 - `secret-box` scrubs outgoing messages and system content for OpenCode 2.2.1 compaction, generate and title requests as well as primary context, including user `!` shell output, with shared failure withholding.
 - `secret-box` keeps OpenCode 2.2.1 tool-call inputs, provider execution flags, result objects, Error instances and typed prompts usable after a scrub failure, and checks non-enumerable Error fields during scrubbing.
 - `guard-rules` disables exemptions for PATH tokens and `env -P`/`--path`, checks loop output through `done`, and recognizes `ssh`, `php`, `lua`, `tclsh`, `at`, `crontab` and `batch` as input executors.

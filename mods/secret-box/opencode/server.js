@@ -198,6 +198,8 @@ function withholdMessages(value) {
           case "tool-call":
           case "tool-result": {
             const provider = part !== null && typeof part === "object" && "providerExecuted" in part && typeof part.providerExecuted === "boolean" ? { providerExecuted: part.providerExecuted } : {};
+            if (provider.providerExecuted === true)
+              return { type: "text", text: WITHHELD };
             return {
               type,
               id: toolId(part),
