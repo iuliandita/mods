@@ -207,11 +207,11 @@ test('opencode: options are read per event and a failing notifier warns once', a
 })
 
 test.each([
-  ['session.execution.succeeded'],
-  ['session.idle'],
-  ['session.execution.succeeded', 'session.idle'],
-  ['session.idle', 'session.execution.succeeded'],
-])('opencode: completion names %j notify once per execution and separately per session', async (...events: string[]) => {
+  { events: ['session.execution.succeeded'] },
+  { events: ['session.idle'] },
+  { events: ['session.execution.succeeded', 'session.idle'] },
+  { events: ['session.idle', 'session.execution.succeeded'] },
+])('opencode: completion names %j notify once per execution and separately per session', async ({ events }) => {
   withOptions({})
   const { ctx, push } = stream()
   const runs: string[][] = []
