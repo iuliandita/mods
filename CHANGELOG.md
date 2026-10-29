@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- `guard-rules` treats cleared or removed infra target variables, empty values, changed HOME and privilege-wrapper environments as custom targets instead of using inherited relaxed lookups.
 - `guard-rules` keeps explicit kubeconfig paths intact and tracks context switches by the first existing file in a `KUBECONFIG` list.
 - `guard-rules` tracks more file writers, attached output options and `dd of=` paths; unresolved writer and redirect targets make later Kubernetes and Terraform writes unclassified.
 - `guard-rules` invalidates stale kube context lookups after more documented switchers and cloud CLI aliases, and checks only the `oc config` verb for read exemptions.

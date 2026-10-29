@@ -38,6 +38,8 @@ export type InfraCall = {
   args: string[]
   dir: string
   assigns: Record<string, string>
+  unset?: string[]
+  clear?: boolean
   context?: string
   kubeconfig?: string
   custom?: boolean
@@ -238,7 +240,7 @@ export function parseInfra(s: Simple, argv: string[], dyn: boolean[], tool: Infr
     if (eq === -1 && INFRA_VALUE[tool].has(a)) i++
     else if (takesValue(tool, a)) loose = true
   }
-  return { kind: 'infra', tool, sub: verb, args: argv.slice(at + 1), dir, assigns: s.assigns, context, kubeconfig, custom, unsure, flow }
+  return { kind: 'infra', tool, sub: verb, args: argv.slice(at + 1), dir, assigns: s.assigns, unset: s.unset, clear: s.clear, context, kubeconfig, custom, unsure, flow }
 }
 
 // The words after the verb that are not options or option values (`rollout restart`, `state rm`).

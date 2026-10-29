@@ -204,8 +204,8 @@ separately, use a file-reading tool, or run the command yourself.
   for writers other than `dd`. A writer or redirect target containing a variable, substitution or secret
   placeholder makes both kube context and Terraform workspace lookups unknown; variables are not resolved.
 - Not handled: `rm .terraform/environment`, kubeconfig writers outside that list (a script editing the file,
-  `terragrunt`), `oc` and other tools that act on the cluster themselves, the guard's own lookups after
-  `export -n KUBECONFIG`, `git branch -m` renaming the current branch to a protected name, `git update-ref HEAD <rev>` without
+  `terragrunt`), `oc` and other tools that act on the cluster themselves,
+  `git branch -m` renaming the current branch to a protected name, `git update-ref HEAD <rev>` without
   `--no-deref`, `git branch -f main HEAD`, `git fetch . feature:main`, `git reset --hard` while on a protected
   branch, `git remote add/set-url` earlier in a command, a secret placeholder in the value of a context or workspace
   variable, a command word built from fragments when the text names no tool (`a=gi; b=t; $a$b push`), a `cd` inside `bash -c` leaking out, `printf ... | git commit -F -`, `git commit -F file` message
@@ -248,6 +248,10 @@ separately, use a file-reading tool, or run the command yourself.
   - The guard runs its own lookups with fixed arguments (`kubectl config current-context`,
     `<tool> workspace show`) and never passes options from your command. A lookup that cannot run
     blocks the command; no current context counts as `(none)`, which is unclassified.
+    Removed or empty target variables (`unset`, `export -n`, `env -u`), `env -i`, changed `HOME`, and
+    `sudo`/`doas` resets count as `(custom target)`. Privilege-wrapper policy is not read, including
+    whether `sudo -E` preserves variables. Reads remain allowed. Literal nonempty target assignments
+    are followed; removed variables never fall back to the hook's inherited relaxed context.
   - Not seen: wrappers such as `k` or `kubecolor`, `helmfile` or `make` targets that run these
     tools, and `HELM_KUBECONTEXT`, `KUBECONFIG` or `TF_WORKSPACE` exported by an earlier Bash call
     in the session (only the current command text is read).
