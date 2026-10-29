@@ -33,16 +33,6 @@
       ],
       "semanticCommitType": "deps",
       "semanticCommitScope": "dev"
-    },
-    {
-      "matchUpdateTypes": [
-        "minor",
-        "patch",
-        "pin",
-        "digest"
-      ],
-      "automerge": true,
-      "platformAutomerge": false
     }
   ]
 }
