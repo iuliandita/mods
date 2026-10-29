@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- `guard-rules` accepts opt-in `modeUnparsed=ask` on Claude Code for enforced parser findings; parsed violations still deny. Codex and OpenCode fall back to `on` with a warning.
+
 ### Fixed
 
 - `guard-rules` scans decoded argument words for attribution and retains unparsed findings for encoded tool names, including when state combinations exceed the parser limit.

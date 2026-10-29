@@ -99,7 +99,10 @@ set); kubectl, helm and terraform use the context mode; a shell name uses both. 
 those inherited modes, `dry` caps denial at reporting, and `off` removes only unparsed findings. Parsed
 checks, lookup failures and invalid configuration still apply. A git write after an unresolved directory
 change (`cd "$X" && git push`, `env -C "$X" git push`, or `git -C "$X" push`) uses the strictest active git-side mode as a lookup finding, even with
-`modeUnparsed=off`. No host supports `ask` in this adapter.
+`modeUnparsed=off`. On Claude Code, `ask` requests permission for enforced parser findings only;
+parsed checks and failures still deny. Unanswered requests deny, including in the checked headless
+bypass mode. Codex and OpenCode treat `ask` as `on` and warn once. See the [mode controls](../README.md#quiet-a-rule)
+for the tested permission modes and approval limits.
 Known false positives: a dynamic
 command word next to a tool word (`$EDITOR notes.md && git status`) and an unmodeled command that names a tool as
 data (`custom-reader docs/git`). Run those parts separately, or use literal command words.

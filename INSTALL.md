@@ -23,6 +23,11 @@ to verified hook behavior. Each mod's manifest records actual surface coverage.
 README describes the host setup. [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) shows what works
 where.
 
+For `guard-rules`, `modeUnparsed` defaults to `on`. Set it to `ask` in the Claude plugin options
+to request permission for parser findings; enforced parsed violations still deny. Codex and OpenCode
+treat `ask` as `on` with a warning. See the [mode controls](mods/guard-rules/README.md#quiet-a-rule)
+for headless behavior and verification limits.
+
 For `secret-box`, install Python 3 and `bash`, plus `secret-tool` on Linux (with an unlocked
 Secret Service keyring). macOS uses the built-in `/usr/bin/security` and an unlocked Keychain;
 backend selection is automatic. Windows is unsupported. `scripts/mods doctor --json` checks

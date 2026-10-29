@@ -33,7 +33,7 @@ installed with `scripts/mods list`, and check the environment with `scripts/mods
 
 ### Catalog
 
-- `guard-rules`: blocks AI attribution in commits and PRs, direct commits to protected branches, commits under the wrong git identity, and mutating kubectl, helm and terraform calls on protected or unclassified environments.
+- `guard-rules`: blocks AI attribution in commits and PRs, direct commits to protected branches, commits under the wrong git identity, and mutating kubectl, helm and terraform calls on protected or unclassified environments. Claude Code can optionally ask for permission on parser findings with `modeUnparsed=ask`.
 - `secret-box`: fills named placeholders from Linux Secret Service or macOS Keychain at execution time, with optional directory scopes. The helper scrubs text without a plaintext export command. Tool and directory coverage depend on the host; see [what it does not protect](mods/secret-box/README.md#what-it-does-not-protect). The mod makes no network or model calls; commands it runs may still send values.
 - `delegation-board`: a live pane of the session's subagents and teammates: type, model, effort, state, elapsed time and tokens; in Claude Desktop, a compact band above the prompt.
 - `statusline`: a two-row status line above the prompt in the terminal and Claude Desktop: model and effort, git state, context against your auto-compact window, 5h and 7d limits with pace, cache, cost and time. In a git repo with a GitHub or GitLab remote it runs `gh` or `glab` for PR and issue counts; `forge=off` turns that off.
@@ -42,7 +42,7 @@ installed with `scripts/mods list`, and check the environment with `scripts/mods
 `mods.json` has the full catalog: egress, modes, requirements, and the install command per mod.
 `guard-rules`, `secret-box`, `delegation-board` and `statusline` have recorded Claude terminal
 checks; `notify` has none yet. The compatibility page lists the tested behavior and versions.
-Other Claude surfaces remain unverified.
+Headless parser-permission decisions also have a scoped check; other Claude surfaces remain unverified.
 
 ## Compatibility
 
@@ -55,6 +55,7 @@ compaction, generate and title requests; stored history and output files are not
 finish notices per execution; its permission and form events are covered by adapter tests.
 On Codex, finish delivery is synchronous with a short cap for `codex exec`; permission
 notifications stay in the background.
+`guard-rules` parser permission requests are Claude Code only; Codex and OpenCode treat `ask` as `on` and warn once.
 [What works on which host, and why](docs/COMPATIBILITY.md).
 
 ## Private mods

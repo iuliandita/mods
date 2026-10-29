@@ -2942,7 +2942,7 @@ function parseMode(value, name, errors) {
     return "on";
   if (v === "off" || v === "dry" || v === "on")
     return v;
-  errors.push(`${name} must be off, dry or on`);
+  errors.push(`${name} must be ${name === "modeUnparsed" ? "off, dry, on or ask" : "off, dry or on"}`);
   return "on";
 }
 function parseConfig(options) {
@@ -2969,7 +2969,7 @@ function parseConfig(options) {
     protectedBranch: parseMode(options.modeProtectedBranch, "modeProtectedBranch", errors),
     identity: parseMode(options.modeIdentity, "modeIdentity", errors),
     context: parseMode(options.modeContext, "modeContext", errors),
-    unparsed: parseMode(options.modeUnparsed, "modeUnparsed", errors),
+    unparsed: String(options.modeUnparsed ?? "").trim().toLowerCase() === "ask" ? "ask" : parseMode(options.modeUnparsed, "modeUnparsed", errors),
     protectedBranches: branches,
     unprotectedRepos: parseList(options.unprotectedRepos, ""),
     identityRules,
@@ -3221,6 +3221,19 @@ function run(dir, argv, vars, timeoutMs = TIMEOUT_MS) {
 var configPath = () => optionsPath("guard-rules");
 var guardDirs = ownDirs;
 var storePath = () => join2(dataDir(), "guard-rules", "contexts.json");
+var ASK_UNSUPPORTED = "guard-rules: warning: modeUnparsed=ask is supported only on Claude Code; this host treats it as on (deny).";
+function warnAskOnce(warn, store = storePath()) {
+  try {
+    mkdirSync(dirname(store), { recursive: true, mode: 448 });
+    writeFileSync(join2(dirname(store), "ask-notice"), "", { flag: "wx", mode: 384 });
+  } catch (e) {
+    if (e instanceof Error && "code" in e && e.code === "EEXIST")
+      return;
+    warn(`${ASK_UNSUPPORTED} The warning marker could not be saved, so this notice may repeat.`);
+    return;
+  }
+  warn(ASK_UNSUPPORTED);
+}
 function loadConfig(path = configPath()) {
   const loaded = loadOptions("guard-rules", path);
   return loaded.error ? { ...parseConfig({}), error: loaded.error } : parseConfig(loaded.options);
@@ -3389,7 +3402,10 @@ async function hook(io) {
     return 2;
   }
   const cwd = typeof toolInput.workdir === "string" && toolInput.workdir !== "" ? resolve(input.cwd, toolInput.workdir) : input.cwd;
-  const result = await withDeadline(checkCommand(toolInput.command, loadConfig(io.config), nodeEnv(cwd, () => loadClasses(io.store))), io.deadlineMs ?? DEADLINE_MS);
+  const cfg = loadConfig(io.config);
+  if (cfg.unparsed === "ask")
+    warnAskOnce(io.err, io.store);
+  const result = await withDeadline(checkCommand(toolInput.command, cfg, nodeEnv(cwd, () => loadClasses(io.store))), io.deadlineMs ?? DEADLINE_MS);
   emit(io, result);
   return 0;
 }

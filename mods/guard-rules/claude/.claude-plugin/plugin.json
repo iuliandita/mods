@@ -58,8 +58,8 @@
     "modeUnparsed": {
       "type": "string",
       "title": "Unparsed-command rule mode",
-      "description": "on keeps the active rules' modes, dry reports instead of denying unparsed commands, and off disables only unparsed findings. Parsed checks still apply, including git writes after unresolved directory changes. Ask is not supported.",
-      "options": ["off", "dry", "on"],
+      "description": "on keeps the active rules' modes, dry reports instead of denying unparsed commands, off disables only unparsed findings, and ask requests permission on Claude Code. Parsed checks still apply. Codex and OpenCode treat ask as on.",
+      "options": ["off", "dry", "on", "ask"],
       "default": "on"
     },
     "modeContext": {
