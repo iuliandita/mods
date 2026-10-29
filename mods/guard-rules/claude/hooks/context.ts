@@ -124,16 +124,24 @@ export function stepContext(state: ContextState, chain: number): void {
   state.workspaces.step(chain)
 }
 
-function kubeconfigOf(call: InfraCall): string {
-  return call.kubeconfig || call.assigns.KUBECONFIG || ''
+function kubeconfigs(call: InfraCall, home: string): string[] {
+  if (call.kubeconfig) return [call.kubeconfig]
+  return call.assigns.KUBECONFIG?.split(':').filter(Boolean).length
+    ? call.assigns.KUBECONFIG.split(':').filter(Boolean)
+    : [resolvePath('/', '~/.kube/config', home)]
 }
 
 // The switch-state key of a call's kubeconfig: each entry resolved against the call's directory, so `./c` and `c`
 // share state and `./c` in two directories does not; no kubeconfig is the default file.
-function kubeKey(call: InfraCall, home: string): string {
-  const entries = kubeconfigOf(call).split(':').filter(Boolean)
-  if (!entries.length) return resolvePath('/', '~/.kube/config', home)
-  return entries.map((p) => (/[$`]/.test(p) ? p : resolvePath(call.dir, p, home))).join(':')
+async function kubeKey(call: InfraCall, env: Env): Promise<string> {
+  const entries = kubeconfigs(call, env.home).map((p) => hasVariable(p) ? p : resolvePath(call.dir, p, env.home))
+  if (entries.length === 1) return entries[0]!
+  for (const path of entries) {
+    if (hasVariable(path)) return path
+    if (env.exists ? await env.exists(path) : await env.read(path) !== null) return path
+  }
+  // kubectl creates the last file when none exists.
+  return entries[entries.length - 1]!
 }
 
 // `kubectl config` verbs that only read; any other verb (`set-cluster`, `set-credentials`, `delete-*`, a plugin or an
@@ -148,9 +156,9 @@ function known(name: string): string | typeof UNKNOWN {
 const CTX_PLUGINS = new Set(['ctx', 'kubectx', 'switch', 'konfig'])
 const CTX_READ = new Set(['-c', '--current', '-h', '--help'])
 
-export function followSwitch(call: InfraCall, state: ContextState, home: string): void {
+export async function followSwitch(call: InfraCall, state: ContextState, env: Env): Promise<void> {
   const [verb, target, value] = positionals(call)
-  const key = kubeKey(call, home)
+  const key = await kubeKey(call, env)
   if (call.tool === 'kubectl' && call.sub === 'config') {
     // `use` is an alias of `use-context`.
     if ((verb === 'use-context' || verb === 'use') && target) state.contexts.set(key, [known(target)], call.flow)
@@ -207,8 +215,8 @@ export function parseCurrentContext(text: string): string | null {
 
 // The current-context the kubeconfig files set (the first file that sets one wins, as kubectl merges them);
 // '' when none sets one, null when a file cannot be read or its value cannot be told.
-async function fileContext(config: string, dir: string, env: Env): Promise<string | null> {
-  for (const path of config.split(':').filter(Boolean)) {
+async function fileContext(paths: string[], dir: string, env: Env): Promise<string | null> {
+  for (const path of paths) {
     if (/[$`]/.test(path)) return null
     const text = await env.read(resolvePath(dir, path, env.home))
     if (text === null) return null
@@ -223,7 +231,7 @@ async function fileContext(config: string, dir: string, env: Env): Promise<strin
 // it as a lookup failure). An UNKNOWN switch is a custom target.
 async function candidates(call: InfraCall, env: Env, state: ContextState): Promise<Candidate[][] | null> {
   const kube = call.tool === 'kubectl' || call.tool === 'helm'
-  const switched = kube ? state.contexts.get(kubeKey(call, env.home)) : state.workspaces.get(`${call.tool}\0${call.dir}`)
+  const switched = kube ? state.contexts.get(await kubeKey(call, env)) : state.workspaces.get(`${call.tool}\0${call.dir}`)
   const out: Candidate[][] = []
   for (const p of switched) {
     const list = p === UNKNOWN ? [{ name: CUSTOM, kind: 'target' }] : await candidatesAt(call, env, state, p)
@@ -238,10 +246,10 @@ async function candidatesAt(call: InfraCall, env: Env, state: ContextState, p: s
   if (call.tool === 'kubectl' || call.tool === 'helm') {
     const named = call.context || (call.tool === 'helm' ? call.assigns.HELM_KUBECONTEXT : '')
     if (named && hasVariable(named)) return [{ name: CUSTOM, kind: 'target' }]
-    const config = kubeconfigOf(call)
+    const config = kubeconfigs(call, env.home)
     const switched = p === REAL ? undefined : p
-    const current = !named && switched === undefined && config ? await fileContext(config, call.dir, env) : undefined
-    const file = lastPart(config.split(':')[0] ?? '')
+    const current = !named && switched === undefined && (call.kubeconfig || call.assigns.KUBECONFIG) ? await fileContext(config, call.dir, env) : undefined
+    const file = lastPart(config[0] ?? '')
     const base: Candidate | undefined = named
       ? { name: named, kind: 'context' }
       : switched !== undefined

@@ -36,6 +36,8 @@ export interface Env {
   contexts(): Promise<Classes>
   // Null when the file cannot be read.
   read(path: string): Promise<string | null>
+  // Throws when existence cannot be established; omitted by in-memory test environments.
+  exists?(path: string): Promise<boolean>
 }
 
 export type Verdict = { enforced: Violation[]; dry: Violation[] }
@@ -247,7 +249,7 @@ export async function evaluate(command: string, cfg: Config, rawEnv: Env): Promi
     if (call.kind === 'infra') {
       stepContext(switched, call.flow.chain)
       all.push(...(await contextViolations(call, cfg, env, switched)))
-      followSwitch(call, switched, env.home)
+      await followSwitch(call, switched, env)
       continue
     }
     if (call.kind !== 'git') continue

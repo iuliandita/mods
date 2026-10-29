@@ -221,7 +221,7 @@ separately, use a file-reading tool, or run the command yourself.
 - Context rule:
   - Environment name: `--context` / `--kube-context` / `HELM_KUBECONTEXT`; else a context switched
     to earlier in the command against the same kubeconfig; else the `current-context` read from
-    the `--kubeconfig` or `KUBECONFIG` files (the first file that sets one); else the current
+    the `--kubeconfig` file or colon-separated `KUBECONFIG` files (the first file that sets one); else the current
     kubectl context. `(custom target)` is used for `--server`, `-s`, `--cluster`,
     `--kube-apiserver`, `HELM_KUBEAPISERVER`, `HELM_KUBETOKEN`, `HELM_KUBECAFILE`, `TF_DATA_DIR`,
     a context switch the guard cannot tell, a `-chdir` built from a variable, a kubeconfig the guard
@@ -242,9 +242,9 @@ separately, use a file-reading tool, or run the command yourself.
   - Earlier `kubectl config use-context X`, `kubectl config set current-context X` and
     `terraform workspace select|new X` calls in the same command are followed as described above. Other
     `kubectl config` writes (`set-context`, `delete-context`, `rename-context`, `set`, `unset`) leave the
-    current context unknown. The switch state is keyed by the kubeconfig paths resolved against the call's
-    directory (`./c` and `c` are the same file; `./c` in two directories are not); no kubeconfig means
-    `~/.kube/config`.
+    current context unknown. Switch state uses the first existing file in a `KUBECONFIG` list, or the last
+    file if none exists. An explicit `--kubeconfig` is always one path, including colons. Paths resolve
+    against the call's directory (`./c` and `c` share state); no kubeconfig means `~/.kube/config`.
   - The guard runs its own lookups with fixed arguments (`kubectl config current-context`,
     `<tool> workspace show`) and never passes options from your command. A lookup that cannot run
     blocks the command; no current context counts as `(none)`, which is unclassified.

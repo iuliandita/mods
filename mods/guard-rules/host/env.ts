@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import { dataDir, home as accountHome, loadOptions, optionsPath, ownDirs } from '../../../host-lib/options'
@@ -61,6 +61,15 @@ export function nodeEnv(cwd: string, classes: () => Classes = loadClasses): Env 
     git: (dir, args, vars) => run(dir, ['git', '-C', dir, ...args], vars),
     run,
     contexts: async () => classes(),
+    exists: async (path) => {
+      try {
+        statSync(path)
+        return true
+      } catch (e) {
+        if (e instanceof Error && 'code' in e && e.code === 'ENOENT') return false
+        throw e
+      }
+    },
     read: async (path) => {
       try {
         return readFileSync(path, 'utf8')

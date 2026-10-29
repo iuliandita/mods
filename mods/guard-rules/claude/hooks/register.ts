@@ -45,6 +45,12 @@ export const register: Register = (on, options) => {
       git: (dir, args, vars) => run(dir, ['git', '-C', dir, ...args], vars),
       run,
       contexts: () => stored($),
+      exists: async (path) => {
+        const r = await $.process.run(['test', '-e', path], { timeoutMs: 10_000 })
+        if (r.exitCode === 0) return true
+        if (r.exitCode === 1) return false
+        throw new Error('Cannot check kubeconfig existence')
+      },
       read: async (path) => {
         try {
           return await $.fs.read(path)

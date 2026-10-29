@@ -1687,7 +1687,7 @@ function emitToolCalls(w, s) {
       const call = parseInfra(simple, argv, s.dyn, name, at, w.st.home, flow, slot);
       const located = name === "terraform" || name === "tofu" || Boolean(call?.kubeconfig || simple.assigns.KUBECONFIG);
       const opaque = call !== null && call.dir.split("/").includes("..");
-      const files = (call?.kubeconfig || simple.assigns.KUBECONFIG || "").split(":").filter(Boolean);
+      const files = call?.kubeconfig ? [call.kubeconfig] : (simple.assigns.KUBECONFIG || "").split(":").filter(Boolean);
       const switched = name === "kubectl" || name === "helm" ? w.kube || files.some((f) => w.written.has(basename(f))) : w.workspace;
       if (call && (here === null && located || unknown || opaque && located || switched))
         call.custom = true;
@@ -2130,14 +2130,22 @@ function stepContext(state, chain) {
   state.contexts.step(chain);
   state.workspaces.step(chain);
 }
-function kubeconfigOf(call) {
-  return call.kubeconfig || call.assigns.KUBECONFIG || "";
+function kubeconfigs(call, home) {
+  if (call.kubeconfig)
+    return [call.kubeconfig];
+  return call.assigns.KUBECONFIG?.split(":").filter(Boolean).length ? call.assigns.KUBECONFIG.split(":").filter(Boolean) : [resolvePath("/", "~/.kube/config", home)];
 }
-function kubeKey(call, home) {
-  const entries = kubeconfigOf(call).split(":").filter(Boolean);
-  if (!entries.length)
-    return resolvePath("/", "~/.kube/config", home);
-  return entries.map((p) => /[$`]/.test(p) ? p : resolvePath(call.dir, p, home)).join(":");
+async function kubeKey(call, env) {
+  const entries = kubeconfigs(call, env.home).map((p) => hasVariable(p) ? p : resolvePath(call.dir, p, env.home));
+  if (entries.length === 1)
+    return entries[0];
+  for (const path of entries) {
+    if (hasVariable(path))
+      return path;
+    if (env.exists ? await env.exists(path) : await env.read(path) !== null)
+      return path;
+  }
+  return entries[entries.length - 1];
 }
 var CONFIG_READ = new Set(["view", "get-contexts", "current-context", "get-clusters", "get-users"]);
 function known(name) {
@@ -2145,9 +2153,9 @@ function known(name) {
 }
 var CTX_PLUGINS = new Set(["ctx", "kubectx", "switch", "konfig"]);
 var CTX_READ = new Set(["-c", "--current", "-h", "--help"]);
-function followSwitch(call, state, home) {
+async function followSwitch(call, state, env) {
   const [verb, target, value] = positionals(call);
-  const key = kubeKey(call, home);
+  const key = await kubeKey(call, env);
   if (call.tool === "kubectl" && call.sub === "config") {
     if ((verb === "use-context" || verb === "use") && target)
       state.contexts.set(key, [known(target)], call.flow);
@@ -2203,8 +2211,8 @@ function parseCurrentContext(text) {
     return null;
   return plain;
 }
-async function fileContext(config, dir, env) {
-  for (const path of config.split(":").filter(Boolean)) {
+async function fileContext(paths, dir, env) {
+  for (const path of paths) {
     if (/[$`]/.test(path))
       return null;
     const text = await env.read(resolvePath(dir, path, env.home));
@@ -2220,7 +2228,7 @@ async function fileContext(config, dir, env) {
 }
 async function candidates(call, env, state) {
   const kube = call.tool === "kubectl" || call.tool === "helm";
-  const switched = kube ? state.contexts.get(kubeKey(call, env.home)) : state.workspaces.get(`${call.tool}\x00${call.dir}`);
+  const switched = kube ? state.contexts.get(await kubeKey(call, env)) : state.workspaces.get(`${call.tool}\x00${call.dir}`);
   const out = [];
   for (const p of switched) {
     const list = p === UNKNOWN ? [{ name: CUSTOM, kind: "target" }] : await candidatesAt(call, env, state, p);
@@ -2237,10 +2245,10 @@ async function candidatesAt(call, env, state, p) {
     const named = call.context || (call.tool === "helm" ? call.assigns.HELM_KUBECONTEXT : "");
     if (named && hasVariable(named))
       return [{ name: CUSTOM, kind: "target" }];
-    const config = kubeconfigOf(call);
+    const config = kubeconfigs(call, env.home);
     const switched = p === REAL ? undefined : p;
-    const current = !named && switched === undefined && config ? await fileContext(config, call.dir, env) : undefined;
-    const file = lastPart(config.split(":")[0] ?? "");
+    const current = !named && switched === undefined && (call.kubeconfig || call.assigns.KUBECONFIG) ? await fileContext(config, call.dir, env) : undefined;
+    const file = lastPart(config[0] ?? "");
     const base = named ? { name: named, kind: "context" } : switched !== undefined ? { name: switched, kind: "context" } : typeof current === "string" ? { name: current || "(none)", kind: "context" } : current === null && file ? { name: file, kind: "kubeconfig" } : undefined;
     if (call.custom || current === null || call.tool === "helm" && HELM_TARGET_ENV.some((k) => call.assigns[k]))
       return base ? [{ name: CUSTOM, kind: "target" }, { ...base, weak: true }] : [{ name: CUSTOM, kind: "target" }];
@@ -3068,7 +3076,7 @@ async function evaluate(command, cfg, rawEnv) {
     if (call.kind === "infra") {
       stepContext(switched, call.flow.chain);
       all.push(...await contextViolations(call, cfg, env, switched));
-      followSwitch(call, switched, env.home);
+      await followSwitch(call, switched, env);
       continue;
     }
     if (call.kind !== "git")
@@ -3119,7 +3127,7 @@ function formatDeny(violations) {
 }
 
 // mods/guard-rules/host/env.ts
-import { mkdirSync, readFileSync as readFileSync2, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync as readFileSync2, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join as join2 } from "node:path";
 
 // host-lib/options.ts
@@ -3218,6 +3226,16 @@ function nodeEnv(cwd, classes = loadClasses) {
     git: (dir, args, vars) => run(dir, ["git", "-C", dir, ...args], vars),
     run,
     contexts: async () => classes(),
+    exists: async (path) => {
+      try {
+        statSync(path);
+        return true;
+      } catch (e) {
+        if (e instanceof Error && "code" in e && e.code === "ENOENT")
+          return false;
+        throw e;
+      }
+    },
     read: async (path) => {
       try {
         return readFileSync2(path, "utf8");
