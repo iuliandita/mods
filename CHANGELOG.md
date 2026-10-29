@@ -20,6 +20,8 @@
 
 ### Fixed
 
+- `guard-rules` allowlists editor flags, disables data exemptions after command-resolution changes, and checks dynamic `git -C` directories even with `modeUnparsed=off`.
+
 - `secret-box` removes the plaintext `values` command; hooks use batched `scrub` calls instead. Directory and Bash-only placeholder limits are documented per host.
 
 - `guard-rules` narrows data exemptions for scripts, path-qualified commands and editor options, and checks git writes after unresolved directory changes independently of `modeUnparsed`.

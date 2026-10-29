@@ -43,7 +43,8 @@ These constructs make the whole command unparsed when its text names `git`, `gh`
   `source`/`.` of `<(...)`, `/dev/stdin` or a dynamic path; an `env -S` string the guard cannot split;
 - `case`, `select`, `coproc`, `trap`, `alias`, function definitions (`f()`, `function f`), and `declare` with
   other flags;
-- assignments to `IFS`, `BASH_ENV`, `ENV` or `GIT_CONFIG_PARAMETERS`;
+- assignments to `IFS`, `BASH_ENV`, `ENV`, `GIT_CONFIG_PARAMETERS` or `PATH`, and `hash` or `enable` calls;
+  these and alias or function definitions override data and file exemptions for the whole command;
 - arithmetic with a substitution or subscript inside;
 - an unterminated quote, nesting deeper than 4, more than 16 combinations of directory and variables for one call,
   or a command too long to follow.
@@ -56,8 +57,10 @@ These are unparsed on their own, without another tool word:
   and `cat` are text heads and exempt. Known data commands (`ls`, `mkdir`, `head`, `tail`, `tee`,
   `curl` and similar file utilities) and `brew install` also treat their arguments as data. These exemptions
   require bare command names, so `./cat` and `/tmp/bin/curl` stay checked. Editors ignore literal file arguments
-  containing `/` or an extension; every option operand stays checked, including a filename after a flag such as
-  `vim -R`. No editor file-taking options are specially exempted. `sed` exempts literal file arguments only
+  containing `/` or an extension only when every word is literal and every option is on that editor's safe list:
+  `vi`: `-R -n`; `vim`/`nvim`: `-R -o -O -p -d -M -m -n -b`; `nano`: `-v --view`;
+  `less`: `-R -M -m -N -S -X -F`; `more`: `-d -f -l -s -u`. Any other option or `+cmd` keeps all words checked.
+  `sed` exempts literal file arguments only
   with known options: `-n`, `--quiet`, `--silent`, `-E`, `-r`, `--regexp-extended`, separate `-e SCRIPT` or
   `--expression SCRIPT`, and `--`. Script words always stay checked. An unsupported option, dynamic word or
   any `e` in any script keeps every word checked, including harmless text containing `e`; this avoids guessing
@@ -75,11 +78,15 @@ Git and forge tools use the strictest of the attribution and protected-branch mo
 set); kubectl, helm and terraform use the context mode; a shell name uses both. `modeUnparsed=on` keeps
 those inherited modes, `dry` caps denial at reporting, and `off` removes only unparsed findings. Parsed
 checks, lookup failures and invalid configuration still apply. A git write after an unresolved directory
-change (`cd "$X" && git push`) uses the strictest active git-side mode as a lookup finding, even with
+change (`cd "$X" && git push`, `env -C "$X" git push`, or `git -C "$X" push`) uses the strictest active git-side mode as a lookup finding, even with
 `modeUnparsed=off`. No host supports `ask` in this adapter.
 Known false positives: a dynamic
 command word next to a tool word (`$EDITOR notes.md && git status`) and an unmodeled command that names a tool as
 data (`custom-reader docs/git`). Run those parts separately, or use literal command words.
+Harmless editor invocations with unlisted options are also conservative, such as `vim -u NONE terraform/main.tf`,
+`vim +1 terraform/main.tf`, or a dynamic flag (`vim "$FLAGS" terraform/main.tf`). No editor exemption was removed,
+but these previously exempted forms now fail closed. A harmless PATH assignment or hash lookup alongside a tool
+filename is conservative too (`PATH=/usr/bin ls terraform`, `hash tee; cat docs/git`). Run the setup separately.
 
 ### Other limits
 
