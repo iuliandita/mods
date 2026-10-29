@@ -33,8 +33,9 @@ network destinations.
 Values under 6 characters and unsupported transformations are not scrubbed. A failed scrub
 withholds checked text on Claude Code and OpenCode; Claude Code refuses unchecked sent messages.
 OpenCode discards arbitrary keys and nested payloads on failure, keeping only allowlisted message
-roles and content-part fields. Tool inputs become empty objects; boolean `providerExecuted`
-flags and replacement call/result pairs are preserved. Results keep notice `output` and text
+roles and content-part fields. Provider-executed tool calls and results become plain text notices.
+Client tool inputs become empty objects; replacement call/result pairs and an explicit
+`providerExecuted: false` are preserved. Results keep notice `output` and text
 `content`, errors retain their Error prototype with a notice message, and prompts keep notice
 `text` with empty attachment arrays. Unchecked own fields are discarded.
 On OpenCode 2.2.1, the `context`, `compaction`, `generate` and `title` hooks check outgoing

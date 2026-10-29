@@ -74,6 +74,8 @@ function withholdMessages(value: unknown): unknown {
           case 'tool-result': {
             const provider = part !== null && typeof part === 'object' && 'providerExecuted' in part
               && typeof part.providerExecuted === 'boolean' ? { providerExecuted: part.providerExecuted } : {}
+            // Server tools need unchecked provider payloads to round-trip through Anthropic.
+            if (provider.providerExecuted === true) return { type: 'text', text: WITHHELD }
             return { type, id: toolId(part), name: 'withheld', ...provider,
               ...(type === 'tool-call' ? { input: {} } : { result: { type: 'text', value: WITHHELD } }) }
           }

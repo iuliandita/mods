@@ -103,10 +103,13 @@ separate Bash directory and does not guarantee it follows a persistent shell `cd
 A failed scrub withholds checked text on Claude Code; sent Claude messages are refused. OpenCode
 replaces result content, errors and prompt text with notices, clears prompt attachments, and
 rebuilds messages from allowlisted roles and content-part fields, discarding unchecked keys and
-nested payloads. The fallbacks match the OpenCode 2.2.1 types: tool inputs are empty objects,
-boolean `providerExecuted` flags are preserved, results keep `output` and text `content`, errors
+nested payloads. The fallbacks match the OpenCode 2.2.1 types: provider-executed tool calls and
+results become plain text notices; client tool inputs are empty objects and an explicit
+`providerExecuted: false` is preserved. Results keep `output` and text `content`, errors
 keep their Error prototype, and prompts keep `text`, `files`, `agents` and `skills`. These shapes
-are covered by adapter tests, not new authenticated host verification.
+are covered by adapter tests. A failed-scrub history with server-tool pairs also passed the published
+`@opencode/ai` 2.2.1 Anthropic adapter's request conversion and body schema encoding. This is not
+new authenticated host verification.
 The four request hooks and `!` shell-output projection were checked against the published
 `@opencode/plugin`, `@opencode/schema` and `@opencode/ai` 2.2.1 types and installed binary. All
 share the same message scrubber and fallback; failed system scrubs become a text notice.
