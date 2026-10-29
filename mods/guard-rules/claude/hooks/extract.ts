@@ -118,6 +118,14 @@ type Step = {
   here: (d: Possible<string>) => string | null
 }
 
+// Privilege wrappers may reset HOME and target variables under host policy. Inspect only the stripped prefix;
+// an env -S prefix can contain several words in one argument. Do not guess sudoers or doas configuration.
+function resetsInfraEnv(s: Step): boolean {
+  const at = s.cmd.argv.indexOf(s.argv[0] ?? '')
+  const prefix = at === -1 ? s.cmd.argv : s.cmd.argv.slice(0, at)
+  return prefix.some((a) => /(?:^|[\s/])(?:sudo|doas)(?:\s|$)/.test(a))
+}
+
 function mark(w: Walk, why: string): void {
   if (!w.opaque.includes(why)) w.opaque.push(why)
 }
@@ -213,6 +221,7 @@ function emitToolCalls(w: Walk, s: Step): void {
       if (call) w.calls.push(call)
     } else {
       const call = parseInfra(simple, argv, s.dyn, name as InfraTool, at, w.st.home, flow, slot)
+      if (call && resetsInfraEnv(s)) call.custom = true
       // Terraform is classified by its directory, and a relative kubeconfig path depends on it.
       const located = name === 'terraform' || name === 'tofu' || Boolean(call?.kubeconfig || simple.assigns.KUBECONFIG)
       // A `..` left for the OS to resolve hides the directory names terraform is classified by.
@@ -267,7 +276,7 @@ function inlineScript(w: Walk, s: Step): void {
   for (const why of inner.opaque) mark(w, why)
   // The wrapper's own assignments and `env -u`/`-i` apply to the inner script, which runs in the wrapper's place in the chain.
   const outer = u.assigns
-  const drop = { unset: [...u.unset], clear: u.clear, chdir: u.chdir }
+  const drop = { unset: [...u.unset], clear: u.clear || resetsInfraEnv(s), chdir: u.chdir }
   w.queue.splice(s.idx + 1, 0, ...inner.cmds.map((c) => ({ ...c, op: c.op === '' ? s.cmd.op : c.op, ...(c.argv.length ? { assigns: { ...outer, ...c.assigns }, ...drop } : {}) })))
 }
 

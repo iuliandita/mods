@@ -327,7 +327,7 @@ test('context: a switch earlier in the same command decides the environment of l
     expect((await evaluate(command, cfg(), fakeEnv({ context: 'dev-1', workspace: 'dev' }))).enforced, command).toHaveLength(1)
   }
   expect((await evaluate('kubectl config use-context dev-1 && kubectl apply -f x.yaml', cfg(), fakeEnv({ context: 'prod-eu' }))).enforced).toEqual([])
-  expect((await evaluate('export TF_WORKSPACE=prod && unset TF_WORKSPACE && terraform apply', cfg(), fakeEnv({ workspace: 'dev' }))).enforced).toEqual([])
+  expect((await evaluate('export TF_WORKSPACE=prod && unset TF_WORKSPACE && terraform apply', cfg(), fakeEnv({ workspace: 'dev' }))).enforced).toHaveLength(1)
   expect((await evaluate('export TF_WORKSPACE=prod && TF_WORKSPACE=dev terraform apply', cfg(), fakeEnv({ workspace: 'dev' }))).enforced).toEqual([])
 })
 

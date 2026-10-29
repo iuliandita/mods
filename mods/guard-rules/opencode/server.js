@@ -597,7 +597,7 @@ function parseInfra(s, argv, dyn, tool, dir0, home, flow, mark) {
     else if (takesValue(tool, a))
       loose = true;
   }
-  return { kind: "infra", tool, sub: verb, args: argv.slice(at + 1), dir, assigns: s.assigns, context, kubeconfig, custom, unsure, flow };
+  return { kind: "infra", tool, sub: verb, args: argv.slice(at + 1), dir, assigns: s.assigns, unset: s.unset, clear: s.clear, context, kubeconfig, custom, unsure, flow };
 }
 function positionals(call) {
   const value = INFRA_VALUE[call.tool];
@@ -1736,6 +1736,11 @@ var FILE_OUTPUT_OPTIONS = {
 };
 var KUBE_FILE = /(?:^|\/)\.kube(?:\/|$)|kubeconfig/i;
 var WORKSPACE_FILE = /(?:^|\/)\.terraform(?:\/environment)?\/?$/;
+function resetsInfraEnv(s) {
+  const at = s.cmd.argv.indexOf(s.argv[0] ?? "");
+  const prefix = at === -1 ? s.cmd.argv : s.cmd.argv.slice(0, at);
+  return prefix.some((a) => /(?:^|[\s/])(?:sudo|doas)(?:\s|$)/.test(a));
+}
 function mark(w, why) {
   if (!w.opaque.includes(why))
     w.opaque.push(why);
@@ -1836,6 +1841,8 @@ function emitToolCalls(w, s) {
         w.calls.push(call);
     } else {
       const call = parseInfra(simple, argv, s.dyn, name, at, w.st.home, flow, slot);
+      if (call && resetsInfraEnv(s))
+        call.custom = true;
       const located = name === "terraform" || name === "tofu" || Boolean(call?.kubeconfig || simple.assigns.KUBECONFIG);
       const opaque = call !== null && call.dir.split("/").includes("..");
       const files = call?.kubeconfig ? [call.kubeconfig] : (simple.assigns.KUBECONFIG || "").split(":").filter(Boolean);
@@ -1891,7 +1898,7 @@ function inlineScript(w, s) {
   for (const why of inner.opaque)
     mark(w, why);
   const outer = u.assigns;
-  const drop = { unset: [...u.unset], clear: u.clear, chdir: u.chdir };
+  const drop = { unset: [...u.unset], clear: u.clear || resetsInfraEnv(s), chdir: u.chdir };
   w.queue.splice(s.idx + 1, 0, ...inner.cmds.map((c) => ({ ...c, op: c.op === "" ? s.cmd.op : c.op, ...c.argv.length ? { assigns: { ...outer, ...c.assigns }, ...drop } : {} })));
 }
 function markSwitch(w, s) {
@@ -2668,6 +2675,9 @@ async function candidates(call, env, state) {
 async function candidatesAt(call, env, state, p) {
   const first = (r) => r.ok ? r.out.split(`
 `)[0]?.trim() ?? "" : "";
+  const targets = call.tool === "kubectl" || call.tool === "helm" ? ["HOME", "KUBECONFIG", "HELM_KUBECONTEXT", ...HELM_TARGET_ENV] : ["HOME", "TF_WORKSPACE", "TF_DATA_DIR"];
+  if (call.clear || call.unset?.some((k) => targets.includes(k)) || targets.some((k) => Object.hasOwn(call.assigns, k) && call.assigns[k] === "") || Object.hasOwn(call.assigns, "HOME") && call.assigns.HOME !== env.home)
+    return [{ name: CUSTOM, kind: "target" }];
   if (call.tool === "kubectl" || call.tool === "helm") {
     const named = call.context || (call.tool === "helm" ? call.assigns.HELM_KUBECONTEXT : "");
     if (named && hasVariable(named))

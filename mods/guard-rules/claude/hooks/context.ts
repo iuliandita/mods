@@ -243,6 +243,14 @@ async function candidates(call: InfraCall, env: Env, state: ContextState): Promi
 
 async function candidatesAt(call: InfraCall, env: Env, state: ContextState, p: string | typeof REAL): Promise<Candidate[] | null> {
   const first = (r: { ok: boolean; out: string }) => (r.ok ? r.out.split('\n')[0]?.trim() ?? '' : '')
+  const targets = call.tool === 'kubectl' || call.tool === 'helm'
+    ? ['HOME', 'KUBECONFIG', 'HELM_KUBECONTEXT', ...HELM_TARGET_ENV]
+    : ['HOME', 'TF_WORKSPACE', 'TF_DATA_DIR']
+  // The probes inherit the hook's environment. A removed/empty target or another home cannot be replayed
+  // safely, so no inherited relaxed context or directory may stand in for the command's actual target.
+  if (call.clear || call.unset?.some((k) => targets.includes(k)) ||
+    targets.some((k) => Object.hasOwn(call.assigns, k) && call.assigns[k] === '') ||
+    (Object.hasOwn(call.assigns, 'HOME') && call.assigns.HOME !== env.home)) return [{ name: CUSTOM, kind: 'target' }]
   if (call.tool === 'kubectl' || call.tool === 'helm') {
     const named = call.context || (call.tool === 'helm' ? call.assigns.HELM_KUBECONTEXT : '')
     if (named && hasVariable(named)) return [{ name: CUSTOM, kind: 'target' }]

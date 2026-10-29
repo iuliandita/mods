@@ -36,6 +36,9 @@ are listed in the [parser limits](docs/limits.md). A writer or redirect path bui
 Kubernetes and Terraform mutations unclassified; reads still pass. Run setup separately when the target is known
 only at execution time.
 
+Removed or empty target variables, `env -i`, a changed `HOME`, and `sudo`/`doas` environments count as
+`(custom target)`. The guard cannot replay those environments in its inherited context lookups.
+
 Hooks only, no UI. Portability to other Claude surfaces is expected, but only terminal behavior
 is verified; Desktop, VS Code and headless behavior remain untested.
 Egress: none (no network, no model calls).

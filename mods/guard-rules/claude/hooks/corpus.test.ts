@@ -70,6 +70,7 @@ function fakeEnv(w: World = {}): Env & { probes: (Record<string, string> | undef
 const heredoc = (msg: string) => `git commit -m "$(cat <<'EOF'\n${msg}\nEOF\n)"`
 
 export const ROWS: Row[] = [
+  ...['unset KUBECONFIG && kubectl apply -f a', 'env -u KUBECONFIG kubectl apply -f a', 'KUBECONFIG= kubectl apply -f a', 'HOME=/srv/ops kubectl apply -f a', 'sudo kubectl apply -f a', 'env -i kubectl apply -f a', 'env -u TF_WORKSPACE terraform apply'].map((cmd): Row => [cmd, 'D:context', { world: { cwd: '/w/dev', workspace: 'dev' } }]),
   ['KUBECONFIG=/h/.kube/config:/dev/null kubectl config use-context prod && kubectl apply -f a', 'D:context', { world: { files: { '/h/.kube/config': 'current-context: kind-dev\n' } } }],
   ['kubectl --kubeconfig dev.yaml:x apply -f a', 'D:context', { world: { files: { '/h/personal/repo/dev.yaml': 'current-context: kind-dev\n', '/h/personal/repo/dev.yaml:x': 'current-context: prod\n' } } }],
   // #19/#21: writer flags and unresolved paths invalidate the files read before the command runs.

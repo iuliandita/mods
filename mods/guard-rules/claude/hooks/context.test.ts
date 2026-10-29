@@ -24,6 +24,40 @@ const cfg = () => parseConfig({})
 const KUBE = '/h/.kube/config'
 const denied = async (command: string, e: Env) => (await evaluate(command, cfg(), e)).enforced
 
+test('context: removed, cleared and empty target variables never reuse inherited relaxed lookups', async () => {
+  for (const command of [
+    'unset KUBECONFIG && kubectl apply -f x',
+    'env -u KUBECONFIG kubectl apply -f x',
+    'export -n KUBECONFIG && kubectl apply -f x',
+    'KUBECONFIG= kubectl apply -f x',
+    'env -i kubectl apply -f x',
+    'env -u KUBECONFIG bash -c "kubectl apply -f x"',
+    'unset HELM_KUBECONTEXT && helm upgrade x ./c',
+    'HELM_KUBECONTEXT= helm upgrade x ./c',
+    'env -u TF_WORKSPACE terraform apply',
+    'TF_WORKSPACE= tofu apply',
+    'env -i terraform apply',
+    'HOME=/srv/ops kubectl apply -f x',
+    'export HOME=/srv/ops && terraform apply',
+    'sudo kubectl apply -f x',
+    '/usr/bin/sudo -E helm upgrade x ./c',
+    'env -S "sudo kubectl apply -f x"',
+    'sudo bash -c "kubectl apply -f x"',
+    'sudo -s "kubectl apply -f x"',
+    'doas tofu apply',
+  ]) {
+    const v = await denied(command, env({ dir: '/w/dev', workspace: 'dev' }))
+    expect(v.some((f) => f.rule === 'context' && f.message.includes('(custom target)')), command).toBe(true)
+  }
+  for (const command of [
+    'env -u OTHER kubectl apply -f x',
+    'HOME=/h kubectl apply -f x',
+    'sudo kubectl get pods',
+    'env -u TF_WORKSPACE terraform plan',
+    'kubectl --context sudo get pods',
+  ]) expect(await denied(command, env({ dir: '/w/dev', workspace: 'dev' })), command).toEqual([])
+})
+
 test('context: switch state follows the first existing kubeconfig and aliases the default file', async () => {
   const files = { [KUBE]: 'current-context: dev-1\n', '/w/other': 'current-context: dev-1\n' }
   for (const command of [
