@@ -239,7 +239,10 @@ async function refreshForge($: Engine, s: Snap): Promise<void> {
   const prKey = `${key}@${branch}`
   if (!branch || branch === '(detached)') {
     s.pr = null
+    s.prKey = ''
   } else if (prKey !== s.prKey || now - s.prAt > PR_TTL_MS) {
+    // Another repository or branch: the old answer belongs to something else, so it never stays.
+    if (prKey !== s.prKey) s.pr = null
     s.prKey = prKey
     s.prAt = now
     try {
@@ -248,7 +251,7 @@ async function refreshForge($: Engine, s: Snap): Promise<void> {
           ? parseGhPr(await cli($, s, ['gh', 'pr', 'list', '--repo', `${target.host}/${target.path}`, `--head=${branch}`, '--state', 'open', '--json', 'number,isDraft,reviewDecision', '--limit', '1'], cwd, now))
           : parseGlabMr(await cli($, s, ['glab', 'api', '--hostname', target.host, `projects/${enc}/merge_requests?state=opened&source_branch=${encodeURIComponent(branch)}&per_page=1`], cwd, now))
     } catch {
-      // keep the last answer
+      // keep the last answer for this branch; a new one stays empty (cleared above)
     }
   }
 }
