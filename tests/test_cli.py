@@ -159,3 +159,17 @@ def test_an_unusable_root_is_one_json_failure(
     payload = json.loads(captured.out)
     assert code == 1 and payload["ok"] is False and payload["errors"]
     assert captured.out.count("\n") == 1 and "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["install", "nope"], ["uninstall", "nope"], ["generate", "--check"]],
+)
+def test_human_failures_go_to_stderr_with_prefix(
+    argv: list[str], fake_claude: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_mod(tmp_path, "alpha")
+    code, out, err = run(capsys, "--root", str(tmp_path), *argv)
+    assert code == 1 and out == ""
+    lines = err.splitlines()
+    assert lines and all(line.startswith("error: ") for line in lines), err
