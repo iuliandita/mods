@@ -24,6 +24,28 @@ const cfg = () => parseConfig({})
 const KUBE = '/h/.kube/config'
 const denied = async (command: string, e: Env) => (await evaluate(command, cfg(), e)).enforced
 
+test('context: switch state follows the first existing kubeconfig and aliases the default file', async () => {
+  const files = { [KUBE]: 'current-context: dev-1\n', '/w/other': 'current-context: dev-1\n' }
+  for (const command of [
+    'KUBECONFIG=/h/.kube/config:/dev/null kubectl config use-context prod && kubectl apply -f x',
+    'KUBECONFIG=/missing:/h/.kube/config kubectl config use-context prod && kubectl apply -f x',
+    'KUBECONFIG=/missing:/w/other kubectl config use-context prod && kubectl --kubeconfig /w/other apply -f x',
+    'KUBECONFIG=/missing:/w/new kubectl config use-context prod && kubectl --kubeconfig /w/new apply -f x',
+  ]) expect(await denied(command, env({ files })), command).toHaveLength(1)
+  expect(await denied('KUBECONFIG=/h/.kube/config:/dev/null kubectl config use-context dev-1 && kubectl apply -f x', env({ context: 'prod', files }))).toEqual([])
+})
+
+test('context: an explicit kubeconfig containing a colon is one file, including writer tracking', async () => {
+  const files = { '/h/personal/repo/dev.yaml': 'current-context: dev-1\n', '/h/personal/repo/dev.yaml:x': 'current-context: prod\n' }
+  for (const command of [
+    'kubectl --kubeconfig dev.yaml:x apply -f x',
+    'helm --kubeconfig dev.yaml:x upgrade x ./c',
+    'cp prod.yaml dev.yaml:x && kubectl --kubeconfig dev.yaml:x apply -f x',
+    'kubectl --kubeconfig dev.yaml:x config use-context prod && kubectl --kubeconfig ./dev.yaml:x apply -f x',
+  ]) expect(await denied(command, env({ files })), command).not.toEqual([])
+  expect(await denied('KUBECONFIG=dev.yaml:x kubectl apply -f x', env({ files }))).toEqual([])
+})
+
 test('context: a kubeconfig current-context is read like kubectl reads it, and anything else is not classified', async () => {
   const apply = 'kubectl --kubeconfig /h/.kube/config apply -f x'
   const kubeconfig = (body: string) => env({ files: { [KUBE]: body } })

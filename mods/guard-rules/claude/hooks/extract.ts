@@ -218,7 +218,7 @@ function emitToolCalls(w: Walk, s: Step): void {
       // A `..` left for the OS to resolve hides the directory names terraform is classified by.
       const opaque = call !== null && call.dir.split('/').includes('..')
       // An earlier command may have switched the context or workspace, or written the kubeconfig the guard reads.
-      const files = (call?.kubeconfig || simple.assigns.KUBECONFIG || '').split(':').filter(Boolean)
+      const files = call?.kubeconfig ? [call.kubeconfig] : (simple.assigns.KUBECONFIG || '').split(':').filter(Boolean)
       const switched = name === 'kubectl' || name === 'helm' ? w.kube || files.some((f) => w.written.has(basename(f))) : w.workspace
       if (call && ((here === null && located) || unknown || (opaque && located) || switched)) call.custom = true
       if (call) w.calls.push(call)
