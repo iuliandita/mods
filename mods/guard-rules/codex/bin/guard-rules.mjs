@@ -1551,6 +1551,7 @@ var MAX_QUEUE = 4000;
 var DECLARES = new Set(["declare", "typeset", "local", "readonly"]);
 var SUBST_TEXT = /[$<>]\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)|`[^`]*`/g;
 var SHELL_ENV = new Set(["IFS", "BASH_ENV", "ENV", "GIT_CONFIG_PARAMETERS", "PATH"]);
+var EXEC_ENV = /^(?:PAGER|MANPAGER|LESS(?:OPEN|CLOSE)?|EDITOR|VISUAL|BROWSER|MANOPT|SHELL|GIT_.*|.*_(?:PAGER|EDITOR|BROWSER))$/;
 var DYNAMIC = "built from a variable, substitution or glob";
 var PLAIN_WORD = /^[\w./+@%:,=~-]+$/;
 var KUBE_SWITCHERS = {
@@ -1756,7 +1757,7 @@ function sedFileSlots(s) {
   for (let i = 1;i < s.argv.length; i++) {
     const a = s.argv[i];
     if (s.dyn[i])
-      return new Set;
+      return null;
     if (options && a === "--")
       options = false;
     else if (options && SED_FLAGS.has(a))
@@ -1764,20 +1765,36 @@ function sedFileSlots(s) {
     else if (options && (a === "-e" || a === "--expression")) {
       const script = s.argv[++i];
       if (script === undefined || s.dyn[i])
-        return new Set;
+        return null;
       scripts.push(script);
     } else if (options && a.startsWith("-"))
-      return new Set;
+      return null;
     else if (!scripts.length)
       scripts.push(a);
     else
       files.add(i);
   }
-  return scripts.some((script) => script.includes("e")) ? new Set : files;
+  return !scripts.length || scripts.some((script) => script.includes("e")) ? null : files;
+}
+function pipedWords(w, s) {
+  const words = [];
+  let cmd = s.cmd;
+  let idx = s.idx;
+  while (SINGLE_PIPE.test(cmd.op)) {
+    do {
+      idx--;
+    } while (idx >= 0 && w.queue[idx].op === "$(");
+    if (idx < 0)
+      break;
+    cmd = w.queue[idx];
+    words.push(...cmd.argv, ...Object.values(cmd.assigns), ...cmd.input ?? []);
+  }
+  return words;
 }
 function markOpaque(w, s) {
   const bare = s.argv[0] === s.name;
-  if (bare && (FLOW_HEADS.has(s.name) || TEXT_HEADS.has(s.name) && !(s.name === "rg" && s.argv.some((a) => a === "--pre" || a.startsWith("--pre=")))))
+  const executableOption = s.name === "rg" ? s.argv.some((a) => a === "--pre" || a.startsWith("--pre=")) : s.name === "man" && s.argv.slice(1).some((a) => /^-[^-]*[PH]|^--(?:pager|html)(?:=|$)/.test(a));
+  if (bare && (FLOW_HEADS.has(s.name) || TEXT_HEADS.has(s.name) && !executableOption))
     return;
   if (bare && (DATA_HEADS.has(s.name) || s.name === "brew" && s.argv[1] === "install"))
     return;
@@ -1786,12 +1803,15 @@ function markOpaque(w, s) {
   const words = s.argv.slice(1).map((a, i) => {
     if (s.dyn[i + 1])
       return a.replace(SUBST_TEXT, " ");
-    const file = s.name === "sed" ? sedFiles.has(i + 1) : editor && !/^[+-]/.test(a);
+    if (s.name === "man")
+      return a.replace(/^-[^-]*?[PH]/, " ");
+    const file = s.name === "sed" ? sedFiles?.has(i + 1) : editor && !/^[+-]/.test(a);
     return bare && FILE_CODE_HEADS.has(s.name) && file && isDataWord(a) ? "" : a;
   });
   if (!PLAIN_WORD.test(s.argv[0]))
     words.push(s.argv[0]);
-  const tools = toolWords([...words, ...s.cmd.input ?? []].join(" "), { shells: true });
+  const input = s.name === "sed" && sedFiles !== null ? [] : [...s.cmd.input ?? [], ...pipedWords(w, s)];
+  const tools = toolWords([...words, ...input].join(" "), { shells: true });
   if (tools.length)
     w.local.push({ why: `${s.name} with ${tools.join(", ")} among its words`, tools });
 }
@@ -1832,6 +1852,20 @@ function extractCalls(src, startDir, home) {
     for (const k of assigned)
       if (SHELL_ENV.has(k))
         mark(w, `an assignment to ${k}`);
+    const settings = Object.entries(s.u.assigns);
+    if (s.name === "export" || DECLARES.has(s.name))
+      for (const a of s.argv.slice(1)) {
+        const eq = a.indexOf("=");
+        if (eq > 0)
+          settings.push([a.slice(0, eq), a.slice(eq + 1)]);
+      }
+    for (const [key, value] of settings) {
+      if (!EXEC_ENV.test(key))
+        continue;
+      const tools = toolWords(value, { shells: true });
+      if (tools.length)
+        w.local.push({ why: `an assignment to ${key} with ${tools.join(", ")} among its words`, tools });
+    }
     if (s.dyn[0]) {
       const tools = mayName(s.argv[0], [...OPAQUE_TOOLS]);
       if (tools.length)

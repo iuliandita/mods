@@ -53,7 +53,7 @@ These are unparsed on their own, without another tool word:
 
 - a command the guard does not model whose own words, or heredoc or here-string body, name one of those tools or
   a shell (`xargs git ...`, `flock /l git push`, `find -exec`, `su -c '...'`, `python3 -c "os.system('git push')"`,
-  `perl`, `node -e`, `python3 <<'EOF'`). `echo`, `printf`, `man`, `which`, `type`, `grep`, `rg` (without `--pre`)
+  `perl`, `node -e`, `python3 <<'EOF'`). `echo`, `printf`, `man` (without `-P`, `--pager`, `-H` or `--html`), `which`, `type`, `grep`, `rg` (without `--pre`)
   and `cat` are text heads and exempt. Known data commands (`ls`, `mkdir`, `head`, `tail`, `tee`,
   `curl` and similar file utilities) and `brew install` also treat their arguments as data. These exemptions
   require bare command names, so `./cat` and `/tmp/bin/curl` stay checked. Editors ignore literal file arguments
@@ -67,7 +67,16 @@ These are unparsed on their own, without another tool word:
   whether a script can execute commands. Path-qualified editors and `sed` have no file exemptions.
   Unknown commands stay conservative, including runners such as `xargs`, `find -exec`, `flock`,
   `su -c`, `direnv exec`, interpreters, and programs with executable options such as `sort --compress-program`.
+  A pipeline into one of these commands also checks the literal words and inline input of its producer stages,
+  including through text-only stages such as `cat`. `sed` with known options and scripts containing no `e`
+  keeps piped text as data; executable or unsupported sed forms check it. The guard does not inspect interpreter
+  code to prove that it only prints input, so `echo git | awk '{print $0}'` is conservative too.
   A tool path in command position (`/usr/bin/git push`, `./terraform apply`) is checked by its normal rule;
+- command-bearing environment values naming a tool or shell, even on text/data commands or in standalone
+  assignments, `export` or declarations. The checked names are `PAGER`, `MANPAGER`, `LESS`, `LESSOPEN`,
+  `LESSCLOSE`, `EDITOR`, `VISUAL`, `BROWSER`, `MANOPT`, `SHELL`, every `GIT_*` name, and names ending in
+  `_PAGER`, `_EDITOR` or `_BROWSER`. Values are scanned as words rather than executed, so harmless data such as
+  `PAGER='cat docs/git' man ls` can also be unparsed;
 - a glob or brace command word that can expand to a tool or shell (`gi[t]`, `/usr/bin/gi?`, `{git,true}`);
 - a shell whose script is dynamic (`bash -c "$CMD"`, `bash <(curl ...)`);
 - a guarded git write in a repository or environment the guard cannot follow (`--git-dir`, `--work-tree`,
@@ -90,6 +99,10 @@ filename is conservative too (`PATH=/usr/bin ls terraform`, `hash tee; cat docs/
 
 ### Other limits
 
+- Pipeline checks read literal command words, not computed output. For example,
+  `printf '%s%s push origin main' gi t | xargs env` still passes because the producer builds `git` at run time.
+  This exact case remains in the regression corpus as a known gap. Output from files, transformations and
+  external programs is not evaluated; arbitrary pipelines remain outside a security boundary.
 - State changes inside one command are followed as the set of values each could have: the directory (`cd`,
   `pushd`, `popd`, `cd -`, `env -C DIR`, `sudo -D DIR`), variables set by `export`, `declare -x` and friends or a
   statement of only assignments (`unset` removes one; a prefix on the call wins), the branch per repository, the

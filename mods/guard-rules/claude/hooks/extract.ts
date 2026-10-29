@@ -50,6 +50,8 @@ const DECLARES = new Set(['declare', 'typeset', 'local', 'readonly'])
 const SUBST_TEXT = /[$<>]\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)|`[^`]*`/g
 // Variables that change how the shell or git reads every later word.
 const SHELL_ENV = new Set(['IFS', 'BASH_ENV', 'ENV', 'GIT_CONFIG_PARAMETERS', 'PATH'])
+// Values these programs can interpret as commands or command options, including exported settings.
+const EXEC_ENV = /^(?:PAGER|MANPAGER|LESS(?:OPEN|CLOSE)?|EDITOR|VISUAL|BROWSER|MANOPT|SHELL|GIT_.*|.*_(?:PAGER|EDITOR|BROWSER))$/
 const DYNAMIC = 'built from a variable, substitution or glob'
 const PLAIN_WORD = /^[\w./+@%:,=~-]+$/
 // Commands that switch the kube context, or rewrite what a context points at, in a kubeconfig the guard read before
@@ -282,29 +284,46 @@ function markSwitch(w: Walk, s: Step): void {
 
 // Only known sed options can separate scripts from files. Any `e` in a script keeps all words visible:
 // this deliberately includes harmless occurrences rather than trying to parse sed's execution syntax.
-function sedFileSlots(s: Step): Set<number> {
+function sedFileSlots(s: Step): Set<number> | null {
   const files = new Set<number>()
   const scripts: string[] = []
   let options = true
   for (let i = 1; i < s.argv.length; i++) {
     const a = s.argv[i]!
-    if (s.dyn[i]) return new Set()
+    if (s.dyn[i]) return null
     if (options && a === '--') options = false
     else if (options && SED_FLAGS.has(a)) continue
     else if (options && (a === '-e' || a === '--expression')) {
       const script = s.argv[++i]
-      if (script === undefined || s.dyn[i]) return new Set()
+      if (script === undefined || s.dyn[i]) return null
       scripts.push(script)
-    } else if (options && a.startsWith('-')) return new Set()
+    } else if (options && a.startsWith('-')) return null
     else if (!scripts.length) scripts.push(a)
     else files.add(i)
   }
-  return scripts.some((script) => script.includes('e')) ? new Set() : files
+  return !scripts.length || scripts.some((script) => script.includes('e')) ? null : files
+}
+
+// Literal words are evidence about piped text, not an evaluation of the producer's output. Include all
+// stages through pass-through commands; substitutions are queued separately and do not break a pipeline.
+function pipedWords(w: Walk, s: Step): string[] {
+  const words: string[] = []
+  let cmd = s.cmd
+  let idx = s.idx
+  while (SINGLE_PIPE.test(cmd.op)) {
+    do { idx-- } while (idx >= 0 && w.queue[idx]!.op === '$(')
+    if (idx < 0) break
+    cmd = w.queue[idx]!
+    words.push(...cmd.argv, ...Object.values(cmd.assigns), ...(cmd.input ?? []))
+  }
+  return words
 }
 
 function markOpaque(w: Walk, s: Step): void {
   const bare = s.argv[0] === s.name
-  if (bare && (FLOW_HEADS.has(s.name) || (TEXT_HEADS.has(s.name) && !(s.name === 'rg' && s.argv.some((a) => a === '--pre' || a.startsWith('--pre=')))))) return
+  const executableOption = s.name === 'rg' ? s.argv.some((a) => a === '--pre' || a.startsWith('--pre='))
+    : s.name === 'man' && s.argv.slice(1).some((a) => /^-[^-]*[PH]|^--(?:pager|html)(?:=|$)/.test(a))
+  if (bare && (FLOW_HEADS.has(s.name) || (TEXT_HEADS.has(s.name) && !executableOption))) return
   if (bare && (DATA_HEADS.has(s.name) || (s.name === 'brew' && s.argv[1] === 'install'))) return
   const sedFiles = s.name === 'sed' ? sedFileSlots(s) : new Set<number>()
   const editor = Object.hasOwn(EDITOR_FLAGS, s.name) && s.argv.slice(1).every((a, i) =>
@@ -313,11 +332,13 @@ function markOpaque(w: Walk, s: Step): void {
   // that is not a plain name or path (`"git push" origin main`) counts among them.
   const words = s.argv.slice(1).map((a, i) => {
     if (s.dyn[i + 1]) return a.replace(SUBST_TEXT, ' ')
-    const file = s.name === 'sed' ? sedFiles.has(i + 1) : editor && !/^[+-]/.test(a)
+    if (s.name === 'man') return a.replace(/^-[^-]*?[PH]/, ' ')
+    const file = s.name === 'sed' ? sedFiles?.has(i + 1) : editor && !/^[+-]/.test(a)
     return bare && FILE_CODE_HEADS.has(s.name) && file && isDataWord(a) ? '' : a
   })
   if (!PLAIN_WORD.test(s.argv[0]!)) words.push(s.argv[0]!)
-  const tools = toolWords([...words, ...(s.cmd.input ?? [])].join(' '), { shells: true })
+  const input = s.name === 'sed' && sedFiles !== null ? [] : [...(s.cmd.input ?? []), ...pipedWords(w, s)]
+  const tools = toolWords([...words, ...input].join(' '), { shells: true })
   if (tools.length) w.local.push({ why: `${s.name} with ${tools.join(', ')} among its words`, tools })
 }
 
@@ -343,6 +364,16 @@ export function extractCalls(src: string, startDir: string, home: string): Parse
     for (const why of s.u.opaque) mark(w, why)
     const assigned = [...Object.keys(s.u.assigns), ...(s.name === 'export' || DECLARES.has(s.name) ? s.argv.slice(1).map((a) => a.split('=')[0]!) : [])]
     for (const k of assigned) if (SHELL_ENV.has(k)) mark(w, `an assignment to ${k}`)
+    const settings = Object.entries(s.u.assigns)
+    if (s.name === 'export' || DECLARES.has(s.name)) for (const a of s.argv.slice(1)) {
+      const eq = a.indexOf('=')
+      if (eq > 0) settings.push([a.slice(0, eq), a.slice(eq + 1)])
+    }
+    for (const [key, value] of settings) {
+      if (!EXEC_ENV.test(key)) continue
+      const tools = toolWords(value, { shells: true })
+      if (tools.length) w.local.push({ why: `an assignment to ${key} with ${tools.join(', ')} among its words`, tools })
+    }
     if (s.dyn[0]) {
       const tools = mayName(s.argv[0]!, [...OPAQUE_TOOLS])
       if (tools.length) w.local.push({ why: `a command word that may expand to ${tools.join(', ')}`, tools })
