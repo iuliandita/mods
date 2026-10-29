@@ -39,10 +39,10 @@ export function request(helper: string, texts: string[]) {
 // The command a host runs instead: the helper fills the placeholders in and scrubs its own output.
 export const rewrite = (helper: string, command: string): string => rewriteCommand(helper, command, true)
 
-const WITHHELD = '[secret-box: this content was withheld because scrubbing failed]'
+export const WITHHELD = '[secret-box: this content was withheld because scrubbing failed]'
 const MAX_DEPTH = 24
 
-// @opencode/ai 2.0.29 schema/messages: only message roles and content-part tags are structural.
+// @opencode/ai 2.2.1 schema/messages: only allowlisted fields are structural.
 // Rebuild a minimal message rather than walking arbitrary payloads with a key-name exemption.
 const MESSAGE_ROLES = new Set(['system', 'user', 'assistant', 'tool'])
 const CONTENT_TYPES = new Set(['text', 'reasoning', 'media', 'tool-call', 'tool-result', 'compaction', 'effort'])
@@ -70,8 +70,13 @@ function withholdMessages(value: unknown): unknown {
         const type = part !== null && typeof part === 'object' && 'type' in part
           && typeof part.type === 'string' && CONTENT_TYPES.has(part.type) ? part.type : 'text'
         switch (type) {
-          case 'tool-call': return { type, id: toolId(part), name: 'withheld', input: WITHHELD }
-          case 'tool-result': return { type, id: toolId(part), name: 'withheld', result: { type: 'text', value: WITHHELD } }
+          case 'tool-call':
+          case 'tool-result': {
+            const provider = part !== null && typeof part === 'object' && 'providerExecuted' in part
+              && typeof part.providerExecuted === 'boolean' ? { providerExecuted: part.providerExecuted } : {}
+            return { type, id: toolId(part), name: 'withheld', ...provider,
+              ...(type === 'tool-call' ? { input: {} } : { result: { type: 'text', value: WITHHELD } }) }
+          }
           case 'effort': return { type }
           case 'reasoning': return { type, text: WITHHELD }
           // Media and compaction require unchecked assets/provider state; replace the whole part.
@@ -105,14 +110,15 @@ export function scrubValue<T>(value: T, scrub: Scrubber): { value: T; names: str
     path.add(v)
     try {
       if (Array.isArray(v)) return v.map((x) => walk(x, depth + 1, path))
-      const entries = Object.entries(v)
+      // Error.message/stack/cause are non-enumerable but consumed by the host too.
+      const entries = v instanceof Error ? Object.getOwnPropertyNames(v).map((key) => [key, Reflect.get(v, key)] as const) : Object.entries(v)
       if (entries.length === 0) return v
       const out = Object.create(Object.getPrototypeOf(v)) as Record<string, unknown>
       for (const [k, x] of entries) {
         const base = text(k)
         let key = base
-        for (let n = 2; key in out; n++) key = `${base}#${n}`
-        out[key] = walk(x, depth + 1, path)
+        for (let n = 2; Object.hasOwn(out, key); n++) key = `${base}#${n}`
+        Object.defineProperty(out, key, { value: walk(x, depth + 1, path), enumerable: true, configurable: true, writable: true })
       }
       return out
     } finally {
@@ -123,11 +129,24 @@ export function scrubValue<T>(value: T, scrub: Scrubber): { value: T; names: str
   return { value: out, names: [...names], changed }
 }
 
-export async function scrubRemote(helper: string, value: unknown, messages = false): Promise<unknown> {
+type Fallback = 'text' | 'messages' | 'result' | 'error' | 'prompt'
+
+export async function scrubRemote(helper: string, value: unknown, fallback: Fallback = 'text'): Promise<unknown> {
   try {
     const r = await scrubBatch((scrub) => scrubValue(value, scrub), (texts) => request(helper, texts))
     return r.value
   } catch {
-    return messages ? withholdMessages(value) : WITHHELD
+    switch (fallback) {
+      case 'messages': return withholdMessages(value)
+      case 'result': return { output: WITHHELD, content: [{ type: 'text', text: WITHHELD }] }
+      case 'prompt': return { text: WITHHELD, files: [], agents: [], skills: [] }
+      case 'error': {
+        const error = new Error(WITHHELD)
+        // Tool.Error is yieldable in Effect. Keep its prototype, never its unchecked own fields.
+        if (value instanceof Error) Object.setPrototypeOf(error, Object.getPrototypeOf(value))
+        return Object.assign(error, { _tag: 'Tool.Error' })
+      }
+      default: return WITHHELD
+    }
   }
 }

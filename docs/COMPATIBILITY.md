@@ -101,8 +101,13 @@ and direct keyring reads remain out of scope. Scopes use only the directory list
 The installed Claude API describes `$.session.cwd()` as the session directory, exposes no
 separate Bash directory and does not guarantee it follows a persistent shell `cd`.
 A failed scrub withholds checked text on Claude Code; sent Claude messages are refused. OpenCode
-withholds results and prompts entirely and rebuilds messages from allowlisted roles and content-part
-fields, discarding unchecked keys and nested payloads. Each scrub reads current values, so new secrets need no reload and removed or rotated
+replaces result content, errors and prompt text with notices, clears prompt attachments, and
+rebuilds messages from allowlisted roles and content-part fields, discarding unchecked keys and
+nested payloads. The fallbacks match the OpenCode 2.2.1 types: tool inputs are empty objects,
+boolean `providerExecuted` flags are preserved, results keep `output` and text `content`, errors
+keep their Error prototype, and prompts keep `text`, `files`, `agents` and `skills`. These shapes
+are covered by adapter tests, not new authenticated host verification.
+Each scrub reads current values, so new secrets need no reload and removed or rotated
 values are unknown to later scrubs, including saved-file checks. A wrapped command retains its
 initial values while filtering its own stdout and stderr.
 

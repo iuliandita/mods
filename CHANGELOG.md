@@ -18,6 +18,7 @@
 
 ### Fixed
 
+- `secret-box` keeps OpenCode 2.2.1 tool-call inputs, provider execution flags, result objects, Error instances and typed prompts usable after a scrub failure, and checks non-enumerable Error fields during scrubbing.
 - `guard-rules` disables exemptions for PATH tokens and `env -P`/`--path`, checks loop output through `done`, and recognizes `ssh`, `php`, `lua`, `tclsh`, `at`, `crontab` and `batch` as input executors.
 - `notify` runs Codex hooks in the background, caps notifier delivery at 250 ms on both Codex entry paths, and skips events with `agent_id`.
 - `guard-rules` removes editor/pager file exemptions, checks data-command inline input and PATH writes, and limits producer checks to named input executors; use a file-reading tool for tool-named editor paths.

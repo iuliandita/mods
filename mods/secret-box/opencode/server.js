@@ -196,9 +196,16 @@ function withholdMessages(value) {
         const type = part !== null && typeof part === "object" && "type" in part && typeof part.type === "string" && CONTENT_TYPES.has(part.type) ? part.type : "text";
         switch (type) {
           case "tool-call":
-            return { type, id: toolId(part), name: "withheld", input: WITHHELD };
-          case "tool-result":
-            return { type, id: toolId(part), name: "withheld", result: { type: "text", value: WITHHELD } };
+          case "tool-result": {
+            const provider = part !== null && typeof part === "object" && "providerExecuted" in part && typeof part.providerExecuted === "boolean" ? { providerExecuted: part.providerExecuted } : {};
+            return {
+              type,
+              id: toolId(part),
+              name: "withheld",
+              ...provider,
+              ...type === "tool-call" ? { input: {} } : { result: { type: "text", value: WITHHELD } }
+            };
+          }
           case "effort":
             return { type };
           case "reasoning":
@@ -233,16 +240,16 @@ function scrubValue(value, scrub) {
     try {
       if (Array.isArray(v))
         return v.map((x) => walk(x, depth + 1, path));
-      const entries = Object.entries(v);
+      const entries = v instanceof Error ? Object.getOwnPropertyNames(v).map((key) => [key, Reflect.get(v, key)]) : Object.entries(v);
       if (entries.length === 0)
         return v;
       const out = Object.create(Object.getPrototypeOf(v));
       for (const [k, x] of entries) {
         const base = text(k);
         let key = base;
-        for (let n = 2;key in out; n++)
+        for (let n = 2;Object.hasOwn(out, key); n++)
           key = `${base}#${n}`;
-        out[key] = walk(x, depth + 1, path);
+        Object.defineProperty(out, key, { value: walk(x, depth + 1, path), enumerable: true, configurable: true, writable: true });
       }
       return out;
     } finally {
@@ -252,12 +259,27 @@ function scrubValue(value, scrub) {
   const out = walk(value, 0, new Set);
   return { value: out, names: [...names], changed };
 }
-async function scrubRemote(helper, value, messages = false) {
+async function scrubRemote(helper, value, fallback = "text") {
   try {
     const r = await scrubBatch((scrub) => scrubValue(value, scrub), (texts) => request(helper, texts));
     return r.value;
   } catch {
-    return messages ? withholdMessages(value) : WITHHELD;
+    switch (fallback) {
+      case "messages":
+        return withholdMessages(value);
+      case "result":
+        return { output: WITHHELD, content: [{ type: "text", text: WITHHELD }] };
+      case "prompt":
+        return { text: WITHHELD, files: [], agents: [], skills: [] };
+      case "error": {
+        const error = new Error(WITHHELD);
+        if (value instanceof Error)
+          Object.setPrototypeOf(error, Object.getPrototypeOf(value));
+        return Object.assign(error, { _tag: "Tool.Error" });
+      }
+      default:
+        return WITHHELD;
+    }
   }
 }
 
@@ -293,21 +315,20 @@ async function setup(ctx, deps) {
   await ctx.tool.hook("execute.after", async (e) => {
     if (mode() !== "on")
       return;
-    const checked = await scrubRemote(deps.helper, [e.result, e.error]);
     if (e.result !== undefined)
-      e.result = Array.isArray(checked) ? checked[0] : checked;
+      e.result = await scrubRemote(deps.helper, e.result, "result");
     if (e.error !== undefined)
-      e.error = Array.isArray(checked) ? checked[1] : checked;
+      e.error = await scrubRemote(deps.helper, e.error, "error");
   });
   await ctx.session.hook("context", async (e) => {
     if (mode() !== "on")
       return;
-    e.messages = await scrubRemote(deps.helper, e.messages, true);
+    e.messages = await scrubRemote(deps.helper, e.messages, "messages");
   });
   await ctx.session.hook("prompt", async (e) => {
     if (mode() !== "on")
       return;
-    e.prompt = await scrubRemote(deps.helper, e.prompt);
+    e.prompt = await scrubRemote(deps.helper, e.prompt, "prompt");
   });
 }
 var helper = join2(dirname(fileURLToPath(import.meta.url)), "bin", "secret-box");

@@ -45,7 +45,8 @@ This is not a security boundary. These limits apply in mode `on`; `off` and `dry
 - **Codex:** Only a helper-wrapped command's own stdout and stderr are scrubbed. Other tool
   results, prompts and conversation content stay raw. Failed helper loads block execution; a
   hook that cannot start leaves the command unchanged with its placeholder unfilled.
-- **OpenCode:** A failed scrub withholds results and prompts entirely. Messages retain only
+- **OpenCode:** A failed scrub replaces result content, errors and prompt text with notices,
+  clears prompt attachments, and keeps the object shapes required by OpenCode 2.2.1. Messages retain only
   allowlisted roles and content-part fields; unchecked keys and nested payloads are discarded.
   Result and conversation hooks do not rewrite saved output files on disk.
 - **Current values:** Each scrub reads current stored values, so new values need no reload.
@@ -136,8 +137,12 @@ Install steps are in [INSTALL.md](../../INSTALL.md); what differs from Claude Co
   Trust the hook once with `/hooks`.
 - OpenCode 2.x: the same rewrite in `execute.before`, plus scrubbing of every tool result and error, of the
   messages the model sees again, and of the prompt as typed. If a scrub fails (locked keyring, timeout,
-  reply over 4 MiB), results and prompts are replaced by a notice. Messages are rebuilt with
-  only known roles and content-part fields from `@opencode/ai` 2.0.29. Text, reasoning and tool
+  reply over 4 MiB), results keep `output` and text `content` notices, errors keep their Error
+  prototype with a notice message, and prompts keep notice `text` with empty `files`, `agents`
+  and `skills`. Messages are rebuilt with
+  only known roles and content-part fields from `@opencode/ai` 2.2.1. Tool calls use empty object
+  inputs; calls and results retain only boolean `providerExecuted` values and paired replacement IDs.
+  Text, reasoning and tool
   payloads are withheld; media, compaction and unknown parts become text notices. Unknown roles
   become `user`. Arbitrary keys, metadata and nested `role`/`type` values are discarded.
 - The mode is read from `~/.config/iuliandita-mods/secret-box.json` (`{"mode": "on"}`; `off`, `dry`

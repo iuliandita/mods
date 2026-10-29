@@ -55,19 +55,18 @@ export async function setup(ctx: Context, deps: Deps): Promise<void> {
   await ctx.tool.hook('execute.after', async (e) => {
     if (mode() !== 'on') return
     // A failed or aborted call can carry partial output in `result` next to its `error`.
-    const checked = await scrubRemote(deps.helper, [e.result, e.error])
-    if (e.result !== undefined) e.result = Array.isArray(checked) ? checked[0] : checked
-    if (e.error !== undefined) e.error = Array.isArray(checked) ? checked[1] : checked
+    if (e.result !== undefined) e.result = await scrubRemote(deps.helper, e.result, 'result')
+    if (e.error !== undefined) e.error = await scrubRemote(deps.helper, e.error, 'error')
   })
 
   // Every row the model sees again, and the prompt as typed.
   await ctx.session.hook('context', async (e) => {
     if (mode() !== 'on') return
-    e.messages = await scrubRemote(deps.helper, e.messages, true)
+    e.messages = await scrubRemote(deps.helper, e.messages, 'messages')
   })
   await ctx.session.hook('prompt', async (e) => {
     if (mode() !== 'on') return
-    e.prompt = await scrubRemote(deps.helper, e.prompt)
+    e.prompt = await scrubRemote(deps.helper, e.prompt, 'prompt')
   })
 }
 
