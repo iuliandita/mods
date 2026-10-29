@@ -91,7 +91,7 @@ These are unparsed on their own, without another tool word:
 - a glob or brace command word that can expand to a tool or shell (`gi[t]`, `/usr/bin/gi?`, `{git,true}`);
 - a shell whose script is dynamic (`bash -c "$CMD"`, `bash <(curl ...)`);
 - a guarded git write in a repository or environment the guard cannot follow (`--git-dir`, `--work-tree`,
-  `--namespace`, `--config-env`, `--bare`, `GIT_DIR`/`GIT_WORK_TREE`/`GIT_NAMESPACE`, an option git's parser may
+  `--namespace`, `--config-env`, `--bare`, `GIT_DIR`/`GIT_COMMON_DIR`/`GIT_WORK_TREE`/`GIT_NAMESPACE`, an option git's parser may
   read differently such as `-C/path` or `-cname=value`, a variable the guard cannot tell).
 
 Git and forge tools use the strictest of the attribution and protected-branch modes (and identity, once rules are
@@ -226,6 +226,7 @@ separately, use a file-reading tool, or run the command yourself.
     the `--kubeconfig` file or colon-separated `KUBECONFIG` files (the first file that sets one); else the current
     kubectl context. `(custom target)` is used for `--server`, `-s`, `--cluster`,
     `--kube-apiserver`, `HELM_KUBEAPISERVER`, `HELM_KUBETOKEN`, `HELM_KUBECAFILE`, `TF_DATA_DIR`,
+    `TF_CLOUD_ORGANIZATION`, `TF_CLOUD_HOSTNAME`, `TF_CLOUD_PROJECT`, `TF_CLI_ARGS` or `TF_CLI_ARGS_*`,
     a context switch the guard cannot tell, a `-chdir` built from a variable, a kubeconfig the guard
     cannot read, and a context option that may be the value of an option the guard does not know
     (`kubectl apply -f --context=x`). With `(custom target)`, a context or kubeconfig file name can
@@ -239,6 +240,13 @@ separately, use a file-reading tool, or run the command yourself.
     enough; the parent directory can only protect, never relax. Otherwise the first non-`default`
     name is asked for. The `default` workspace is never a name. Classify a directory as
     `/guard-context <dir-name> protected|relaxed`; `/guard-context (custom target) relaxed` works too.
+    Any assigned `TF_CLI_ARGS` or subcommand variant makes the call mutating and its target custom;
+    injected flags are not evaluated, even when the variable names another subcommand or is empty.
+    Ordinary reads without injected arguments keep their exemptions. Cloud target overrides affect
+    mutations only. These variables are followed through exports; unexported assignments retain both
+    possible environments when the inherited export state is unknown.
+    A switch through a custom or reset environment stays unknown for later calls; its literal target
+    cannot relax the inherited kubeconfig or Terraform directory.
   - `--dry-run` counts only as bare, `=client`, `=server` or `=true`, and the last `--dry-run` flag
     wins; `none`, `false` or anything else is a change. `--dry-run` only excuses verbs that take it.
   - Earlier `kubectl config use-context X`, `kubectl config set current-context X` and

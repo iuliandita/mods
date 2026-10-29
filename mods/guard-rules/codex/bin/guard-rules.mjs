@@ -78,7 +78,7 @@ function hasVariable(p) {
 // mods/guard-rules/claude/hooks/words.ts
 var ASSIGN = /^[A-Za-z_][A-Za-z0-9_]*=/;
 var IDENTITY_ENV = /^(?:GIT_(?:AUTHOR|COMMITTER)_(?:NAME|EMAIL)|EMAIL|HOME|XDG_CONFIG_HOME|GIT_CONFIG_(?:GLOBAL|SYSTEM|NOSYSTEM|COUNT|KEY_\d+|VALUE_\d+))$/;
-var READ_ENV = /^(?:KUBECONFIG|TF_WORKSPACE|TF_DATA_DIR|HELM_KUBE(?:CONTEXT|APISERVER|TOKEN|CAFILE)|GIT_(?:DIR|WORK_TREE|NAMESPACE|CONFIG_PARAMETERS))$/;
+var READ_ENV = /^(?:HOME|KUBECONFIG|TF_(?:WORKSPACE|DATA_DIR|CLI_ARGS(?:_[A-Za-z0-9_]+)?|CLOUD_(?:ORGANIZATION|HOSTNAME|PROJECT))|HELM_KUBE(?:CONTEXT|APISERVER|TOKEN|CAFILE)|GIT_(?:DIR|COMMON_DIR|WORK_TREE|NAMESPACE|CONFIG_PARAMETERS))$/;
 function liftAssigns(words) {
   const assigns = {};
   let k = 0;
@@ -282,13 +282,13 @@ var GIT_FLAGS = new Set([
   "--list-cmds"
 ]);
 var GIT_OPAQUE = new Set(["--git-dir", "--work-tree", "--namespace", "--config-env", "--bare"]);
-var GIT_OPAQUE_ENV = ["GIT_DIR", "GIT_WORK_TREE", "GIT_NAMESPACE"];
+var GIT_OPAQUE_ENV = ["GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_NAMESPACE"];
 var PUSH_OPTION_VALUE = new Set(["-o", "--push-option"]);
 function parseGit(s, argv, dyn0, dir0, home, flow, mark) {
   const dyn = argv.map((a, k) => (dyn0[k] ?? false) || SECRET_PLACEHOLDER.test(a));
   let dir = dir0;
   let unresolvedDir = false;
-  let ok = !GIT_OPAQUE_ENV.some((k) => (k in s.assigns));
+  let ok = !GIT_OPAQUE_ENV.some((k) => (k in s.assigns)) && !s.unset?.includes("GIT_COMMON_DIR");
   const overrides = {};
   const config = [];
   let i = 1;
@@ -2052,6 +2052,8 @@ var HELM_DRY = new Set(["install", "upgrade", "uninstall", "delete", "rollback"]
 var DRY_VALUES = new Set(["client", "server", "true"]);
 var CUSTOM = "(custom target)";
 var HELM_TARGET_ENV = ["HELM_KUBEAPISERVER", "HELM_KUBETOKEN", "HELM_KUBECAFILE"];
+var TF_TARGET_ENV = ["TF_DATA_DIR", "TF_CLOUD_ORGANIZATION", "TF_CLOUD_HOSTNAME", "TF_CLOUD_PROJECT"];
+var TF_ARGS_ENV = /^TF_CLI_ARGS(?:_[A-Za-z0-9_]+)?$/;
 var NAME_LIMIT = 200;
 var CONTROL = /[\u0000-\u001f\u007f]/;
 var CONTROL_ALL = new RegExp(CONTROL.source, "g");
@@ -2074,6 +2076,8 @@ function isDryRun(call) {
 }
 function isMutating(call) {
   if (call.unsure)
+    return true;
+  if ((call.tool === "terraform" || call.tool === "tofu") && Object.keys(call.assigns).some((k) => TF_ARGS_ENV.test(k)))
     return true;
   const next = positionals(call)[0] ?? "";
   if (call.tool === "kubectl") {
@@ -2160,14 +2164,23 @@ function known(name) {
 }
 var CTX_PLUGINS = new Set(["ctx", "kubectx", "switch", "konfig"]);
 var CTX_READ = new Set(["-c", "--current", "-h", "--help"]);
+function changedEnvironment(call, home) {
+  const targets = call.tool === "kubectl" || call.tool === "helm" ? ["HOME", "KUBECONFIG", "HELM_KUBECONTEXT", ...HELM_TARGET_ENV] : ["HOME", "TF_WORKSPACE", ...TF_TARGET_ENV, ...[...Object.keys(call.assigns), ...call.unset ?? []].filter((k) => TF_ARGS_ENV.test(k))];
+  return Boolean(call.clear || call.unset?.some((k) => targets.includes(k)) || targets.some((k) => Object.hasOwn(call.assigns, k) && call.assigns[k] === "") || Object.hasOwn(call.assigns, "HOME") && call.assigns.HOME !== home);
+}
+function terraformTargetOverride(call) {
+  return TF_TARGET_ENV.some((k) => Object.hasOwn(call.assigns, k)) || Object.keys(call.assigns).some((k) => TF_ARGS_ENV.test(k));
+}
 async function followSwitch(call, state, env) {
   const [verb, target, value] = positionals(call);
   const key = await kubeKey(call, env);
+  const uncertain = call.custom || changedEnvironment(call, env.home) || (call.tool === "terraform" || call.tool === "tofu") && terraformTargetOverride(call);
+  const switched = (name) => uncertain ? UNKNOWN : known(name);
   if (call.tool === "kubectl" && call.sub === "config") {
     if ((verb === "use-context" || verb === "use") && target)
-      state.contexts.set(key, [known(target)], call.flow);
+      state.contexts.set(key, [switched(target)], call.flow);
     else if (verb === "set" && target === "current-context" && value)
-      state.contexts.set(key, [known(value)], call.flow);
+      state.contexts.set(key, [switched(value)], call.flow);
     else if (verb !== undefined && !CONFIG_READ.has(verb))
       state.contexts.set(key, [UNKNOWN], call.flow);
   }
@@ -2175,7 +2188,7 @@ async function followSwitch(call, state, env) {
     state.contexts.set(key, [UNKNOWN], call.flow);
   }
   if ((call.tool === "terraform" || call.tool === "tofu") && call.sub === "workspace" && (verb === "select" || verb === "new") && target) {
-    state.workspaces.set(`${call.tool}\x00${call.dir}`, [known(target)], call.flow);
+    state.workspaces.set(`${call.tool}\x00${call.dir}`, [switched(target)], call.flow);
   }
 }
 function lastPart(path) {
@@ -2252,9 +2265,7 @@ async function candidates(call, env, state) {
 async function candidatesAt(call, env, state, p) {
   const first = (r) => r.ok ? r.out.split(`
 `)[0]?.trim() ?? "" : "";
-  const targets = call.tool === "kubectl" || call.tool === "helm" ? ["HOME", "KUBECONFIG", "HELM_KUBECONTEXT", ...HELM_TARGET_ENV] : ["HOME", "TF_WORKSPACE", "TF_DATA_DIR"];
-  if (call.clear || call.unset?.some((k) => targets.includes(k)) || targets.some((k) => Object.hasOwn(call.assigns, k) && call.assigns[k] === "") || Object.hasOwn(call.assigns, "HOME") && call.assigns.HOME !== env.home)
-    return [{ name: CUSTOM, kind: "target" }];
+  const changed = changedEnvironment(call, env.home);
   if (call.tool === "kubectl" || call.tool === "helm") {
     const named = call.context || (call.tool === "helm" ? call.assigns.HELM_KUBECONTEXT : "");
     if (named && hasVariable(named))
@@ -2264,14 +2275,14 @@ async function candidatesAt(call, env, state, p) {
     const current = !named && switched === undefined && (call.kubeconfig || call.assigns.KUBECONFIG) ? await fileContext(config, call.dir, env) : undefined;
     const file = lastPart(config[0] ?? "");
     const base = named ? { name: named, kind: "context" } : switched !== undefined ? { name: switched, kind: "context" } : typeof current === "string" ? { name: current || "(none)", kind: "context" } : current === null && file ? { name: file, kind: "kubeconfig" } : undefined;
-    if (call.custom || current === null || call.tool === "helm" && HELM_TARGET_ENV.some((k) => call.assigns[k]))
+    if (changed || call.custom || current === null || call.tool === "helm" && HELM_TARGET_ENV.some((k) => call.assigns[k]))
       return base ? [{ name: CUSTOM, kind: "target" }, { ...base, weak: true }] : [{ name: CUSTOM, kind: "target" }];
     if (base)
       return [base];
     const r = await env.run(call.dir, ["kubectl", "config", "current-context"]);
     return r.failed ? null : [{ name: first(r) || "(none)", kind: "context" }];
   }
-  if (call.custom || call.assigns.TF_DATA_DIR)
+  if (changed || call.custom || terraformTargetOverride(call))
     return [{ name: CUSTOM, kind: "target" }];
   const [verb, target] = positionals(call);
   const targeted = call.sub === "workspace" && verb !== undefined && ["new", "delete", "select"].includes(verb) ? target : undefined;

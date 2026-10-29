@@ -39,6 +39,10 @@ only at execution time.
 Removed or empty target variables, `env -i`, a changed `HOME`, and `sudo`/`doas` environments count as
 `(custom target)`. The guard cannot replay those environments in its inherited context lookups.
 
+`TF_CLOUD_ORGANIZATION`, `TF_CLOUD_HOSTNAME` and `TF_CLOUD_PROJECT` overrides make Terraform mutations
+custom targets. An assigned `TF_CLI_ARGS` or `TF_CLI_ARGS_*` also makes normally read-exempt calls count
+as changes, since injected flags can move state. `GIT_COMMON_DIR` overrides make guarded git writes unparsed.
+
 Hooks only, no UI. Portability to other Claude surfaces is expected, but only terminal behavior
 is verified; Desktop, VS Code and headless behavior remain untested.
 Egress: none (no network, no model calls).

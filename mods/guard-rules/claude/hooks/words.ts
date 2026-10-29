@@ -4,7 +4,7 @@ export const IDENTITY_ENV =
   /^(?:GIT_(?:AUTHOR|COMMITTER)_(?:NAME|EMAIL)|EMAIL|HOME|XDG_CONFIG_HOME|GIT_CONFIG_(?:GLOBAL|SYSTEM|NOSYSTEM|COUNT|KEY_\d+|VALUE_\d+))$/
 
 // The other variables the guard reads for a call: kube and terraform targets, the git repository and config.
-export const READ_ENV = /^(?:KUBECONFIG|TF_WORKSPACE|TF_DATA_DIR|HELM_KUBE(?:CONTEXT|APISERVER|TOKEN|CAFILE)|GIT_(?:DIR|WORK_TREE|NAMESPACE|CONFIG_PARAMETERS))$/
+export const READ_ENV = /^(?:HOME|KUBECONFIG|TF_(?:WORKSPACE|DATA_DIR|CLI_ARGS(?:_[A-Za-z0-9_]+)?|CLOUD_(?:ORGANIZATION|HOSTNAME|PROJECT))|HELM_KUBE(?:CONTEXT|APISERVER|TOKEN|CAFILE)|GIT_(?:DIR|COMMON_DIR|WORK_TREE|NAMESPACE|CONFIG_PARAMETERS))$/
 
 export function liftAssigns(words: string[]): { assigns: Record<string, string>; rest: string[] } {
   const assigns: Record<string, string> = {}

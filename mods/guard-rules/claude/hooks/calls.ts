@@ -96,7 +96,7 @@ const GIT_FLAGS = new Set([
 ])
 // Options that move the repository or its refs somewhere the guard's own lookups do not follow.
 const GIT_OPAQUE = new Set(['--git-dir', '--work-tree', '--namespace', '--config-env', '--bare'])
-const GIT_OPAQUE_ENV = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_NAMESPACE']
+const GIT_OPAQUE_ENV = ['GIT_DIR', 'GIT_COMMON_DIR', 'GIT_WORK_TREE', 'GIT_NAMESPACE']
 const PUSH_OPTION_VALUE = new Set(['-o', '--push-option'])
 
 // Reports a word the shell expands in a slot that decides what a call does.
@@ -107,7 +107,7 @@ export function parseGit(s: Simple, argv: string[], dyn0: boolean[], dir0: strin
   const dyn = argv.map((a, k) => (dyn0[k] ?? false) || SECRET_PLACEHOLDER.test(a))
   let dir = dir0
   let unresolvedDir = false
-  let ok = !GIT_OPAQUE_ENV.some((k) => k in s.assigns)
+  let ok = !GIT_OPAQUE_ENV.some((k) => k in s.assigns) && !s.unset?.includes('GIT_COMMON_DIR')
   const overrides: Record<string, string> = {}
   const config: [string, string][] = []
   let i = 1

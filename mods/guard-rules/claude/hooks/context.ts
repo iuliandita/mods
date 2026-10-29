@@ -37,6 +37,8 @@ const DRY_VALUES = new Set(['client', 'server', 'true'])
 const CUSTOM = '(custom target)'
 // Helm variables that point at a cluster no context name describes.
 const HELM_TARGET_ENV = ['HELM_KUBEAPISERVER', 'HELM_KUBETOKEN', 'HELM_KUBECAFILE']
+const TF_TARGET_ENV = ['TF_DATA_DIR', 'TF_CLOUD_ORGANIZATION', 'TF_CLOUD_HOSTNAME', 'TF_CLOUD_PROJECT']
+const TF_ARGS_ENV = /^TF_CLI_ARGS(?:_[A-Za-z0-9_]+)?$/
 const NAME_LIMIT = 200
 const CONTROL = /[\u0000-\u001f\u007f]/
 const CONTROL_ALL = new RegExp(CONTROL.source, 'g')
@@ -58,6 +60,8 @@ function isDryRun(call: InfraCall): boolean {
 
 export function isMutating(call: InfraCall): boolean {
   if (call.unsure) return true
+  // Injected flags can make otherwise read-exempt operations move state (for example init -migrate-state).
+  if ((call.tool === 'terraform' || call.tool === 'tofu') && Object.keys(call.assigns).some((k) => TF_ARGS_ENV.test(k))) return true
   const next = positionals(call)[0] ?? ''
   if (call.tool === 'kubectl') {
     if (KUBECTL_READ.has(call.sub)) return false
@@ -156,14 +160,31 @@ function known(name: string): string | typeof UNKNOWN {
 const CTX_PLUGINS = new Set(['ctx', 'kubectx', 'switch', 'konfig'])
 const CTX_READ = new Set(['-c', '--current', '-h', '--help'])
 
+function changedEnvironment(call: InfraCall, home: string): boolean {
+  const targets = call.tool === 'kubectl' || call.tool === 'helm'
+    ? ['HOME', 'KUBECONFIG', 'HELM_KUBECONTEXT', ...HELM_TARGET_ENV]
+    : ['HOME', 'TF_WORKSPACE', ...TF_TARGET_ENV, ...[...Object.keys(call.assigns), ...(call.unset ?? [])].filter((k) => TF_ARGS_ENV.test(k))]
+  return Boolean(call.clear || call.unset?.some((k) => targets.includes(k)) ||
+    targets.some((k) => Object.hasOwn(call.assigns, k) && call.assigns[k] === '') ||
+    (Object.hasOwn(call.assigns, 'HOME') && call.assigns.HOME !== home))
+}
+
+function terraformTargetOverride(call: InfraCall): boolean {
+  return TF_TARGET_ENV.some((k) => Object.hasOwn(call.assigns, k)) || Object.keys(call.assigns).some((k) => TF_ARGS_ENV.test(k))
+}
+
 export async function followSwitch(call: InfraCall, state: ContextState, env: Env): Promise<void> {
   const [verb, target, value] = positionals(call)
   const key = await kubeKey(call, env)
+  // A switch through another or reset environment must not relax a later call in the inherited environment.
+  const uncertain = call.custom || changedEnvironment(call, env.home) ||
+    ((call.tool === 'terraform' || call.tool === 'tofu') && terraformTargetOverride(call))
+  const switched = (name: string) => uncertain ? UNKNOWN : known(name)
   if (call.tool === 'kubectl' && call.sub === 'config') {
     // `use` is an alias of `use-context`.
-    if ((verb === 'use-context' || verb === 'use') && target) state.contexts.set(key, [known(target)], call.flow)
+    if ((verb === 'use-context' || verb === 'use') && target) state.contexts.set(key, [switched(target)], call.flow)
     // `config set current-context X` is a switch; other writes leave the current context unknown.
-    else if (verb === 'set' && target === 'current-context' && value) state.contexts.set(key, [known(value)], call.flow)
+    else if (verb === 'set' && target === 'current-context' && value) state.contexts.set(key, [switched(value)], call.flow)
     else if (verb !== undefined && !CONFIG_READ.has(verb)) state.contexts.set(key, [UNKNOWN], call.flow)
   }
   // A krew plugin that switches context (`kubectl ctx NAME`); with no argument or only a read flag it just lists.
@@ -171,7 +192,7 @@ export async function followSwitch(call: InfraCall, state: ContextState, env: En
     state.contexts.set(key, [UNKNOWN], call.flow)
   }
   if ((call.tool === 'terraform' || call.tool === 'tofu') && call.sub === 'workspace' && (verb === 'select' || verb === 'new') && target) {
-    state.workspaces.set(`${call.tool}\0${call.dir}`, [known(target)], call.flow)
+    state.workspaces.set(`${call.tool}\0${call.dir}`, [switched(target)], call.flow)
   }
 }
 
@@ -247,14 +268,9 @@ async function candidates(call: InfraCall, env: Env, state: ContextState): Promi
 
 async function candidatesAt(call: InfraCall, env: Env, state: ContextState, p: string | typeof REAL): Promise<Candidate[] | null> {
   const first = (r: { ok: boolean; out: string }) => (r.ok ? r.out.split('\n')[0]?.trim() ?? '' : '')
-  const targets = call.tool === 'kubectl' || call.tool === 'helm'
-    ? ['HOME', 'KUBECONFIG', 'HELM_KUBECONTEXT', ...HELM_TARGET_ENV]
-    : ['HOME', 'TF_WORKSPACE', 'TF_DATA_DIR']
   // The probes inherit the hook's environment. A removed/empty target or another home cannot be replayed
   // safely, so no inherited relaxed context or directory may stand in for the command's actual target.
-  if (call.clear || call.unset?.some((k) => targets.includes(k)) ||
-    targets.some((k) => Object.hasOwn(call.assigns, k) && call.assigns[k] === '') ||
-    (Object.hasOwn(call.assigns, 'HOME') && call.assigns.HOME !== env.home)) return [{ name: CUSTOM, kind: 'target' }]
+  const changed = changedEnvironment(call, env.home)
   if (call.tool === 'kubectl' || call.tool === 'helm') {
     const named = call.context || (call.tool === 'helm' ? call.assigns.HELM_KUBECONTEXT : '')
     if (named && hasVariable(named)) return [{ name: CUSTOM, kind: 'target' }]
@@ -272,12 +288,12 @@ async function candidatesAt(call: InfraCall, env: Env, state: ContextState, p: s
             ? { name: file, kind: 'kubeconfig' }
             : undefined
     // A server or cluster override, or a kubeconfig the guard cannot read, points somewhere no name describes, so only the target can relax it.
-    if (call.custom || current === null || (call.tool === 'helm' && HELM_TARGET_ENV.some((k) => call.assigns[k]))) return base ? [{ name: CUSTOM, kind: 'target' }, { ...base, weak: true }] : [{ name: CUSTOM, kind: 'target' }]
+    if (changed || call.custom || current === null || (call.tool === 'helm' && HELM_TARGET_ENV.some((k) => call.assigns[k]))) return base ? [{ name: CUSTOM, kind: 'target' }, { ...base, weak: true }] : [{ name: CUSTOM, kind: 'target' }]
     if (base) return [base]
     const r = await env.run(call.dir, ['kubectl', 'config', 'current-context'])
     return r.failed ? null : [{ name: first(r) || '(none)', kind: 'context' }]
   }
-  if (call.custom || call.assigns.TF_DATA_DIR) return [{ name: CUSTOM, kind: 'target' }]
+  if (changed || call.custom || terraformTargetOverride(call)) return [{ name: CUSTOM, kind: 'target' }]
   const [verb, target] = positionals(call)
   const targeted = call.sub === 'workspace' && verb !== undefined && ['new', 'delete', 'select'].includes(verb) ? target : undefined
   let workspace = targeted || call.assigns.TF_WORKSPACE || (p === REAL ? '' : p)

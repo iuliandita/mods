@@ -24,6 +24,41 @@ const cfg = () => parseConfig({})
 const KUBE = '/h/.kube/config'
 const denied = async (command: string, e: Env) => (await evaluate(command, cfg(), e)).enforced
 
+test('context: Terraform injected arguments and cloud overrides cannot reuse relaxed names', async () => {
+  for (const command of [
+    'TF_CLI_ARGS=-migrate-state terraform init',
+    'TF_CLI_ARGS_init=-reconfigure terraform init',
+    'export TF_CLI_ARGS_init=-force-copy && terraform init',
+    'TF_CLI_ARGS_plan=-destroy terraform plan',
+    'export TF_CLI_ARGS=-refresh=false && tofu plan',
+    'TF_CLI_ARGS_apply=-auto-approve terraform plan',
+    'TF_CLI_ARGS= terraform plan',
+    'TF_CLI_ARGS_plan=-destroy && terraform plan',
+    'TF_CLOUD_PROJECT=other && terraform apply',
+    'TF_CLOUD_ORGANIZATION=other terraform apply',
+    'export TF_CLOUD_HOSTNAME=cloud.example && terraform apply',
+    'TF_CLOUD_PROJECT=other tofu apply',
+    'unset TF_CLOUD_PROJECT && terraform apply',
+    'env -u TF_CLI_ARGS terraform apply',
+    'HOME=/srv/ops terraform apply',
+    'HOME=/srv/ops kubectl config use-context dev && kubectl apply -f x',
+    'sudo kubectl config use-context dev && kubectl apply -f x',
+    'env -u KUBECONFIG kubectl config use-context dev && kubectl apply -f x',
+    'TF_DATA_DIR=/other terraform workspace select dev && terraform apply',
+    'TF_CLOUD_PROJECT=other terraform workspace select dev && terraform apply',
+  ]) {
+    const v = await denied(command, env({ dir: '/w/dev', workspace: 'dev' }))
+    expect(v.some((f) => f.rule === 'context' && f.message.includes('(custom target)')), command).toBe(true)
+  }
+  for (const command of [
+    'terraform plan',
+    'terraform init',
+    'TF_CLOUD_PROJECT=other terraform plan',
+    'declare +x TF_CLI_ARGS_plan=-destroy && terraform plan',
+    'TF_VAR_project=other terraform apply',
+  ]) expect(await denied(command, env({ dir: '/w/dev', workspace: 'dev' })), command).toEqual([])
+})
+
 test('context: secret placeholders are unknown in direct targets and followed switches', async () => {
   for (const command of [
     'kubectl --context {{secret:dev_context}} apply -f x',
