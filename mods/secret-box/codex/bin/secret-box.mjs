@@ -123,7 +123,8 @@ function helperExists(helper) {
   }
 }
 var rewrite = (helper, command) => rewriteCommand(helper, command, true);
-var KEEP_ON_FAILURE2 = new Set(["role", "type"]);
+var MESSAGE_ROLES = new Set(["system", "user", "assistant", "tool"]);
+var CONTENT_TYPES = new Set(["text", "reasoning", "media", "tool-call", "tool-result", "compaction", "effort"]);
 
 // mods/secret-box/host/cli.ts
 var deny = (io, reason) => {
