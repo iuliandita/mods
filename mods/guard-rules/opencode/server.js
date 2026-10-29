@@ -2894,7 +2894,7 @@ function parseMode(value, name, errors) {
     return "on";
   if (v === "off" || v === "dry" || v === "on")
     return v;
-  errors.push(`${name} must be off, dry or on`);
+  errors.push(`${name} must be ${name === "modeUnparsed" ? "off, dry, on or ask" : "off, dry or on"}`);
   return "on";
 }
 function parseConfig(options) {
@@ -2921,7 +2921,7 @@ function parseConfig(options) {
     protectedBranch: parseMode(options.modeProtectedBranch, "modeProtectedBranch", errors),
     identity: parseMode(options.modeIdentity, "modeIdentity", errors),
     context: parseMode(options.modeContext, "modeContext", errors),
-    unparsed: parseMode(options.modeUnparsed, "modeUnparsed", errors),
+    unparsed: String(options.modeUnparsed ?? "").trim().toLowerCase() === "ask" ? "ask" : parseMode(options.modeUnparsed, "modeUnparsed", errors),
     protectedBranches: branches,
     unprotectedRepos: parseList(options.unprotectedRepos, ""),
     identityRules,
@@ -3169,6 +3169,7 @@ function run(dir, argv, vars, timeoutMs = TIMEOUT_MS) {
 var configPath = () => optionsPath("guard-rules");
 var guardDirs = ownDirs;
 var storePath = () => join2(dataDir(), "guard-rules", "contexts.json");
+var ASK_UNSUPPORTED = "guard-rules: warning: modeUnparsed=ask is supported only on Claude Code; this host treats it as on (deny).";
 function loadConfig(path = configPath()) {
   const loaded = loadOptions("guard-rules", path);
   return loaded.error ? { ...parseConfig({}), error: loaded.error } : parseConfig(loaded.options);
@@ -3274,6 +3275,7 @@ async function checkCommand(command, cfg, env) {
 // mods/guard-rules/host/opencode.ts
 var SHELL_TOOLS = new Set(["shell", "bash"]);
 async function setup(ctx, options = { config: undefined }) {
+  let warnedAsk = false;
   await ctx.tool.hook("execute.before", async (event) => {
     if (!SHELL_TOOLS.has(event.tool.toLowerCase())) {
       const result = checkTool(event.input, ctx.location.directory, process.env.HOME || userInfo2().homedir);
@@ -3285,7 +3287,12 @@ async function setup(ctx, options = { config: undefined }) {
     if (typeof input?.command !== "string")
       throw new Error("guard-rules: a shell call without a command cannot be checked, so it was blocked (fail closed).");
     const cwd = typeof input.workdir === "string" && input.workdir !== "" ? resolve(ctx.location.directory, input.workdir) : ctx.location.directory;
-    const result = await checkCommand(input.command, loadConfig(options.config), nodeEnv(cwd));
+    const cfg = loadConfig(options.config);
+    if (cfg.unparsed === "ask" && !warnedAsk) {
+      warnedAsk = true;
+      console.error(ASK_UNSUPPORTED);
+    }
+    const result = await checkCommand(input.command, cfg, nodeEnv(cwd));
     if (result.notice)
       console.error(result.notice);
     if (result.deny)

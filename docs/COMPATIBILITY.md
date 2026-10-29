@@ -10,7 +10,8 @@ Labels: **works** (the behavior described below was run on the real host), **unt
 not verify every rule, mode or surface. Claude surface declarations remain in each `mod.json`.
 
 Versions checked: Claude Code 2.1.296 (`guard-rules`, `secret-box`) and 2.1.301
-(`delegation-board`, `statusline`), Codex CLI 0.162.1, OpenCode 2.0.29.
+(`delegation-board`, `statusline`), plus 2.1.312 for headless `guard-rules` parser permissions,
+Codex CLI 0.162.1, OpenCode 2.0.29.
 
 | Mod | Claude Code | Codex | OpenCode |
 | --- | --- | --- | --- |
@@ -46,6 +47,7 @@ recorded runtime verification version.
 | Options | plugin options | `~/.config/iuliandita-mods/guard-rules.json` | the same file |
 | Classify an environment | `/guard-context` | `node .../guard-rules.mjs context` in your terminal | the same bundle |
 | Dry mode | toast | `systemMessage` (not checked how Codex shows it) | written to the host log |
+| `modeUnparsed=ask` | classic `PreToolUse` permission request for enforced parser findings only | falls back to `on`, warns once per account's data directory | falls back to `on`, warns once per plugin session |
 | If the guard itself fails | denies | denies; the hook command turns any failure into exit 2 | denies |
 | Not checked | | text typed into a running terminal session (`write_stdin`); file tools other than `apply_patch`, `Edit`, `Write` | |
 | Own files fenced off | n/a | `apply_patch`, `Edit`, `Write`, shell text | every non-shell tool, shell text |
@@ -53,6 +55,14 @@ recorded runtime verification version.
 What was run on the real hosts: a commit on `main` is blocked and the model sees the reason, and
 the same commit goes through once the repository is listed in `unprotectedRepos`. The other rules
 share the same code and its unit tests; they were not each run on Codex or OpenCode.
+
+On Claude Code 2.1.312, an isolated `claude -p` driver checked `on`, `dry`, `off` and `ask` without
+a model request: `on` denied, `dry` and `off` ran the harmless command, and `ask` returned a classic
+permission request and denied unanswered. The unanswered request denied in default, `acceptEdits`,
+`plan`, `dontAsk` and `bypassPermissions` modes, including with Bash allowed. Engine tests cover
+parsed hard denials, failed checks, other classic denials and rewritten commands. Interactive
+approval, timeout behavior, Desktop and VS Code remain unverified. Codex/OpenCode fallback and
+warning frequency are covered by adapter tests, not new real-host checks.
 
 Why the differences:
 

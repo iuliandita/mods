@@ -242,6 +242,8 @@ export const ROWS: Row[] = [
   ['git diff', 'A'],
   ['xargs git push', 'A', { options: { modeUnparsed: 'off' } }],
   ['xargs git push', 'A', { options: { modeUnparsed: 'dry' } }],
+  ['xargs git push', 'U', { options: { modeUnparsed: 'ask' } }],
+  ['xargs git push; git push origin main', 'D:protected-branch', { options: { modeUnparsed: 'ask' } }],
   ['git push origin main', 'D:protected-branch', { options: { modeUnparsed: 'off' } }],
   ['kubectl --context prod-eu delete ns x', 'D:context', { options: { modeUnparsed: 'off' } }],
   ['ls terraform', 'A'],

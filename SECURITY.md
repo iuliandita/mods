@@ -21,6 +21,12 @@ update, review and trust changed hooks again with `/hooks`; guards fail open unt
 See [host compatibility](docs/COMPATIBILITY.md) for the verified
 cases and limits.
 
+`guard-rules` defaults to denying enforced parser findings. Its opt-in `modeUnparsed=ask` uses
+Claude Code's permission flow for those findings only, trusting the person approving syntax the
+guard cannot inspect. Enforced parsed violations and failed checks still deny; unanswered requests
+denied in the checked headless permission modes, including bypass mode. Other hosts fall back to
+`on` and warn. Interactive approval and prompt timeouts remain unverified.
+
 `secret-box` uses Linux Secret Service or macOS Keychain without network or model calls. In
 all modes, the helper has no plaintext `values` command. Hooks send text to its batched
 `scrub` command over stdin and receive filtered text and name metadata. Scripts, dynamic commands

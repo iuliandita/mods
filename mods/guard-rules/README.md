@@ -44,17 +44,18 @@ Removed or empty target variables, `env -i`, a changed `HOME`, and `sudo`/`doas`
 custom targets. An assigned `TF_CLI_ARGS` or `TF_CLI_ARGS_*` also makes normally read-exempt calls count
 as changes, since injected flags can move state. `GIT_COMMON_DIR` overrides make guarded git writes unparsed.
 
-Hooks only, no UI. Portability to other Claude surfaces is expected, but only terminal behavior
-is verified; Desktop, VS Code and headless behavior remain untested.
+Hooks only; opt-in parser exceptions use Claude Code's permission prompt. Terminal behavior is
+verified, along with the headless permission checks described below; Desktop and VS Code remain untested.
 Egress: none (no network, no model calls).
 
 ## Compatibility status
 
 - Claude Code: verified on 2.1.296 in the terminal.
-- Desktop, VS Code and headless: untested.
+- Claude Code 2.1.312: headless parser-mode decisions checked without model requests, including bypass mode.
+- Desktop and VS Code: untested. Interactive approval of parser exceptions is unverified.
 - Codex CLI 0.162.1 and OpenCode 2.0.29: a protected-branch block and the `unprotectedRepos`
   exemption were run on each; see [Codex and OpenCode](#codex-and-opencode).
-- Mode: `on` by default; available modes are `off`, `dry` and `on`.
+- Mode: `on` by default; rule modes are `off`, `dry` and `on`. `modeUnparsed` also accepts `ask` on Claude Code.
 - Egress: none. Requirements: `git`.
 
 The Claude Code lines match `mod.json`. See [installation and recovery](../../INSTALL.md) and
@@ -81,7 +82,7 @@ settings, never in a repository.
 | `modeProtectedBranch` | `on` | same |
 | `modeIdentity` | `on` | same; does nothing until `identityRules` is set |
 | `modeContext` | `on` | same; covers `kubectl`, `helm`, `terraform` and `tofu` |
-| `modeUnparsed` | `on` | `on` keeps inherited modes, `dry` reports instead of denying unparsed commands, `off` disables only parser findings; no `ask` support |
+| `modeUnparsed` | `on` | `on` keeps inherited modes, `dry` reports instead of denying unparsed commands, `off` disables only parser findings; `ask` requests permission for enforced parser findings on Claude Code. Codex and OpenCode treat `ask` as `on` |
 
 Invalid options deny git and GitHub writes until fixed, so a typo cannot silently turn a rule off.
 
@@ -135,6 +136,7 @@ why is in [docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md).
   paths, so a path built at run time gets past it; nothing stops a model that can run arbitrary
   code from changing those files, as with the Claude plugin's settings. Keep the guard for accidents.
 - OpenCode needs the v2 plugin API; dry-mode findings go to the host log.
+- `modeUnparsed=ask` falls back to `on` (deny), with a warning once per account on Codex or per plugin session on OpenCode. Removing the Codex data directory resets the warning.
 
 ## Quiet a rule
 
@@ -150,7 +152,7 @@ Identity does nothing until `identityRules` is set. Change options in your user 
 | `modeIdentity` | `on`, `dry`, `off` | Controls identity checks once configured |
 | `identityRules` | JSON array, or empty | Sets path/email pairs; empty disables identity checks |
 | `modeContext` | `on`, `dry`, `off` | Controls mutations on protected or unknown infra environments |
-| `modeUnparsed` | `on`, `dry`, `off` | Caps unparsed findings without changing parsed rule checks |
+| `modeUnparsed` | `on`, `dry`, `off`, `ask` | Caps unparsed findings; `ask` uses Claude Code permission approval and falls back to `on` on other hosts |
 | `protectedContexts`, `relaxedContexts` | Comma-separated names or globs | Changes environment matching; protected matches win |
 | `/guard-context <name> protected\|relaxed` | One classification | Records a machine-local classification that overrides patterns |
 | `/guard-context forget <name>` | One name | Removes its stored classification |
@@ -159,8 +161,15 @@ With `modeUnparsed=on`, unparsed commands inherit the strictest active git-side 
 for infra. `dry` reports findings that would deny; `off` suppresses parser findings. Both can let
 commands run that the guard cannot inspect. Parsed rule checks still apply. A git write after an
 unresolved directory change, including `git -C "$X"`, uses the active git-side modes even with `modeUnparsed=off`.
-There is no approval prompt;
-`ask` is rejected as an invalid option on every host.
+`modeUnparsed=ask` keeps inherited modes and turns only enforced parser findings into a classic
+`PreToolUse` permission request on Claude Code. Attribution, protected-branch, identity, context,
+lookup and configuration findings still deny when enforced. Other permission gates can still deny;
+an allow from another gate does not remove this request. A failed permission check denies.
+
+Unanswered requests deny. A real headless `claude -p` probe on 2.1.312 denied in default, `acceptEdits`,
+`plan`, `dontAsk` and `bypassPermissions` modes, even with Bash allowed. The probe used an isolated
+config and dropped the prompt before a model request. Interactive approval and prompt timeout behavior
+were not exercised. This opt-in trusts the person approving shell syntax the guard cannot inspect.
 
 The model cannot approve its own exception. Type the command yourself with the `!` prefix in Claude
 Code, or run it in your own terminal. On Codex and OpenCode, use the context CLI described above.

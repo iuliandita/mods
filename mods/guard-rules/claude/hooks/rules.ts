@@ -6,6 +6,7 @@ import { taintConfig, type ConfigTaint } from './state'
 import { SHELL_NAMES, toolWords } from './words'
 
 export type Mode = 'off' | 'dry' | 'on'
+export type UnparsedMode = Mode | 'ask'
 export type RuleId = 'attribution' | 'protected-branch' | 'identity' | 'context' | 'unparsed' | 'config' | 'lookup'
 export type Violation = { rule: RuleId; mode: Mode; message: string }
 export type IdentityRule = { prefix: string; email: string }
@@ -15,7 +16,7 @@ export type Config = {
   protectedBranch: Mode
   identity: Mode
   context: Mode
-  unparsed: Mode
+  unparsed: UnparsedMode
   protectedBranches: string[]
   unprotectedRepos: string[]
   identityRules: IdentityRule[]
@@ -83,7 +84,7 @@ function parseMode(value: unknown, name: string, errors: string[]): Mode {
   const v = value === undefined || value === null ? '' : String(value).trim().toLowerCase()
   if (v === '') return 'on'
   if (v === 'off' || v === 'dry' || v === 'on') return v
-  errors.push(`${name} must be off, dry or on`)
+  errors.push(`${name} must be ${name === 'modeUnparsed' ? 'off, dry, on or ask' : 'off, dry or on'}`)
   return 'on'
 }
 
@@ -121,7 +122,7 @@ export function parseConfig(options: Readonly<Record<string, unknown>>): Config 
     protectedBranch: parseMode(options.modeProtectedBranch, 'modeProtectedBranch', errors),
     identity: parseMode(options.modeIdentity, 'modeIdentity', errors),
     context: parseMode(options.modeContext, 'modeContext', errors),
-    unparsed: parseMode(options.modeUnparsed, 'modeUnparsed', errors),
+    unparsed: String(options.modeUnparsed ?? '').trim().toLowerCase() === 'ask' ? 'ask' : parseMode(options.modeUnparsed, 'modeUnparsed', errors),
     protectedBranches: branches,
     unprotectedRepos: parseList(options.unprotectedRepos, ''),
     identityRules,

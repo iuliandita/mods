@@ -694,17 +694,19 @@ test('unparsed: identity counts toward the mode only when identity rules are set
 })
 
 test('unparsed mode caps only parser findings and preserves the inherited defaults', async () => {
-  for (const mode of ['on', 'dry', 'off']) {
+  for (const mode of ['on', 'dry', 'off', 'ask']) {
     for (const command of ['xargs git push', 'xargs kubectl apply']) {
       const v = await evaluate(command, cfg({ modeUnparsed: mode }), fakeEnv())
-      expect(v.enforced.map((x) => x.rule)).toEqual(mode === 'on' ? ['unparsed'] : [])
+      expect(v.enforced.map((x) => x.rule)).toEqual(mode === 'on' || mode === 'ask' ? ['unparsed'] : [])
       expect(v.dry.map((x) => x.rule)).toEqual(mode === 'dry' ? ['unparsed'] : [])
     }
     const parsed = await evaluate('git push origin main', cfg({ modeUnparsed: mode }), fakeEnv())
     expect(parsed.enforced.map((x) => x.rule)).toContain('protected-branch')
   }
   expect(cfg().unparsed).toBe('on')
-  expect(cfg({ modeUnparsed: 'ask' }).error).toContain('modeUnparsed must be off, dry or on')
+  expect(cfg({ modeUnparsed: 'ask' }).error).toBeUndefined()
+  expect(cfg({ modeUnparsed: 'ask' }).unparsed).toBe('ask')
+  expect(cfg({ modeUnparsed: 'invalid' }).error).toContain('modeUnparsed must be off, dry, on or ask')
   const off = await evaluate('xargs kubectl apply', cfg({ modeUnparsed: 'dry', modeContext: 'off' }), fakeEnv())
   expect([...off.enforced, ...off.dry]).toEqual([])
 })
