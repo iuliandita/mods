@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `guard-rules` documents rule controls and common false positives in its README, with parser details on a linked page.
+
 ### Fixed
 
 - `guard-rules` treats file arguments and known data commands as data while keeping command runners guarded.
