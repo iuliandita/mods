@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `guard-rules` follows both plain and scrubbed `secret-box exec` wrappers when checking commands.
+
 ### Removed
 
 - Breaking: the `prompt-gate` and `skill-pick` mods, with their shared helpers, the Jev client and

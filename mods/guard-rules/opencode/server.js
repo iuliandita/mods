@@ -1818,8 +1818,9 @@ function inlineScript(w, s) {
   let from = argv.length;
   if (name === "secret-box") {
     if (argv[1] === "exec") {
-      if (argv[2] === "--" && argv[3] !== undefined)
-        script = argv.slice(from = 3).join(" ");
+      const separator = argv[2] === "--scrub" ? 3 : 2;
+      if (argv[separator] === "--" && argv[separator + 1] !== undefined)
+        script = argv.slice(from = separator + 1).join(" ");
       else
         mark(w, "a secret-box exec without a script");
     }

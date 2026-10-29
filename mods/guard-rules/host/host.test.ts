@@ -125,6 +125,28 @@ test('dry mode reports through systemMessage and does not deny', async () => {
   writeConfig('{}')
 })
 
+test('secret-box wrappers preserve allowed and denied commands on both hosts', async () => {
+  writeConfig('{}')
+  let hook: (e: { tool: string; input: unknown }) => Promise<void> | void = () => {}
+  await setup({ location: { directory: repo }, tool: { hook: async (_name, cb) => void (hook = cb) } }, { config: configFile })
+  for (const wrapper of ['secret-box exec --', 'secret-box exec --scrub --']) {
+    for (const [script, denied] of [['git status', false], ['git commit -m x', true]] as const) {
+      // Before rewriting the guard sees the script; after rewriting it sees the wrapper.
+      for (const command of [script, `${wrapper} '${script}'`]) {
+        const o = io(call(command))
+        expect(await main(['hook'], o)).toBe(0)
+        if (denied) {
+          expect(JSON.parse(o.stdout).hookSpecificOutput.permissionDecisionReason).toContain('protected branch')
+          await expect(Promise.resolve(hook({ tool: 'shell', input: { command } }))).rejects.toThrow('protected branch')
+        } else {
+          expect(o.stdout).toBe('')
+          await hook({ tool: 'shell', input: { command } })
+        }
+      }
+    }
+  }
+})
+
 test('context: only a terminal changes a class, list reads, and the model cannot run the change through the guard', async () => {
   const refused = io('', false)
   expect(await main(['context', 'staging', 'relaxed'], refused)).toBe(1)

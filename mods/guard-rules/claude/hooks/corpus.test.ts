@@ -70,6 +70,14 @@ function fakeEnv(w: World = {}): Env & { probes: (Record<string, string> | undef
 const heredoc = (msg: string) => `git commit -m "$(cat <<'EOF'\n${msg}\nEOF\n)"`
 
 export const ROWS: Row[] = [
+  [`secret-box exec -- 'git status'`, 'A'],
+  [`secret-box exec --scrub -- 'git status'`, 'A'],
+  [`secret-box exec -- 'git push origin main'`, 'D:protected-branch'],
+  [`secret-box exec --scrub -- 'git push origin main'`, 'D:protected-branch'],
+  [`secret-box exec -- 'kubectl --context prod-eu delete ns x'`, 'D:context'],
+  [`secret-box exec --scrub -- 'kubectl --context prod-eu delete ns x'`, 'D:context'],
+  [`secret-box exec --scrub -- "$SCRIPT"; git status`, 'U'],
+  [`secret-box exec --scrub; git status`, 'U'],
   // ALLOW
   ['git status', 'A'],
   ['git add -A && git commit -m "feat: x"', 'A'],
