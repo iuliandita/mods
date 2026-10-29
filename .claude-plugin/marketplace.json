@@ -16,6 +16,11 @@
       "description": "Blocks AI attribution in commits and PRs, direct commits to protected branches, commits under the wrong git identity, and mutating kubectl, helm and terraform calls on protected or unclassified environments."
     },
     {
+      "name": "notify",
+      "source": "./mods/notify/claude",
+      "description": "Desktop notification when the agent finishes or waits on a permission prompt or other input, with the project folder as title and an optional sound. Uses notify-send on Linux and osascript on macOS; makes no network or model calls."
+    },
+    {
       "name": "secret-box",
       "source": "./mods/secret-box/claude",
       "description": "Resolves {{secret:NAME}} placeholders from Linux Secret Service or macOS Keychain at execution time, with optional directory scopes and batched helper-side output scrubbing where hosts allow it."

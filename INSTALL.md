@@ -39,6 +39,12 @@ Claude Code and Codex `Bash`, and OpenCode `shell`/`bash`; Codex `write_stdin` i
 unrestricted; malformed settings deny placeholder commands. See the mod's
 [options](mods/secret-box/README.md#options) and [limits](mods/secret-box/README.md#what-it-does-not-protect).
 
+For `notify`, install `notify-send` (libnotify) on Linux; macOS uses the built-in `osascript`.
+A missing notifier is a one-line `notify: warning:` and never a failure; `scripts/mods doctor`
+lists it under the mod's `requires`. On Codex and OpenCode set options in
+`~/.config/iuliandita-mods/notify.json`; see the mod's [README](mods/notify/README.md) for the events
+each host supports. It has no verified runtime check on any host yet.
+
 ## Clone CLI and scopes
 
 ```bash
@@ -113,7 +119,7 @@ Codex:
 
 ```bash
 codex plugin marketplace add iuliandita/mods
-codex plugin add guard-rules@iuliandita-mods   # or secret-box @iuliandita-mods
+codex plugin add guard-rules@iuliandita-mods   # or secret-box or notify, same suffix
 ```
 
 Codex skips a plugin hook until you trust it once with `/hooks` in the Codex terminal UI.

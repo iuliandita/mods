@@ -36,13 +36,16 @@ installed with `scripts/mods list`, and check the environment with `scripts/mods
 - `delegation-board`: a live pane of the session's subagents and teammates: type, model, effort, state, elapsed time and tokens; in Claude Desktop, a compact band above the prompt.
 - `statusline`: a two-row status line above the prompt in the terminal and Claude Desktop: model and effort, git state, context against your auto-compact window, 5h and 7d limits with pace, cache, cost and time. In a git repo with a GitHub or GitLab remote it runs `gh` or `glab` for PR and issue counts; `forge=off` turns that off.
 
+- `notify`: a desktop notification when the agent finishes or waits on a permission prompt or other input, titled with the project folder, with an optional sound. It starts `notify-send` on Linux or `osascript` on macOS and makes no network or model calls.
+
 `mods.json` has the full catalog: egress, modes, requirements, and the install command per mod.
-All four mods have recorded Claude terminal checks; the compatibility page lists the tested
-behavior and versions. Other Claude surfaces remain unverified.
+`guard-rules`, `secret-box`, `delegation-board` and `statusline` have recorded Claude terminal
+checks; `notify` has none yet. The compatibility page lists the tested behavior and versions.
+Other Claude surfaces remain unverified.
 
 ## Compatibility
 
-`guard-rules` and `secret-box` run on Claude Code, Codex and OpenCode. `statusline` and `delegation-board` run on Claude Code and, as terminal UI plugins, on OpenCode.
+`guard-rules`, `secret-box` and `notify` run on Claude Code, Codex and OpenCode. `statusline` and `delegation-board` run on Claude Code and, as terminal UI plugins, on OpenCode.
 `secret-box` selects its backend by platform; macOS Keychain access is implemented with mocked
 tests and remains unverified on a real host. Windows is unsupported for `secret-box`.
 [What works on which host, and why](docs/COMPATIBILITY.md).

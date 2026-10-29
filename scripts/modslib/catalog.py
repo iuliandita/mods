@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-KINDS = ("guard", "band", "pane", "rewrite", "statusline")
+KINDS = ("guard", "band", "pane", "rewrite", "statusline", "notify")
 HOSTS = ("codex", "opencode")
 MODES = ("off", "dry", "flag", "on")
 SURFACES = ("terminal", "desktop", "vscode", "headless")

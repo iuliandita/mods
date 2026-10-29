@@ -64,6 +64,44 @@
       }
     },
     {
+      "name": "notify",
+      "summary": "Desktop notification when the agent finishes or waits on a permission prompt or other input, with the project folder as title and an optional sound. Uses notify-send on Linux and osascript on macOS; makes no network or model calls.",
+      "kind": "notify",
+      "egress": [
+        "none"
+      ],
+      "modes": [
+        "off",
+        "on"
+      ],
+      "default_mode": "on",
+      "requires": [],
+      "requires_by_platform": {
+        "linux": [
+          "notify-send"
+        ],
+        "darwin": [
+          "osascript"
+        ]
+      },
+      "surfaces": {
+        "terminal": "untested",
+        "desktop": "untested",
+        "vscode": "untested",
+        "headless": "untested"
+      },
+      "verified_on": null,
+      "install": "claude plugin marketplace add iuliandita/mods && claude plugin install notify@iuliandita-mods",
+      "hosts": {
+        "codex": {
+          "install": "codex plugin marketplace add iuliandita/mods && codex plugin add notify@iuliandita-mods"
+        },
+        "opencode": {
+          "install": "clone this repository and add {\"package\": \"<clone>/mods/notify/opencode\"} to \"plugins\" in opencode.json"
+        }
+      }
+    },
+    {
       "name": "secret-box",
       "summary": "Resolves {{secret:NAME}} placeholders from Linux Secret Service or macOS Keychain at execution time, with optional directory scopes and batched helper-side output scrubbing where hosts allow it.",
       "kind": "guard",

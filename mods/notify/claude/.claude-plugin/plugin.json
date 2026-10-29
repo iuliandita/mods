@@ -1,0 +1,28 @@
+{
+  "name": "notify",
+  "version": "0.1.0",
+  "description": "Desktop notification when the agent finishes or waits on a permission prompt or other input, with the project folder as title and an optional sound. Uses notify-send on Linux and osascript on macOS; makes no network or model calls.",
+  "author": { "name": "iuliandita" },
+  "userConfig": {
+    "mode": {
+      "type": "string",
+      "title": "Mode",
+      "description": "off (no hook, no process) or on.",
+      "options": ["off", "on"],
+      "default": "on"
+    },
+    "events": {
+      "type": "string",
+      "title": "Events",
+      "description": "Comma-separated: finish (the agent stopped) and input (it waits on a permission prompt or other input). Empty or unrecognized means both.",
+      "default": "finish,input"
+    },
+    "sound": {
+      "type": "string",
+      "title": "Sound",
+      "description": "off (default) or on: ask the notifier to play its sound. On Linux this depends on the notification server.",
+      "options": ["off", "on"],
+      "default": "off"
+    }
+  }
+}
