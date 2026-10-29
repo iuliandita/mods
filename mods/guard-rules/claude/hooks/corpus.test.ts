@@ -70,6 +70,56 @@ function fakeEnv(w: World = {}): Env & { probes: (Record<string, string> | undef
 const heredoc = (msg: string) => `git commit -m "$(cat <<'EOF'\n${msg}\nEOF\n)"`
 
 export const ROWS: Row[] = [
+  // #17/#18: switchers invalidate a prior context lookup, including aliases and option-bearing forms.
+  ...['kubernetes', 'kube', 'k8s', 'k'].flatMap((kube) =>
+    ['cluster', 'clusters', 'c'].flatMap((cluster) => [
+      ...['kubeconfig', 'kubecfg', 'k8scfg', 'config', 'cfg'].flatMap((config) =>
+        ['save', 's'].map((save) => `doctl ${kube} ${cluster} ${config} ${save} example`)),
+      `doctl ${kube} ${cluster} create example`,
+    ]),
+  ).map((switcher): Row => [`${switcher} && kubectl apply -f a`, 'D:context']),
+  ...[
+    'gcloud container clusters create example',
+    'gcloud beta container clusters create-auto example',
+    'gcloud container clusters get-credentials example',
+    'az fleet get-credentials -g example -n example',
+    'az connectedk8s proxy -g example -n example',
+    'az aksarc get-credentials -g example -n example',
+    'oc new-project example',
+    'oc config set-context view --namespace example',
+    'oc --kubeconfig c config set-context get-contexts --namespace example',
+    'k3d kubeconfig write example',
+    'k3d kubeconfig merge example',
+    'eksctl create cluster --name example',
+    'eksctl utils write-kubeconfig --cluster example',
+    'tsh kube login example',
+    'vcluster connect example',
+    'vcluster create example',
+    'talosctl --nodes example kubeconfig',
+    'scw k8s kubeconfig install example',
+    'ibmcloud ks cluster config --cluster example',
+    'civo kubernetes config example --save --merge',
+  ].flatMap((switcher): Row[] => [
+    [`${switcher} && kubectl apply -f a`, 'D:context'],
+    [`${switcher} && helm upgrade x chart`, 'D:context'],
+    [`${switcher} && kubectl get pods`, 'A'],
+  ]),
+  ...[
+    'doctl kube c cfg show example',
+    'doctl kube c list',
+    'gcloud container clusters list',
+    'az fleet show -g example -n example',
+    'oc config view',
+    'oc config get-contexts',
+    'k3d kubeconfig get example',
+    'eksctl get cluster',
+    'tsh kube ls',
+    'vcluster list',
+    'talosctl health',
+    'scw k8s cluster list',
+    'ibmcloud ks cluster ls',
+    'civo kubernetes list',
+  ].map((read): Row => [`${read} && kubectl apply -f a`, 'A']),
   // #113: PATH tokens disable exemptions regardless of the command that writes them.
   ...[
     'tee /usr/bin/git push origin main',

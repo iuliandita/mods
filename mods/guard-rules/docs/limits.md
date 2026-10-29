@@ -189,8 +189,12 @@ separately, use a file-reading tool, or run the command yourself.
   binary) are context switches, and any `kubectl config` verb outside `view`, `get-contexts`,
   `current-context`, `get-clusters` and `get-users` makes the context of later calls unknown. So do commands that
   switch the context or workspace without being a guarded tool (`kubectx`, `kubens` with arguments, `aws eks
-  update-kubeconfig`, `gcloud ... get-credentials`, `az aks get-credentials`, `doctl ... kubeconfig save`, `oc login`,
-  `kind export kubeconfig`, `minikube update-context`, `k3d kubeconfig merge`) and writes to a kubeconfig or
+  update-kubeconfig`, `gcloud ... get-credentials` or `container clusters create|create-auto`,
+  `az aks|fleet|aksarc get-credentials` or `connectedk8s proxy`, `doctl ... kubeconfig save` or `cluster create`
+  (including documented aliases), `oc login|project|new-project` or config writes, `kind export kubeconfig`,
+  `minikube update-context`, `k3d kubeconfig merge|write`, `eksctl create cluster` or `utils write-kubeconfig`,
+  `tsh kube login`, `vcluster connect|create`, `talosctl kubeconfig`, `scw k8s kubeconfig install`,
+  `ibmcloud ks cluster config`, `civo kubernetes config`) and writes to a kubeconfig or
   `.terraform/environment` (a redirect, `cp`, `mv`, `tee`, `sed -i` and similar): after one, later mutating kube or
   Terraform calls in the same command are unclassified and denied, while reads (`kubectl get`, `terraform plan`) pass.
 - Not handled: `rm .terraform/environment`, kubeconfig writers outside that list (a script editing the file,

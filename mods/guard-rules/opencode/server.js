@@ -1704,13 +1704,20 @@ var KUBE_SWITCHERS = {
   "kubectl-ctx": [[]],
   kubens: [[]],
   aws: [["eks", "update-kubeconfig"]],
-  gcloud: [["get-credentials"]],
-  az: [["aks", "get-credentials"]],
-  doctl: [["kubeconfig", "save"], ["cluster", "create"]],
-  oc: [["login"], ["project"], ["config"]],
+  gcloud: [["get-credentials"], ["container", "clusters", "create|create-auto"]],
+  az: [["aks|fleet|aksarc", "get-credentials"], ["connectedk8s", "proxy"]],
+  doctl: [["kubernetes|kube|k8s|k", "cluster|clusters|c", "kubeconfig|kubecfg|k8scfg|config|cfg", "save|s"], ["kubernetes|kube|k8s|k", "cluster|clusters|c", "create"]],
+  oc: [["login"], ["project"], ["new-project"], ["config"]],
   kind: [["export", "kubeconfig"], ["create", "cluster"]],
   minikube: [["update-context"], ["start"], ["profile"]],
-  k3d: [["kubeconfig", "merge"], ["cluster", "create"]]
+  k3d: [["kubeconfig", "merge|write"], ["cluster", "create"]],
+  eksctl: [["create", "cluster"], ["utils", "write-kubeconfig"]],
+  tsh: [["kube", "login"]],
+  vcluster: [["connect|create"]],
+  talosctl: [["kubeconfig"]],
+  scw: [["k8s", "kubeconfig", "install"]],
+  ibmcloud: [["ks", "cluster", "config"]],
+  civo: [["kubernetes", "config"]]
 };
 var KUBECTX_READ = new Set(["-c", "--current", "-h", "--help"]);
 var OC_CONFIG_READ = new Set(["view", "get-contexts", "current-context", "get-clusters", "get-users"]);
@@ -1887,11 +1894,11 @@ function markSwitch(w, s) {
       w.workspace = true;
   }
   const rows = Object.hasOwn(KUBE_SWITCHERS, s.name) ? KUBE_SWITCHERS[s.name] : [];
-  if (!rows.some((row) => row.every((r) => words.includes(r))))
+  if (!rows.some((row) => row.every((r) => r.split("|").some((alias) => words.includes(alias)))))
     return;
   if ((s.name === "kubectx" || s.name === "kubens" || s.name === "kubectl-ctx") && words.every((a) => KUBECTX_READ.has(a)))
     return;
-  if (s.name === "oc" && words[0] === "config" && words.slice(1).some((a) => OC_CONFIG_READ.has(a)))
+  if (s.name === "oc" && words[0] === "config" && OC_CONFIG_READ.has(words[1] ?? ""))
     return;
   w.kube = true;
 }
