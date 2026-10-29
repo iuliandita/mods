@@ -209,3 +209,12 @@ def test_uninstall_json_for_a_retired_mod(
     assert any("codex plugin remove" in step for step in payload["manual"])
     code, _, err = run(capsys, "--root", str(tmp_path), "uninstall", "skill-pick")
     assert code == 0 and "manual: skill-pick: codex" in err
+
+
+def test_uninstall_prints_the_manual_steps_when_claude_is_missing(
+    no_claude: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_mod(tmp_path, "alpha")
+    code, _, err = run(capsys, "--root", str(tmp_path), "uninstall", "prompt-gate")
+    assert code == 0 and "note: prompt-gate: claude CLI not found" in err
+    assert "manual: prompt-gate: codex" in err

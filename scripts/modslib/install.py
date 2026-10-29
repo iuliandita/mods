@@ -32,9 +32,21 @@ def exit_code(exc: Exception) -> int:
 
 
 def _fail(
-    *errors: str, done: list[str] | None = None, key: str = "installed", code: int = 1
+    *errors: str,
+    done: list[str] | None = None,
+    key: str = "installed",
+    code: int = 1,
+    manual: list[str] | None = None,
 ) -> tuple[int, dict]:
-    return code, {"ok": False, "errors": list(errors), key: list(done or [])}
+    payload: dict = {"ok": False, "errors": list(errors), key: list(done or [])}
+    if manual:
+        payload["manual"] = manual
+    return code, payload
+
+
+def _not_installed(result: dict) -> bool:
+    message = str(result.get("message", "")).lower()
+    return result.get("failureCode") == "not_installed" or "not installed" in message
 
 
 def _claude_status() -> dict:
@@ -81,6 +93,7 @@ def install_mods(
 
 def uninstall_mods(root: Path, names: list[str], *, scope: str) -> tuple[int, dict]:
     done: list[str] = []
+    skipped: list[str] = []
     manual: list[str] = []
     try:
         mods = {m.name: m for m in load_mods(root)}
@@ -92,22 +105,33 @@ def uninstall_mods(root: Path, names: list[str], *, scope: str) -> tuple[int, di
         if unknown:
             return _fail(f"unknown mod(s): {', '.join(unknown)}; see scripts/mods list", key="uninstalled")
         for name in names:
-            if name in mods:
-                plugin_id = f"{name}@{_marketplace(mods[name])}"
-            else:
-                plugin_id = RETIRED[name].plugin_id
+            if name not in mods:
                 manual += [f"{name}: {step}" for step in RETIRED[name].manual_steps()]
-            result = claude.uninstall(plugin_id, scope)
-            if result.get("outcome") != "ok":
-                return _fail(
-                    f"{name}: {result.get('message', 'uninstall failed')}",
-                    done=done,
-                    key="uninstalled",
-                )
-            done.append(plugin_id)
-    except (CatalogError, claude.ClaudeError, OSError) as exc:
-        return _fail(str(exc), done=done, key="uninstalled", code=exit_code(exc))
+    except (CatalogError, OSError) as exc:
+        return _fail(str(exc), key="uninstalled", code=exit_code(exc))
+    fail = {"done": done, "key": "uninstalled", "manual": manual}
+    try:
+        for name in names:
+            retired = name not in mods
+            plugin_id = RETIRED[name].plugin_id if retired else f"{name}@{_marketplace(mods[name])}"
+            try:
+                result = claude.uninstall(plugin_id, scope)
+            except claude.ClaudeMissing:
+                if not retired:
+                    raise
+                skipped.append(f"{name}: claude CLI not found, skipped the Claude uninstall")
+                continue
+            if result.get("outcome") == "ok":
+                done.append(plugin_id)
+            elif retired and _not_installed(result):
+                skipped.append(f"{name}: not installed in Claude Code, nothing to uninstall there")
+            else:
+                return _fail(f"{name}: {result.get('message', 'uninstall failed')}", **fail)
+    except (claude.ClaudeError, OSError) as exc:
+        return _fail(str(exc), code=exit_code(exc), **fail)
     payload: dict = {"ok": True, "errors": [], "uninstalled": done}
+    if skipped:
+        payload["skipped"] = skipped
     if manual:
         payload["manual"] = manual
     return 0, payload
