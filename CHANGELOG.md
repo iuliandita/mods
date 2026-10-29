@@ -2,8 +2,15 @@
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-29
+
+Patch prerelease, tagged on `develop`. Plugin versions are unchanged: `guard-rules` 0.3.2, `secret-box` 0.3.2, `notify` 0.3.3, the rest 0.3.1.
+
+Codex users: updating changes the `guard-rules` and `secret-box` hook content, so trust those hooks again in `/hooks` after the update. `scripts/mods doctor` reports hooks that are still untrusted.
+
 ### Added
 
+- Renovate replaces Dependabot version updates (`renovate.json`: weekly schedule, 7-day cooldown, grouped GitHub Actions updates, OSV alerts). Automerge is off, so every Renovate PR needs a manual merge.
 - `guard-rules` accepts opt-in `modeUnparsed=ask` on Claude Code for enforced parser findings; parsed violations still deny. Codex and OpenCode fall back to `on` with a warning.
 
 ### Fixed
@@ -212,7 +219,8 @@ First collection prerelease. Individual plugin versions remain independent of th
   timer afterwards; `delegation-board` resets on `/clear` and prints a text table when its pane
   is not placed (Claude Desktop).
 
-[Unreleased]: https://github.com/iuliandita/mods/compare/v0.3.2...develop
+[Unreleased]: https://github.com/iuliandita/mods/compare/v0.3.3...develop
+[0.3.3]: https://github.com/iuliandita/mods/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/iuliandita/mods/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/iuliandita/mods/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/iuliandita/mods/compare/v0.2.0...v0.3.0
