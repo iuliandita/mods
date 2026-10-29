@@ -12,10 +12,14 @@ class ClaudeError(Exception):
     """The claude CLI is missing or a call to it failed."""
 
 
+class ClaudeMissing(ClaudeError):
+    """The claude CLI is not on PATH (exit code 3)."""
+
+
 def binary() -> str:
     path = shutil.which("claude")
     if path is None:
-        raise ClaudeError("claude CLI not found: it is not on PATH; install Claude Code and retry")
+        raise ClaudeMissing("claude CLI not found: it is not on PATH; install Claude Code and retry")
     return path
 
 

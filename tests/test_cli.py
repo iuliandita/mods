@@ -47,15 +47,15 @@ def _usage(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
     return ["install"]
 
 
-@pytest.mark.parametrize("setup", [_bad_catalog, _oserror, _usage])
-def test_every_failure_is_exit_1_with_one_json_object(
-    setup, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize(("setup", "exit_code"), [(_bad_catalog, 1), (_oserror, 1), (_usage, 2)])
+def test_every_failure_has_its_exit_code_and_one_json_object(
+    setup, exit_code: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     argv = setup(tmp_path, monkeypatch)
     code = main(["--json", *argv])
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
-    assert code == 1 and payload["ok"] is False and payload["errors"]
+    assert code == exit_code and payload["ok"] is False and payload["errors"]
     assert captured.out.count("\n") == 1
     assert "Traceback" not in captured.err
 
@@ -117,7 +117,7 @@ def test_abbreviated_json_flag_is_a_json_error_not_accepted(
 ) -> None:
     code, out, _ = run(capsys, *argv)
     payload = json.loads(out)
-    assert code == 1 and payload["ok"] is False and "--js" in payload["errors"][0]
+    assert code == 2 and payload["ok"] is False and "--js" in payload["errors"][0]
 
 
 @pytest.mark.parametrize("command", ["list", "generate"])
@@ -173,3 +173,26 @@ def test_human_failures_go_to_stderr_with_prefix(
     assert code == 1 and out == ""
     lines = err.splitlines()
     assert lines and all(line.startswith("error: ") for line in lines), err
+
+
+@pytest.mark.parametrize("argv", [[], ["install"], ["validate"], ["generate"], ["doctor"], ["list"], ["uninstall"]])
+def test_help_lists_environment_and_exit_codes(
+    argv: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as stop:
+        main([*argv, "--help"])
+    out = capsys.readouterr().out
+    assert stop.value.code == 0
+    assert "Environment:" in out and "MODS_REQUIRE_BUN" in out
+    assert "Exit codes:" in out and "3  a required tool is missing" in out
+
+
+def test_missing_claude_exits_3_with_the_json_shape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_mod(tmp_path, "alpha")
+    generate(tmp_path)
+    monkeypatch.setattr("modslib.claude.shutil.which", lambda name: None)
+    code, out, _ = run(capsys, "--json", "--root", str(tmp_path), "install", "alpha")
+    payload = json.loads(out)
+    assert code == 3 and payload["ok"] is False and "claude CLI not found" in payload["errors"][0]

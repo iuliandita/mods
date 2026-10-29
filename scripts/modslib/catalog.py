@@ -47,6 +47,10 @@ class CatalogError(Exception):
     """One or more mods are invalid; the message lists every problem."""
 
 
+class ToolMissing(CatalogError):
+    """A tool the command needs is not installed (exit code 3)."""
+
+
 @dataclass(frozen=True)
 class Mod:
     name: str
