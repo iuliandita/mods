@@ -1,6 +1,6 @@
 {
   "name": "statusline",
-  "version": "0.2.7",
+  "version": "0.3.1",
   "description": "OpenCode terminal UI plugin: one status line above the prompt with the model, folder, branch, context tokens, cost and elapsed time.",
   "private": true,
   "type": "module",

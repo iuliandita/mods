@@ -38,6 +38,14 @@ it; do not turn terminal coverage into a claim about Desktop, VS Code or headles
 
 ## Releases
 
+Run `python3 scripts/check-plugin-versions.py` before pushing. The lint job fetches full
+history and tags and compares each plugin's shipped `claude/`, `codex/` and `opencode/`
+directories against the latest reachable collection tag. Changed plugins must increase their
+version in every host manifest, keeping them equal, even when only one host changed. New
+plugins need an initial version. Regenerate bundles before checking; source-only, README and
+catalog metadata changes do not count as shipped plugin changes. A missing tag/history is an
+error; fetch tags and history rather than skipping the check.
+
 Feature and fix PRs target `develop` and are squash-merged. The version bump follows the
 conventional-commit titles since the last tag: `feat` is minor, `fix` and `deps` are patch,
 `!` or `BREAKING CHANGE:` is major; `docs`, `chore`, `ci`, `test`, and `style` alone do not release.
