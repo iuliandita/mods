@@ -31,7 +31,13 @@ case "$1 $2 $3" in
   "plugin marketplace add") echo added ;;
   "plugin list --json") cat "$FAKE_CLAUDE_DIR/installed.json" ;;
   "plugin install "*) printf '{"command":"install","outcome":"ok","pluginId":"%s","scope":"user","message":"ok"}\n' "$3" ;;
-  "plugin uninstall "*) printf '{"command":"uninstall","outcome":"ok","pluginId":"%s","scope":"user","message":"ok"}\n' "$3" ;;
+  "plugin uninstall "*)
+    if [ -n "$FAKE_CLAUDE_MISSING" ]; then
+      printf '{"command":"uninstall","outcome":"failed","plugin":"%s","scope":"user","message":"not found in installed plugins","failureCode":"not_installed"}\n' "$3"
+      echo "Failed to uninstall plugin" >&2
+      exit 1
+    fi
+    printf '{"command":"uninstall","outcome":"ok","pluginId":"%s","scope":"user","message":"ok"}\n' "$3" ;;
   *) echo "2.1.296 (Claude Code)" ;;
 esac
 """
@@ -100,6 +106,7 @@ def fake_claude(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("FAKE_CLAUDE_DIR", str(state))
     monkeypatch.delenv("FAKE_CLAUDE_FAIL", raising=False)
+    monkeypatch.delenv("FAKE_CLAUDE_MISSING", raising=False)
     return state
 
 

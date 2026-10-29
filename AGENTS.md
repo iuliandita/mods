@@ -47,7 +47,8 @@ What an agent can rely on:
   (a list of strings: empty when `ok` is true, non-empty when false). Failures exit 1. Usage,
   `--root`, I/O, and `generate` catalog errors carry only these two keys.
 - Each command adds its own keys: `list` adds `claude` and `mods`; `install` adds `installed`
-  and `uninstall` adds `uninstalled` (the plugin ids done so far, also on failure); `doctor`
+  and `uninstall` adds `uninstalled` (the plugin ids done so far, also on failure), plus `manual`
+  and `skipped` when retired mods are involved; `doctor`
   adds `claude`, `mods`, `notes`, and `source`; `validate` adds `problems` (same strings as
   `errors`); `generate` adds `written`, and `generate --check` adds `stale`.
 - `claude` is always `{"found": bool, "version": string|null}`. `doctor` exits 1 with `ok` false

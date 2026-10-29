@@ -151,7 +151,11 @@ at). The command also prints the steps it cannot do itself: on Codex run
 `codex plugin remove <mod>@iuliandita-mods`, and on OpenCode remove the `plugins` entry in
 `opencode.json` that ends in `mods/<mod>/opencode`. Their option files in
 `~/.config/iuliandita-mods/` and stored files under `~/.local/share/iuliandita-mods/` can be
-deleted. `scripts/mods list` shows a retired mod only while it is installed.
+deleted. These steps are printed (and listed under `manual` with `--json`) whatever happens on the
+Claude side. A retired mod that Claude Code reports as not installed, or a missing `claude` CLI,
+is skipped with a note (`skipped` with `--json`) and the command still succeeds; a real Claude
+failure exits non-zero and still carries the steps. `scripts/mods list` shows a retired mod only
+while it is installed.
 
 ## Contributor checks
 

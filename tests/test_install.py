@@ -158,13 +158,58 @@ def test_uninstall_removes_a_retired_mod_and_lists_the_manual_steps(
     assert not any(line.startswith("alpha") for line in payload["manual"])
 
 
-def test_retired_uninstall_failure_is_reported(fake_claude: Path, tmp_path: Path, monkeypatch) -> None:
+def test_retired_not_installed_in_claude_is_not_a_failure(
+    fake_claude: Path, tmp_path: Path, monkeypatch
+) -> None:
+    root = _repo(tmp_path)
+    monkeypatch.setenv("FAKE_CLAUDE_MISSING", "1")
+    code, payload = uninstall_mods(root, ["prompt-gate"], scope="user")
+    assert code == 0 and payload["ok"] is True and payload["uninstalled"] == []
+    assert "not installed" in payload["skipped"][0]
+    assert any("codex plugin remove" in step for step in payload["manual"])
+
+
+def test_retired_uninstall_without_the_claude_cli_skips_it(
+    no_claude: None, tmp_path: Path
+) -> None:
+    root = _repo(tmp_path)
+    code, payload = uninstall_mods(root, ["skill-pick", "alpha"], scope="user")
+    assert code == 3 and payload["ok"] is False and "claude CLI not found" in payload["errors"][0]
+    assert any("codex plugin remove" in step for step in payload["manual"])
+    code, payload = uninstall_mods(root, ["skill-pick"], scope="user")
+    assert code == 0 and "claude CLI not found" in payload["skipped"][0]
+    assert any("opencode" in step for step in payload["manual"])
+
+
+def test_retired_uninstall_failure_keeps_the_manual_steps(
+    fake_claude: Path, tmp_path: Path, monkeypatch
+) -> None:
     root = _repo(tmp_path)
     monkeypatch.setattr(
-        "modslib.claude.uninstall", lambda pid, scope: {"outcome": "error", "message": "not installed"}
+        "modslib.claude.uninstall", lambda pid, scope: {"outcome": "failed", "message": "locked"}
     )
+    code, payload = uninstall_mods(root, ["prompt-gate", "skill-pick"], scope="user")
+    assert code == 1 and payload["uninstalled"] == [] and "locked" in payload["errors"][0]
+    assert any("skill-pick: codex" in step for step in payload["manual"])
+
+
+def test_not_installed_stays_a_failure_for_a_catalog_mod(
+    fake_claude: Path, tmp_path: Path, monkeypatch
+) -> None:
+    root = _repo(tmp_path)
+    monkeypatch.setenv("FAKE_CLAUDE_MISSING", "1")
+    code, payload = uninstall_mods(root, ["alpha"], scope="user")
+    assert code == 1 and "not found in installed plugins" in payload["errors"][0]
+
+
+def test_claude_error_on_a_retired_mod_exits_nonzero_with_manual(
+    fake_claude: Path, tmp_path: Path, monkeypatch
+) -> None:
+    root = _repo(tmp_path)
+    monkeypatch.setenv("FAKE_CLAUDE_FAIL", "1")
     code, payload = uninstall_mods(root, ["prompt-gate"], scope="user")
-    assert code == 1 and payload["uninstalled"] == [] and "not installed" in payload["errors"][0]
+    assert code == 1 and payload["ok"] is False and "boom" in payload["errors"][0]
+    assert any("codex plugin remove" in step for step in payload["manual"])
 
 
 def test_list_shows_a_retired_mod_only_when_installed(fake_claude: Path, tmp_path: Path) -> None:

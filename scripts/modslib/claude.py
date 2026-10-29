@@ -145,4 +145,12 @@ def install(plugin_id: str, scope: str) -> dict:
 
 def uninstall(plugin_id: str, scope: str) -> dict:
     args = ("plugin", "uninstall", plugin_id, "--scope", scope, "--json")
-    return _last_json(args, run(*args).stdout)
+    # claude exits 1 with a JSON verdict (failureCode) on stdout for a plugin that is not installed
+    proc = run(*args, check=False)
+    try:
+        return _last_json(args, proc.stdout)
+    except ClaudeError:
+        if proc.returncode == 0:
+            raise
+        detail = (proc.stderr or proc.stdout).strip()
+        raise ClaudeError(f"claude {' '.join(args)} failed ({proc.returncode}): {detail}") from None

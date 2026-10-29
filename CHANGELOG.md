@@ -20,6 +20,8 @@
 
 ### Fixed
 
+- `scripts/mods uninstall` always prints the Codex and OpenCode steps for retired mods, treats "not installed" in Claude Code as a skip and a missing `claude` CLI as a note, and keeps the steps in the payload when the Claude uninstall really fails.
+
 - `guard-rules` checks literal pipeline producer words in command runners, executable `man` options and command-bearing environment values; computed pipeline output remains a documented limit.
 
 - `guard-rules` allowlists editor flags, disables data exemptions after command-resolution changes, and checks dynamic `git -C` directories even with `modeUnparsed=off`.
