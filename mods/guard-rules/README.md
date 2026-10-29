@@ -156,6 +156,9 @@ Code, or run it in your own terminal. On Codex and OpenCode, use the context CLI
   Use a literal editor name or run the parts separately.
 - A command runner that only searches text, such as `find . | xargs grep git`. The guard cannot
   tell whether its arguments will be executed; use a direct `rg` or `grep` call.
+- A pipeline into an interpreter that only prints input, such as `echo git | awk '{print $0}'`, or a
+  harmless pager setting such as `PAGER='cat docs/git' man ls`. Runner input and command-bearing environment
+  values stay checked; ordinary text pipelines and `man git` pass.
 - An unknown utility with a tool name as data, such as `custom-reader docs/git`, or an editor
   opening a bare file named `git`. Known file commands and literal editor filenames with an extension pass.
 - A path-qualified data command such as `/usr/bin/ls terraform`, or an editor option operand
@@ -174,7 +177,8 @@ Code, or run it in your own terminal. On Codex and OpenCode, use the context CLI
 
 This is an accident guard, not a security boundary. It reads Bash command text, not the contents of
 scripts or other tools. See [parser limits](docs/limits.md) for the modeled grammar, state tracking,
-context resolution, unsupported syntax and known gaps. Codex's `write_stdin` is outside hook coverage.
+context resolution, unsupported syntax and known gaps, including pipeline output assembled at run time.
+Codex's `write_stdin` is outside hook coverage.
 
 ## Development
 

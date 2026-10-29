@@ -20,6 +20,8 @@
 
 ### Fixed
 
+- `guard-rules` checks literal pipeline producer words in command runners, executable `man` options and command-bearing environment values; computed pipeline output remains a documented limit.
+
 - `guard-rules` allowlists editor flags, disables data exemptions after command-resolution changes, and checks dynamic `git -C` directories even with `modeUnparsed=off`.
 
 - `secret-box` removes the plaintext `values` command; hooks use batched `scrub` calls instead. Directory and Bash-only placeholder limits are documented per host.

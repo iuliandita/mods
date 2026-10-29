@@ -139,6 +139,44 @@ export const ROWS: Row[] = [
   ['vim "$FLAGS" terraform/main.tf', 'U'],
   ['PATH=/usr/bin ls terraform', 'U'],
   ['hash tee; cat docs/git', 'U'],
+  // #98: literal producer text and executable pager settings stay visible to runners.
+  ['echo git push origin main | sed e', 'U'],
+  ['echo git push origin main | xargs env', 'U'],
+  [`echo git push origin main | awk '{system($0)}'`, 'U'],
+  [`man -P 'sh -c "git push origin main"' ls`, 'U'],
+  [`PAGER='git push origin main' man ls`, 'U'],
+  [`LESSOPEN='|git push origin main %s' less notes.txt`, 'U'],
+  ['echo git push origin main | cat | xargs env', 'U'],
+  ['echo git push origin main |& xargs env', 'U'],
+  [`echo git push origin main | env xargs env`, 'U'],
+  [`echo git push origin main | bash -c 'xargs env'`, 'U'],
+  [`echo git push origin main | xargs "$(echo env)"`, 'U'],
+  [`printf '%s' 'git push origin main' | gawk '{system($0)}'`, 'U'],
+  [`echo git push origin main | perl -ne 'system $_'`, 'U'],
+  [`echo git push origin main | python3 -c 'import os,sys; os.system(sys.stdin.read())'`, 'U'],
+  ['echo git push origin main | sh', 'U'],
+  ['echo git push origin main | bash', 'U'],
+  ['echo kubectl --context prod-eu delete ns x | xargs env', 'U'],
+  [`man --pager='git push origin main' ls`, 'U'],
+  [`man -P'git push origin main' ls`, 'U'],
+  [`man -H'git push origin main' ls`, 'U'],
+  [`man --html='git push origin main' ls`, 'U'],
+  ...['MANPAGER', 'LESSCLOSE', 'EDITOR', 'VISUAL', 'GIT_PAGER', 'GIT_SSH_COMMAND', 'BROWSER', 'MANOPT', 'LESS'].map((key): Row =>
+    [`${key}='git push origin main' man ls`, 'U']),
+  [`env PAGER='git push origin main' man ls`, 'U'],
+  [`export PAGER='git push origin main'; man ls`, 'U'],
+  [`declare -x PAGER='git push origin main'; man ls`, 'U'],
+  [`PAGER='git push origin main'; man ls`, 'U'],
+  ['echo git | cat', 'A'],
+  ['echo git | sed -n p', 'A'],
+  ['echo git | sed -e s/x/y/', 'A'],
+  ['echo git | grep git', 'A'],
+  ['man git', 'A'],
+  ['PAGER=less man ls', 'A'],
+  ['git status && echo hello | xargs env', 'A'],
+  [`echo git | awk '{print $0}'`, 'U'],
+  [`PAGER='cat docs/git' man ls`, 'U'],
+  [`printf '%s%s push origin main' gi t | xargs env`, 'U'],
   ['cd "$X" && git status', 'A', { options: { modeUnparsed: 'off' } }],
   ['cd "$X" && cd /h/personal/repo && git push', 'A', { options: { modeUnparsed: 'off' } }],
   ['echo hi | tee gh.txt', 'A'],
@@ -317,6 +355,7 @@ export const ROWS: Row[] = [
 
 // Rows expected to mismatch today; each build step removes the rows it fixes.
 export const KNOWN_GAPS = new Set<string>([
+  "U printf '%s%s push origin main' gi t | xargs env",
 ])
 
 export async function verdict([cmd, want, extra = {}]: Row): Promise<{ ok: boolean; got: string[] }> {
