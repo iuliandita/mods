@@ -11,6 +11,7 @@ from modslib.generate import (
     MARKETPLACE_NAME,
     generate,
 )
+from modslib.retired import RETIRED
 
 NOTES = (
     "Install from a terminal at user scope. The /plugin command is unavailable in the "
@@ -79,17 +80,22 @@ def install_mods(
 
 def uninstall_mods(root: Path, names: list[str], *, scope: str) -> tuple[int, dict]:
     done: list[str] = []
+    manual: list[str] = []
     try:
         mods = {m.name: m for m in load_mods(root)}
-        unknown = [n for n in names if n not in mods]
+        unknown = [n for n in names if n not in mods and n not in RETIRED]
         if unknown:
             for m in load_mods(root, local=True):
                 mods.setdefault(m.name, m)
-            unknown = [n for n in names if n not in mods]
+            unknown = [n for n in names if n not in mods and n not in RETIRED]
         if unknown:
             return _fail(f"unknown mod(s): {', '.join(unknown)}; see scripts/mods list", key="uninstalled")
         for name in names:
-            plugin_id = f"{name}@{_marketplace(mods[name])}"
+            if name in mods:
+                plugin_id = f"{name}@{_marketplace(mods[name])}"
+            else:
+                plugin_id = RETIRED[name].plugin_id
+                manual += [f"{name}: {step}" for step in RETIRED[name].manual_steps()]
             result = claude.uninstall(plugin_id, scope)
             if result.get("outcome") != "ok":
                 return _fail(
@@ -100,7 +106,10 @@ def uninstall_mods(root: Path, names: list[str], *, scope: str) -> tuple[int, di
             done.append(plugin_id)
     except (CatalogError, claude.ClaudeError, OSError) as exc:
         return _fail(str(exc), done=done, key="uninstalled", code=exit_code(exc))
-    return 0, {"ok": True, "errors": [], "uninstalled": done}
+    payload: dict = {"ok": True, "errors": [], "uninstalled": done}
+    if manual:
+        payload["manual"] = manual
+    return 0, payload
 
 
 def list_mods(root: Path, *, scope: str | None = None) -> tuple[int, dict]:
@@ -133,6 +142,20 @@ def list_mods(root: Path, *, scope: str | None = None) -> tuple[int, dict]:
         }
         for m in mods
     ]
+    if present is not None:
+        rows += [
+            {
+                "name": r.name,
+                "summary": "retired: no longer in the catalog; uninstall it with scripts/mods uninstall",
+                "kind": "retired",
+                "egress": [],
+                "default_mode": None,
+                "local": False,
+                "installed": True,
+            }
+            for r in RETIRED.values()
+            if r.plugin_id in present
+        ]
     return (1 if errors else 0), {"ok": not errors, "errors": errors, "claude": found, "mods": rows}
 
 

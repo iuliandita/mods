@@ -196,3 +196,16 @@ def test_missing_claude_exits_3_with_the_json_shape(
     code, out, _ = run(capsys, "--json", "--root", str(tmp_path), "install", "alpha")
     payload = json.loads(out)
     assert code == 3 and payload["ok"] is False and "claude CLI not found" in payload["errors"][0]
+
+
+def test_uninstall_json_for_a_retired_mod(
+    fake_claude: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_mod(tmp_path, "alpha")
+    code, out, _ = run(capsys, "--root", str(tmp_path), "uninstall", "prompt-gate", "--json")
+    payload = json.loads(out)
+    assert code == 0 and payload["ok"] is True
+    assert payload["uninstalled"] == ["prompt-gate@iuliandita-mods"]
+    assert any("codex plugin remove" in step for step in payload["manual"])
+    code, _, err = run(capsys, "--root", str(tmp_path), "uninstall", "skill-pick")
+    assert code == 0 and "manual: skill-pick: codex" in err

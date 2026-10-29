@@ -10,14 +10,12 @@ Labels: **works** (the behavior described below was run on the real host), **unt
 not verify every rule, mode or surface. Claude surface declarations remain in each `mod.json`.
 
 Versions checked: Claude Code 2.1.296 (`guard-rules`, `secret-box`) and 2.1.301
-(the other four mods), Codex CLI 0.162.1, OpenCode 2.0.29.
+(`delegation-board`, `statusline`), Codex CLI 0.162.1, OpenCode 2.0.29.
 
 | Mod | Claude Code | Codex | OpenCode |
 | --- | --- | --- | --- |
 | `guard-rules` | **works** (terminal verified) | **works** | **works** |
 | `secret-box` | **works** (terminal verified) | **works**, partly: placeholders and the command's own output, see below | **works** |
-| `prompt-gate` | **works** (terminal verified) | **works**, judged by a nested Codex session (luna, low effort) | **works**, judged by DeepSeek Flash; `on` runs as `flag` |
-| `skill-pick` | **works** (terminal verified) | **works**, judged by a nested Codex session (luna, low effort); no use records | **works**; no use records |
 | `delegation-board` | **works** (terminal verified) | **not possible**: hooks cannot draw anything | **works**: a panel of child sessions, opened with `/board` |
 | `statusline` | **works** (terminal verified) | **not possible**: the status line only takes built-in items | **works**, reduced: one line, no rate-limit bars |
 
@@ -25,22 +23,14 @@ Versions checked: Claude Code 2.1.296 (`guard-rules`, `secret-box`) and 2.1.301
 
 On 2026-10-16, authenticated terminal sessions on Claude Code 2.1.301 checked:
 
-- `prompt-gate` 0.1.0: `on` mode with `classifier=haiku` dropped a vague prompt with a question,
-  accepted its identical resend without another classifier call, and passed a concrete prompt.
-  `/prompt-gate` reported the configured mode and stored summary.
-- `skill-pick` 0.1.0: `on` mode with `picker=haiku` picked a synthetic arithmetic skill from
-  the engine's listing; the main model loaded it with `Skill` and answered the arithmetic prompt.
-  The first turn recorded the documented `no-listing` result; the next turn picked the skill.
-  `/skill-pick` and `/skill-pick last` reported the results.
 - `delegation-board` 0.1.0: the pane opened on a real subagent spawn, showed running and completed
   parent/child rows and token totals, and matched `/board status`. `/board` closed and reopened
   it; `/board clear` removed finished rows.
 - `statusline` 0.2.7: the band drew alongside the board, with live model, context, rate-limit,
   cache, cost and elapsed-time figures after real turns.
 
-The adviser calls used real Haiku 5.5 responses. These were terminal smoke checks, not checks of
-every mode or segment. They did not verify Jev runtime paths, provider-outage behavior, board
-failure/wait states, optional pricing or statusline resume. Desktop, VS Code and headless remain
+These were terminal smoke checks, not checks of every mode or segment. They did not verify
+board failure/wait states, optional pricing or statusline resume. Desktop, VS Code and headless remain
 unverified. Automated hook tests cover more branches with mocked engine interfaces; passing them
 alone does not change a surface's status. CI's fixed CLI version is independent of each mod's
 recorded runtime verification version.
@@ -124,59 +114,6 @@ Why the differences:
 
 The helper that reads the keyring (`bin/secret-box`) is a plain script. The Linux keyring backend is
 the only one so far.
-
-## prompt-gate and skill-pick
-
-| | Claude Code | Codex | OpenCode |
-| --- | --- | --- | --- |
-| Hook | `prompt.submit` | `UserPromptSubmit` command hook | `session.prompt` hook |
-| Small model | the engine's model call | a nested `codex exec` session on `gpt-6-luna` at low effort (read-only, hooks off, throwaway directory), about 18k tokens of your plan per measured call; a failure means "error" and the prompt goes through. The mod's `model` option counts only when it names a `gpt-*` model | the host's `generate.text` with a DeepSeek Flash model picked from the host's model list, at low/minimal effort when available; up to three candidates are tried per call. With no eligible candidates it uses the host's default model. An explicit `model` must be `provider/model` |
-| Stop a vague prompt (`on`) | drops it with the question | `decision: block` with the question; sending it again unchanged runs it | **runs as `flag`**: a throw stops the prompt but shows only a generic error, and the terminal UI sends it again |
-| Add a note (`flag`, skill-pick `on`) | adds context | `additionalContext` | appends the note to the prompt text |
-| Dry mode | measures from a timer after the prompt went on | the hook returns at once and starts a detached process that measures | measures from a timer in the host process |
-| Skill catalog (skill-pick) | the engine's skill listing | read from `SKILL.md` files in the folders Codex uses | `skill.list` |
-| Use records and agreement (skill-pick) | from the `Skill` tool call | **not possible**: Codex has no skill tool call to watch | **not ported** |
-| Options | plugin options | `~/.config/iuliandita-mods/<mod>.json` | the same file |
-| Stats | `/prompt-gate`, `/skill-pick` | `node .../<mod>.mjs summary\|last\|clear` | the same bundle |
-| Privacy notice for Jev | toast | `systemMessage` on the first prompt | host log |
-
-What was run on the real hosts, with a stand-in model call for most checks and one real nested luna call on Codex:
-on Codex 0.162.1 a vague prompt was blocked with its question and the same prompt went through
-when sent again, `flag` put the note in the model's context, `dry` measured from the detached
-process and logged a record, and skill-pick put a skill name from the real skill folders in the
-model's context. On OpenCode 2.0.29 the note reached the model for both mods and `skill.list`
-supplied the catalog. The real OpenCode classification ran through the fallback list of DeepSeek Flash candidates
-(18 s on a fresh process, so the call has a 20 s deadline); a failure is an error and the prompt
-goes through.
-
-Why the differences:
-
-- **A Codex hook has no model.** The hook starts a nested `codex exec` session on luna, which uses
-  your Codex plan (about 18k tokens per prompt) and sends the prompt to OpenAI only. With
-  `TYPESAFE_API_KEY` set it also goes to Jev, as in the Claude plugin. `jevPaths` limits every model
-  call on Codex and OpenCode, not only Jev: outside those folders no prompt is judged. The
-  `model` default `haiku` selects the host-specific default above. `classifier` / `picker`
-  still control Jev selection; setting either to `haiku` disables Jev, not the host model call.
-- **Model calls have host-specific costs.** OpenCode uses the selected provider's billing and
-  cannot cap output tokens or cancel a timed-out request. Its 20-second deadline only stops
-  waiting; the request may continue. Codex and OpenCode do not return usage through these
-  adapters, so zero model-token figures in the mod's log do not mean a free call. Dry mode
-  still makes model calls; `off` stops them.
-- **Dry mode on Codex needs a second process.** A hook must answer before the model sees the
-  prompt, and the hook process ends with its answer, so a detached `measure` process does the work.
-  It stops itself after 60 seconds.
-- **Bounced prompts are remembered in a file on Codex** (the hook is a new process each time), in
-  the mod's store under `~/.local/share/iuliandita-mods`, per working directory.
-- **Where a prompt goes is announced once.** The first dry-mode prompt on Codex carries a
-  notice that each prompt is judged by a nested Codex session and costs plan tokens; with a Jev key,
-  one for Jev. Dry mode spawns a nested judgement per prompt until the mode is set to `off`.
-- **The vocabulary file is confined.** `AGENTS.md` or `CLAUDE.md` is read only when it resolves to a
-  regular file under the working directory, up to 64 KiB; skill files are read for their front
-  matter only, at most 300 folders per directory and 100 repository skills, and the user's and
-  system skills come before the repository's.
-- **The OpenCode note is part of your message.** The flag line is appended to the prompt text, so
-  it shows in the history.
-- **OpenCode cannot bounce a prompt.** The hook's only way to stop one is to throw.
 
 ## delegation-board and statusline
 

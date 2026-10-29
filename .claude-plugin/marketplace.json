@@ -16,19 +16,9 @@
       "description": "Blocks AI attribution in commits and PRs, direct commits to protected branches, commits under the wrong git identity, and mutating kubectl, helm and terraform calls on protected or unclassified environments."
     },
     {
-      "name": "prompt-gate",
-      "source": "./mods/prompt-gate/claude",
-      "description": "Before the main model spends a turn on a vague prompt, a small model, checked by Jev when TYPESAFE_API_KEY is set, says so and asks one short question. Default mode dry only measures. With a key set, the prompt goes to api.typesafe.ai (Jev) from every directory unless jevPaths limits it."
-    },
-    {
       "name": "secret-box",
       "source": "./mods/secret-box/claude",
       "description": "Keeps secret values out of the chat: write {{secret:NAME}} in a Bash command and the value is filled in at execution time from the OS keyring, and any known value that still reaches the conversation is replaced with its placeholder."
-    },
-    {
-      "name": "skill-pick",
-      "source": "./mods/skill-pick/claude",
-      "description": "Names the 1 to 5 installed skills that fit each prompt, as many as the ask needs, with a small model and, when TYPESAFE_API_KEY is set, a Jev score per skill; the log shows how often the main model then loads one. Default mode dry only measures. With a key set, the prompt and skill descriptions go to api.typesafe.ai (Jev) from every directory unless jevPaths limits it."
     },
     {
       "name": "statusline",

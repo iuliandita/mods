@@ -123,3 +123,41 @@ def test_list_scope_filters_entries_that_carry_a_scope(fake_claude: Path, tmp_pa
     assert {m["name"]: m["installed"] for m in payload["mods"]} == {"alpha": False, "beta": True}
     _, payload = list_mods(root)
     assert {m["installed"] for m in payload["mods"]} == {True}
+
+
+def test_uninstall_removes_a_retired_mod_and_lists_the_manual_steps(
+    fake_claude: Path, tmp_path: Path
+) -> None:
+    root = _repo(tmp_path)
+    code, payload = uninstall_mods(root, ["prompt-gate", "skill-pick", "alpha"], scope="project")
+    assert code == 0
+    assert payload["uninstalled"] == [
+        "prompt-gate@iuliandita-mods",
+        "skill-pick@iuliandita-mods",
+        "alpha@iuliandita-mods",
+    ]
+    assert "plugin uninstall prompt-gate@iuliandita-mods --scope project --json" in calls(fake_claude)
+    manual = "\n".join(payload["manual"])
+    assert "codex plugin remove skill-pick@iuliandita-mods" in manual
+    assert "mods/prompt-gate/opencode" in manual
+    assert not any(line.startswith("alpha") for line in payload["manual"])
+
+
+def test_retired_uninstall_failure_is_reported(fake_claude: Path, tmp_path: Path, monkeypatch) -> None:
+    root = _repo(tmp_path)
+    monkeypatch.setattr(
+        "modslib.claude.uninstall", lambda pid, scope: {"outcome": "error", "message": "not installed"}
+    )
+    code, payload = uninstall_mods(root, ["prompt-gate"], scope="user")
+    assert code == 1 and payload["uninstalled"] == [] and "not installed" in payload["errors"][0]
+
+
+def test_list_shows_a_retired_mod_only_when_installed(fake_claude: Path, tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _, payload = list_mods(root)
+    assert {m["name"] for m in payload["mods"]} == {"alpha", "beta"}
+    (fake_claude / "installed.json").write_text(json.dumps([{"id": "skill-pick@iuliandita-mods"}]))
+    _, payload = list_mods(root)
+    row = next(m for m in payload["mods"] if m["name"] == "skill-pick")
+    assert row["kind"] == "retired" and row["installed"] is True
+    assert {m["name"] for m in payload["mods"]} == {"alpha", "beta", "skill-pick"}
