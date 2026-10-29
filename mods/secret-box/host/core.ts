@@ -1,7 +1,8 @@
 import { statSync } from 'node:fs'
+import { execFile } from 'node:child_process'
 
-import { run } from '../../../host-lib/proc'
-import { makeScrubber, placeholderNames, rewriteCommand, type Scrubber } from '../claude/hooks/scrub'
+import { parseReply, scrubBatch } from '../claude/hooks/remote'
+import { placeholderNames, rewriteCommand, type Scrubber } from '../claude/hooks/scrub'
 
 export type Mode = 'off' | 'dry' | 'on'
 
@@ -23,17 +24,16 @@ export function helperExists(helper: string): boolean {
   }
 }
 
-// Every stored value through the helper, or null when it cannot be read. Never throws, never puts a value in a message.
-export async function loadValues(helper: string): Promise<Map<string, string> | null> {
-  const r = await run('/', [helper, 'values'], undefined, 10_000)
-  if (!r.ok) return null
-  try {
-    const raw: unknown = JSON.parse(r.out)
-    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null
-    return new Map(Object.entries(raw).filter((e): e is [string, string] => typeof e[1] === 'string'))
-  } catch {
-    return null
-  }
+// Only scrubbed text and name metadata cross the process boundary.
+export function request(helper: string, texts: string[]) {
+  return new Promise<ReturnType<typeof parseReply>>((resolve, reject) => {
+    const child = execFile(helper, ['scrub'], { timeout: 10_000, maxBuffer: 4 * 1024 * 1024, encoding: 'utf8' }, (error, stdout) => {
+      if (error) return reject(new Error('scrub failed'))
+      try { resolve(parseReply(stdout, texts.length)) } catch { reject(new Error('invalid scrub reply')) }
+    })
+    child.stdin?.on('error', () => {}) // An early helper exit is reported by execFile.
+    child.stdin?.end(JSON.stringify(texts))
+  })
 }
 
 // The command a host runs instead: the helper fills the placeholders in and scrubs its own output.
@@ -83,41 +83,11 @@ export function scrubValue<T>(value: T, scrub: Scrubber): { value: T; names: str
   return { value: out, names: [...names], changed }
 }
 
-// Values and their scrubber, loaded on first use and again after a placeholder command; after a failed load it
-// tries again at most every RETRY_MS.
-const RETRY_MS = 30_000
-
-export function createBox(helper: string, now: () => number = Date.now) {
-  let scrubber: Scrubber | null = null
-  let known: Map<string, string> | null = null
-  let failedAt: number | null = null
-  let inflight: Promise<boolean> | null = null
-
-  const load = (): Promise<boolean> => {
-    inflight ??= (async () => {
-      try {
-        const values = await loadValues(helper)
-        failedAt = values ? null : now()
-        if (values) {
-          known = values
-          scrubber = makeScrubber(values)
-        }
-        return values !== null
-      } finally {
-        inflight = null
-      }
-    })()
-    return inflight
-  }
-
-  return {
-    load,
-    // The scrubber, or null when no values are stored or they cannot be loaded right now.
-    async scrubber(): Promise<Scrubber | null> {
-      if (known !== null) return scrubber
-      if (inflight) await inflight
-      else if (failedAt === null || now() - failedAt >= RETRY_MS) await load()
-      return scrubber
-    },
+export async function scrubRemote<T>(helper: string, value: T): Promise<T> {
+  try {
+    const r = await scrubBatch((scrub) => scrubValue(value, scrub), (texts) => request(helper, texts))
+    return r.value
+  } catch {
+    return scrubValue(value, () => ({ text: WITHHELD, names: ['withheld'] })).value
   }
 }

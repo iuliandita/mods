@@ -21,13 +21,13 @@ def load_module():
     return mod
 
 
-def run(tmp_path, *args, secrets=None):
+def run(tmp_path, *args, secrets=None, stdin=None):
     store = tmp_path / "store.json"
     if secrets is not None:
         store.write_text(json.dumps(secrets))
     env = dict(os.environ, SECRET_BOX_TEST="1", SECRET_BOX_BACKEND=f"file:{store}")
     return subprocess.run(
-        [sys.executable, str(BIN), *args], env=env, capture_output=True, text=True
+        [sys.executable, str(BIN), *args], input=stdin, env=env, capture_output=True, text=True
     )
 
 
@@ -96,10 +96,12 @@ def test_exec_placeholder_in_single_quotes_inside_a_substitution_exits_4(tmp_pat
     assert (ok.returncode, ok.stdout) == (0, "v\n")
 
 
-def test_values_and_names_json(tmp_path):
+def test_removed_values_and_names_json(tmp_path):
     data = {"b": "two-two-two", "a": "one-one-one"}
     v = run(tmp_path, "values", secrets=data)
-    assert json.loads(v.stdout) == data
+    assert v.returncode == 2
+    assert v.stdout == ""
+    assert "one-one-one" not in v.stderr
     n = run(tmp_path, "names", "--json")
     assert json.loads(n.stdout) == ["a", "b"]
     assert "one-one-one" not in n.stdout
@@ -219,7 +221,7 @@ def test_min_safe_len_matches_min_len_in_scrub_ts():
     assert py and int(py[1]) == int(re.search(r"^export const MIN_LEN = (\d+)$", ts, re.M)[1])
 
 
-def test_libsecret_values_returns_every_name_in_order(tmp_path, monkeypatch):
+def test_libsecret_scrub_returns_name_metadata_in_order(tmp_path, monkeypatch):
     names = [f"n{i:02d}" for i in range(20)]
     search = "".join(f"[/{i}]\\nattribute.name = {n}\\n" for i, n in enumerate(names))
     exe = tmp_path / "bin" / "secret-tool"
@@ -230,9 +232,9 @@ def test_libsecret_values_returns_every_name_in_order(tmp_path, monkeypatch):
     )
     exe.chmod(0o755)
     monkeypatch.setenv("PATH", f"{exe.parent}{os.pathsep}{os.environ['PATH']}")
-    p = subprocess.run([sys.executable, str(BIN), "values"], capture_output=True, text=True)
+    p = subprocess.run([sys.executable, str(BIN), "scrub"], input="[]", capture_output=True, text=True)
     assert p.returncode == 0, p.stderr
-    assert list(json.loads(p.stdout).items()) == [(n, f"v-{n}") for n in names]
+    assert json.loads(p.stdout) == {"results": [], "names": names, "short": names}
 
 
 def test_set_refuses_a_non_tty_stdin(tmp_path):
@@ -240,3 +242,55 @@ def test_set_refuses_a_non_tty_stdin(tmp_path):
     assert p.returncode != 0
     assert "set needs a terminal" in p.stderr
     assert not (tmp_path / "store.json").exists()
+
+
+@pytest.mark.parametrize("command", [
+    "secret-box values",
+    "echo `secret-box values`",
+    "{ secret-box values; }",
+    "if secret-box values; then echo leaked; fi",
+    "! secret-box values",
+    "time secret-box values",
+    "timeout 5 secret-box values",
+    "nohup secret-box values",
+    "env -i HELPER values",
+    "xargs secret-box <<< values",
+    "</dev/null secret-box values",
+    "python3 HELPER values",
+    'sh -c -- "secret-box values"',
+    "secret-box $'values'",
+    'secret-box val"ues"',
+    "secret-box 'val'ues",
+    '"HELPER" values',
+    'bash -c "secret-box values"',
+    "secret-box exec -- 'secret-box values'",
+    "secret-box exec --scrub -- 'secret-box values'",
+])
+def test_issue_95_commands_cannot_print_values(tmp_path, command):
+    store = tmp_path / "store.json"
+    values = {"long": "stored-value-just-added", "short": "xY9"}
+    store.write_text(json.dumps(values))
+    helper = tmp_path / "secret-box"
+    helper.symlink_to(BIN)
+    env = dict(os.environ, SECRET_BOX_TEST="1", SECRET_BOX_BACKEND=f"file:{store}",
+               PATH=f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+    # env -i deliberately clears the backend settings; dispatch still rejects values before access.
+    command = command.replace("HELPER", str(helper))
+    p = subprocess.run(["bash", "-c", command], env=env, capture_output=True, text=True)
+    assert "unknown command" in p.stderr
+    assert all(v not in p.stdout + p.stderr for v in values.values())
+
+
+def test_scrub_protocol_filters_batches_and_rejects_bad_input(tmp_path):
+    values = {"a": "new-secret-value", "short": "abc"}
+    p = run(tmp_path, "scrub", secrets=values, stdin=json.dumps(["new-secret-value", "plain", "abc"]))
+    assert p.returncode == 0, p.stderr
+    assert json.loads(p.stdout) == {
+        "results": [{"text": "{{secret:a}}", "names": ["a"]}, {"text": "plain", "names": []},
+                    {"text": "abc", "names": []}],
+        "names": ["a", "short"], "short": ["short"],
+    }
+    for stdin in ['{}', '[null]', 'not-json']:
+        bad = run(tmp_path, "scrub", stdin=stdin)
+        assert bad.returncode == 1 and bad.stdout == ""
+        assert "new-secret-value" not in bad.stderr

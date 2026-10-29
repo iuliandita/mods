@@ -138,6 +138,14 @@ def test_scrub_passes_exit_code_and_runs_placeholder(tmp_path):
     assert p.stdout == b"{{secret:tok}}\n"
 
 
+def test_scrub_retains_command_values_when_the_command_removes_them(tmp_path):
+    store = tmp_path / "store.json"
+    p = exec_scrub(tmp_path, f"rm {shlex.quote(str(store))}; printf '%s' {{{{secret:tok}}}}")
+    assert p.returncode == 0
+    assert p.stdout == b"{{secret:tok}}"
+    assert not store.exists()
+
+
 def test_scrub_signal_death_is_128_plus_signal(tmp_path):
     assert exec_scrub(tmp_path, "kill -TERM $$").returncode == 128 + 15
 

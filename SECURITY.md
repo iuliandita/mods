@@ -19,14 +19,21 @@ untrusted Codex hook is skipped. See [host compatibility](docs/COMPATIBILITY.md)
 cases and limits.
 
 `secret-box` uses Linux Secret Service or macOS Keychain without network or model calls. In
-mode `on`, its pre-run hooks deny literal model shell calls to the internal `values` command,
-including visible shell and exec wrappers. Scripts, dynamic commands and other keyring clients
-remain accessible to code with the user's permissions. Optional `secretScopes` restrict named
-placeholders by the call's starting directory; they do not restrict child processes, `cd` inside
-scripts, symlink targets or network destinations.
+all modes, the helper has no plaintext `values` command. Hooks send text to its batched
+`scrub` command over stdin and receive filtered text and name metadata. Scripts, dynamic commands
+and other keyring clients remain accessible to code with the user's permissions. Placeholder
+checks cover Claude Code and Codex `Bash`, and OpenCode `shell`/`bash` only;
+Codex `write_stdin` and other non-Bash calls are not checked or rewritten. Optional
+`secretScopes` use Claude Code's session directory (`$.session.cwd()`), Codex's hook directory
+plus tool `workdir`, or OpenCode's project directory plus tool `workdir`. The installed Claude
+API exposes no separate Bash directory or guarantee that session cwd follows a persistent
+shell `cd`. Scopes do not restrict child processes, `cd` inside scripts, symlink targets or
+network destinations.
 
-Values under 6 characters and unsupported transformations are not scrubbed. A failed first load
-leaves scrubbing off; a failed reload retains only the last successful values. Claude Code may
-leave large or inaccessible saved outputs unchanged, Codex filters only a wrapped command's own
+Values under 6 characters and unsupported transformations are not scrubbed. A failed scrub
+withholds checked text on Claude Code and OpenCode; Claude Code refuses unchecked sent messages.
+Each scrub reads current values; removed or rotated values are unknown to later scrubs. A
+wrapped command retains its initial values while filtering its own stdout and stderr. Claude Code
+may leave large or inaccessible saved outputs unchanged, Codex filters only a wrapped command's own
 output, and OpenCode does not rewrite saved files. Keychain command tests use mocks; real macOS
 access and host integration remain unverified. See [what secret-box does not protect](mods/secret-box/README.md#what-it-does-not-protect).

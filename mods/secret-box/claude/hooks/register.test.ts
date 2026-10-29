@@ -1,5 +1,6 @@
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
+import { makeScrubber } from './scrub'
 
 const SECRET = 'p@ss/w0rd-longer'
 const B64 = 'cEBzcy93MHJkLWxvbmdlcg=='
@@ -9,7 +10,7 @@ const done = (stdout: string, exitCode = 0) => ({
   value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
 })
 
-// Stands in for the engine beneath the plugin: the wrapper (`values`), its file, and the Bash tool.
+// Stands in for the engine beneath the plugin: the scrub protocol, its file, and the Bash tool.
 // `files` is the fake disk behind fs.read and fs.write; `stats` overrides what fs.stat reports for a path
 // ('throw' rejects it, 'hang' never answers).
 function world(
@@ -38,9 +39,17 @@ function world(
     return { value: undefined }
   })
   on('process.run', (_$, e) => {
-    if (e.argv[1] !== 'values') return done('', 1)
+    if (e.argv[1] !== 'scrub') return done('', 1)
     seen.loads++
-    return values === 'fail' ? done('', 1) : done(JSON.stringify(typeof values === 'function' ? values() : values))
+    if (values === 'fail') return done('', 1)
+    const stored = typeof values === 'function' ? values() : values
+    const scrub = makeScrubber(Object.entries(stored))
+    const texts: string[] = JSON.parse(e.init?.stdin ?? '[]')
+    if (!texts.every((t) => typeof t === 'string')) return done('', 1)
+    return done(JSON.stringify({
+      results: texts.map((text) => scrub?.(text) ?? { text, names: [] }),
+      names: Object.keys(stored).sort(), short: Object.keys(stored).filter((n) => stored[n]!.length < 6),
+    }))
   })
   on('tool.call', { tool: 'Bash' }, (_$, e) => {
     seen.commands.push(e.command)
@@ -60,34 +69,29 @@ const row = (text: string) => ({
   uuid: 'u1',
 })
 
-test('a placeholder command runs through the wrapper, quoted, and the values reload after it', async ($, on) => {
+test('a placeholder command runs through the wrapper, quoted, and the result is scrubbed in a batch', async ($, on) => {
   const seen = world(on)
   const r = await $.tool.call({ tool: 'Bash', command: `curl -H "Authorization: Bearer {{secret:api.token}}" it's` })
   expect(r.deny).toBeUndefined()
   expect(seen.commands).toHaveLength(1)
-  expect(seen.commands[0]).toMatch(/^\S+\/bin\/secret-box exec -- 'curl -H "Authorization: Bearer \{\{secret:api\.token\}\}" it'\\''s'$/)
+  expect(seen.commands[0]).toMatch(/^\S+\/bin\/secret-box exec --scrub -- 'curl -H "Authorization: Bearer \{\{secret:api\.token\}\}" it'\\''s'$/)
   expect(seen.loads).toBe(2)
 })
 
-test('a command without a valid placeholder is not touched and the values load once', async ($, on) => {
+test('a command without a valid placeholder is not touched and each result uses one batch', async ($, on) => {
   const seen = world(on)
   for (const command of ['ls -la', 'echo {{secret:bad name}}', 'echo {{ secret:x }}']) {
     const r = await $.tool.call({ tool: 'Bash', command })
     expect(r.deny).toBeUndefined()
   }
   expect(seen.commands).toEqual(['ls -la', 'echo {{secret:bad name}}', 'echo {{ secret:x }}'])
-  expect(seen.loads).toBe(1)
+  expect(seen.loads).toBe(3)
 })
 
-test('model values calls are denied while the internal load and scrubbing still work', async ($, on) => {
-  const seen = world(on, undefined, { stdout: SECRET })
-  for (const command of ['secret-box values', '/opt/plugin/secret-box values', 'bash -c "secret-box values"', "secret-box exec --scrub -- 'secret-box values'"]) {
-    const r = await $.tool.call({ tool: 'Bash', command })
-    expect(r.deny).toContain('reserved for the hook')
-  }
-  expect(seen.commands).toEqual([])
+test('scrubbing batches nested result text without loading plaintext into the hook', async ($, on) => {
+  const seen = world(on, undefined, { stdout: SECRET, stderr: SECRET, structuredContent: [{ text: SECRET }] })
   const allowed = await $.tool.call({ tool: 'Bash', command: 'secret-box names' })
-  expect(allowed.result).toEqual({ stdout: '{{secret:api.token}}' })
+  expect(JSON.stringify(allowed)).not.toContain(SECRET)
   expect(seen.loads).toBe(1)
 })
 
@@ -177,15 +181,13 @@ test('a known value, its base64 and URL forms are replaced in a tool result; a s
   expect(stored.content).toBe('a {{secret:api.token}} b {{secret:api.token}} c {{secret:api.token}} d abc')
 })
 
-test('a value this command used is scrubbed even when the reload after it no longer has it', async ($, on) => {
-  let loads = 0
-  const files = new Map([['/o/tool-results/r.txt', `a ${SECRET}`]])
-  const bash = { stdout: `x ${SECRET}`, stderr: '', interrupted: false, persistedOutputPath: '/o/tool-results/r.txt' }
-  world(on, (): Record<string, string> => (++loads === 1 ? { 'api.token': SECRET } : {}), bash, files)
-  const r = await $.tool.call({ tool: 'Bash', command: 'curl {{secret:api.token}}' })
-  expect(loads).toBe(2)
-  expect((r.result as { stdout: string }).stdout).toBe('x {{secret:api.token}}')
-  expect(files.get('/o/tool-results/r.txt')).toBe('a {{secret:api.token}}')
+test('newly stored values are scrubbed on the next result without a reload', async ($, on) => {
+  let values: Record<string, string> = {}
+  world(on, () => values, { stdout: SECRET })
+  await $.tool.call({ tool: 'Bash', command: 'echo ok' })
+  values = { 'api.token': SECRET }
+  const r = await $.tool.call({ tool: 'Bash', command: 'echo ok' })
+  expect((r.result as { stdout: string }).stdout).toBe('{{secret:api.token}}')
 })
 
 test('attachment, delivery, compaction and notice rows are scrubbed too', async ($, on) => {
@@ -217,6 +219,17 @@ test('when the values cannot be loaded the placeholder command is denied and nev
   const plain = await $.tool.call({ tool: 'Bash', command: 'ls' })
   expect(plain.deny).toBeUndefined()
   expect(seen.commands).toEqual(['ls'])
+})
+
+test('a failed scrub withholds result text and conversation text', async ($, on) => {
+  world(on, 'fail', { stdout: SECRET })
+  const session = mock.session(on)
+  const r = await $.tool.call({ tool: 'Bash', command: 'echo ok' })
+  expect(JSON.stringify(r)).not.toContain(SECRET)
+  expect(JSON.stringify(r)).toContain('withheld')
+  await $.session.append(row(SECRET))
+  expect(JSON.stringify(session.appended())).not.toContain(SECRET)
+  expect(JSON.stringify(session.appended())).toContain('withheld')
 })
 
 test('dry mode toasts what it would do and rewrites nothing', { options: { mode: 'dry' } }, async ($, on) => {

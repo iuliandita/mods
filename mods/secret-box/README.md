@@ -19,8 +19,9 @@ See [what it does not protect](#what-it-does-not-protect) for the limits on each
   characters are never scrubbed; `secret-box set` warns about them.
 - **placeholder failures**: if the stored values cannot be loaded, a Bash call
   with a placeholder is denied before it runs, and the reason tells the model what to check.
-  Scrubbing is best-effort: a failed first load leaves it off (one toast says so), with retries at
-  most every 30 seconds. A failed reload retains the last successful values.
+  Scrubbing runs through the helper in batches, using current keyring values on every call.
+  If that check fails, checked text is withheld; a sent message is refused. Saved files remain
+  best-effort and may stay unchanged. Hooks never request a plaintext export of stored values.
 
 Hooks only, no UI. Portability to other Claude surfaces is expected, but only terminal behavior
 is verified; Desktop, VS Code and headless behavior remain untested.
@@ -35,20 +36,26 @@ This is not a security boundary. These limits apply in mode `on`; `off` and `dry
   values and transformations outside the supported JSON, URL and base64 forms can pass through.
   Child processes receive the values in their environment and may put them in argv, files or
   network requests; scrubbing does not prevent that access.
-- **Claude Code:** A failed first keyring load leaves scrubbing off. Saved Bash output over
+- **Claude Code:** A failed scrub withholds checked text. Saved Bash output over
   4 MiB, links, unexpected paths and files that cannot be read or written stay unchanged.
   Attachments, structured non-Bash records, tool calls and thinking can retain raw values even
   when model-facing text is scrubbed. Prompt-history protection is unverified.
 - **Codex:** Only a helper-wrapped command's own stdout and stderr are scrubbed. Other tool
   results, prompts and conversation content stay raw. Failed helper loads block execution; a
   hook that cannot start leaves the command unchanged with its placeholder unfilled.
-- **OpenCode:** A failed first keyring load leaves results, messages and prompts unscrubbed.
-  Result and conversation hooks do not rewrite saved output files on disk. On Claude Code and
-  OpenCode, a failed reload keeps the last successful values; newly added or changed values may
-  be unknown until a successful reload.
-- **Keyring access and scopes:** All hosts block literal model calls to `values` in mode `on`,
-  but scripts, dynamically built commands and other keyring clients remain accessible.
-  `secretScopes` is optional and checks only the call's starting directory. Neither Linux
+- **OpenCode:** A failed scrub withholds checked strings in results, messages and prompts.
+  Result and conversation hooks do not rewrite saved output files on disk.
+- **Current values:** Each scrub reads current stored values, so new values need no reload.
+  Removed or rotated values are no longer known to later scrubs, including saved-file checks.
+  A wrapped command retains its initial values while filtering its own stdout and stderr.
+- **Keyring access and scopes:** The helper has no `values` command in any mode. Scripts,
+  dynamically built commands and direct reads through other keyring clients remain accessible.
+  Placeholder checks cover only Claude Code and Codex `Bash`, and OpenCode `shell`/`bash`.
+  Codex `write_stdin` and other non-Bash calls are not checked or rewritten.
+  `secretScopes` checks Claude Code's session directory from `$.session.cwd()`, Codex's hook
+  directory plus tool `workdir`, or OpenCode's project directory plus tool `workdir`.
+  The installed Claude API exposes no separate Bash directory or guarantee that session cwd
+  follows a persistent shell `cd`; scopes may differ from that shell's directory. Neither Linux
   Secret Service nor macOS Keychain makes these hooks a sandbox. Real macOS Keychain access
   and host integration remain unverified.
 
@@ -97,7 +104,8 @@ Other commands of the helper:
 
     secret-box names [--json]    list stored names
     secret-box remove NAME       delete a secret
-    secret-box exec -- SCRIPT    run SCRIPT with its placeholders filled in (what the hook calls)
+    secret-box exec [--scrub] -- SCRIPT    run SCRIPT, optionally filtering stdout and stderr
+    secret-box scrub                     filter a JSON array of strings on stdin
 
 A placeholder for a secret that is not stored makes the command exit 3 with a line naming it and
 nothing runs. A placeholder inside single quotes (`'...'` or `$'...'`, also inside `$(...)` or
@@ -108,9 +116,9 @@ backticks within double quotes) would not expand, so it exits 4 and nothing runs
     /secret-box           mode, stored secret names, helper path, how to add one
     /secret-box reload    re-read the keyring after adding or removing a secret
 
-The status shows names only, never values. Known values are also reloaded after every command the
-hook rewrites; the values that command ran with are still scrubbed from its own output if the reload
-no longer has them.
+The status shows names only, never values. Reload refreshes that status metadata; scrubbing
+always reads current values. A wrapped command filters its stdout and stderr with the values
+loaded before execution, even if that command removes or rotates them.
 
 ## Codex and OpenCode
 
@@ -132,8 +140,8 @@ Install steps are in [INSTALL.md](../../INSTALL.md); what differs from Claude Co
 - Output a background process writes after the command's shell has exited is dropped, so a
   command that starts a server returns instead of waiting for it. Signals sent to the helper are
   forwarded to the command.
-- On OpenCode, when the keyring cannot be read, results, messages and the prompt pass through
-  unscrubbed (the load is retried every 30 seconds); a placeholder command still fails closed.
+- On OpenCode, when the keyring cannot be read, checked result, message and prompt strings
+  are withheld; a placeholder command still fails closed.
 - There is no `/secret-box` command on these hosts; run `secret-box names` in a terminal.
 - A Codex hook that cannot start lets the command through with its placeholder unfilled (it holds
   no secret), so this hook does not use the fail-closed wrapper that `guard-rules` does.
@@ -154,13 +162,16 @@ the same option in the user-level JSON file also accepts an object:
 {"mode":"on","secretScopes":{"api.token":["/projects/api/**"]}}
 ```
 
-Globs match the whole directory reported by the host, including a tool's `workdir` on Codex and
-OpenCode. `*` and `?` stay within a path segment; a `**` segment matches zero or more directories.
+Globs match the whole directory reported by the host: Claude Code uses `$.session.cwd()`
+(the session directory), Codex uses the hook directory plus tool `workdir`, and OpenCode uses
+the project directory plus tool `workdir`. The installed Claude API provides no separate Bash
+directory and does not guarantee that session cwd follows a persistent shell `cd`. `*` and `?`
+stay within a path segment; a `**` segment matches zero or more directories.
 Use absolute paths, without `.` or `..` segments; bracket and brace patterns are unsupported.
 An empty array denies that secret everywhere. In mode `on`, an out-of-scope placeholder is denied
 before loading or running anything; malformed options deny all placeholder commands. Mode `dry`
-reports the reason and leaves the command unchanged. These scopes check the call's starting
-directory, not `cd` inside the script, symlink targets or the destination of a network request.
+reports the reason and leaves the command unchanged. These scopes check only the directory
+reported above, not `cd` inside the script, symlink targets or network destinations.
 They do not restrict direct keyring access or the helper when run outside the hooks.
 
 ## Limits
@@ -181,12 +192,13 @@ This is not a security boundary.
   parse heredocs or `case` patterns, so an apostrophe in a heredoc body or a `pattern)` inside
   `$(...)` can confuse it.
 - Bash permission rules (allow and deny patterns) see the wrapper command
-  `<wrapper> exec -- '...'`, not the original. Do not allow `<wrapper> exec:*` broadly.
-- In mode `on`, all three hosts deny model shell calls to `secret-box values`, including literal
-  paths, shell `-c` strings and `secret-box exec [--scrub] --` wrappers. The hook's internal load
-  still works. This check does not inspect scripts, dynamically built commands or other keyring
-  clients. The helper has no authentication boundary; a model that can run arbitrary code can
-  still read the keyring. An environment marker would be forgeable by that same code.
+  `<wrapper> exec --scrub -- '...'`, not the original. Do not allow `<wrapper> exec:*` broadly.
+- The plaintext `values` command was removed. Hooks use `scrub`, which accepts a JSON array
+  of strings on stdin and returns `results` (each with `text` and matched `names`), stored
+  `names`, and `short` names, without exporting stored values. One helper call handles all
+  distinct strings within a result or conversation update. Checked batches whose JSON output
+  exceeds the host's 4 MiB process limit are withheld. The helper has no authentication
+  boundary; arbitrary code and other keyring clients can still read the keyring.
 - Rows are rewritten when they are stored. The screen may show a row just before its rewrite.
 - The model's own tool calls and thinking blocks cannot be rewritten by a hook. If the model writes a
   literal value into a command, that stored `tool_use` keeps it; the value is scrubbed from the rows
