@@ -57,7 +57,11 @@ scripts/typecheck --hosts
 scripts/mods validate --no-claude
 scripts/mods generate --check
 python3 .github/stack/stack-check.py
+npm ci --ignore-scripts --prefix .github/tools/markdownlint
+.github/tools/markdownlint/node_modules/.bin/markdownlint-cli2
 ```
+
+CI also runs lychee, actionlint, zizmor, and gitleaks.
 
 With the pinned Claude CLI, also run
 `scripts/mods validate` and `python3 -m pytest -q -m integration` using a temporary config root.
