@@ -21,8 +21,10 @@ program, `notify-send` or `osascript`, and makes no network or model calls.
 
 ## Install
 
-    claude plugin marketplace add iuliandita/mods
-    claude plugin install notify@iuliandita-mods
+```sh
+claude plugin marketplace add iuliandita/mods
+claude plugin install notify@iuliandita-mods
+```
 
 For Codex and OpenCode see [Codex and OpenCode](#codex-and-opencode) and
 [INSTALL.md](../../INSTALL.md).
@@ -108,6 +110,8 @@ Install steps are in [INSTALL.md](../../INSTALL.md); what each host can do is in
 
 ## Development
 
-    claude plugin test mods/notify/claude
-    claude plugin validate --strict mods/notify/claude
-    bun test mods/notify/host
+```sh
+claude plugin test mods/notify/claude
+claude plugin validate --strict mods/notify/claude
+bun test mods/notify/host
+```

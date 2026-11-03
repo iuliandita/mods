@@ -14,8 +14,10 @@ Set up with an agent:
 
 Or install by hand. Run these in a terminal; the plugins also load in Claude Desktop sessions.
 
-    claude plugin marketplace add iuliandita/mods
-    claude plugin install <mod>@iuliandita-mods
+```sh
+claude plugin marketplace add iuliandita/mods
+claude plugin install <mod>@iuliandita-mods
+```
 
 These calls install from the GitHub marketplace. From a clone, `scripts/mods install <mod>`
 registers that clone as the marketplace instead (or `--source <owner/repo>`).

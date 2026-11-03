@@ -79,8 +79,10 @@ These facts match `mod.json`. See [installation and recovery](../../INSTALL.md) 
 
 ## Install
 
-    claude plugin marketplace add iuliandita/mods
-    claude plugin install secret-box@iuliandita-mods
+```sh
+claude plugin marketplace add iuliandita/mods
+claude plugin install secret-box@iuliandita-mods
+```
 
 Needs Python 3 and `bash`. On Linux, install `secret-tool` (package `libsecret-tools` on Debian
 and Ubuntu, `libsecret` on Arch and Fedora) and unlock a Secret Service keyring (GNOME Keyring,
@@ -101,19 +103,25 @@ covered by mocked command tests; a real macOS Keychain session remains unverifie
 Run this in a terminal, not in the chat. The value is read with a hidden prompt and goes straight to
 the keyring:
 
-    <plugin folder>/bin/secret-box set NAME
+```sh
+<plugin folder>/bin/secret-box set NAME
+```
 
 `/secret-box` prints the exact path for your install. Then tell the model the name, and it uses
 `{{secret:NAME}}` in commands:
 
-    curl -H "Authorization: Bearer {{secret:github.token}}" https://api.github.com/user
+```sh
+curl -H "Authorization: Bearer {{secret:github.token}}" https://api.github.com/user
+```
 
 Other commands of the helper:
 
-    secret-box names [--json]    list stored names
-    secret-box remove NAME       delete a secret
-    secret-box exec [--scrub] -- SCRIPT    run SCRIPT, filtering stdout and stderr (--scrub is optional)
-    secret-box scrub                     filter a JSON array of strings on stdin
+```text
+secret-box names [--json]    list stored names
+secret-box remove NAME       delete a secret
+secret-box exec [--scrub] -- SCRIPT    run SCRIPT, filtering stdout and stderr (--scrub is optional)
+secret-box scrub                     filter a JSON array of strings on stdin
+```
 
 A placeholder for a secret that is not stored makes the command exit 3 with a line naming it and
 nothing runs. A placeholder inside single quotes (`'...'` or `$'...'`, also inside `$(...)` or
@@ -121,8 +129,10 @@ backticks within double quotes) would not expand, so it exits 4 and nothing runs
 
 ## Slash command
 
-    /secret-box           mode, stored secret names, helper path, how to add one
-    /secret-box reload    re-read the keyring after adding or removing a secret
+```text
+/secret-box           mode, stored secret names, helper path, how to add one
+/secret-box reload    re-read the keyring after adding or removing a secret
+```
 
 The status shows names only, never values. Reload refreshes that status metadata; scrubbing
 always reads current values. A wrapped command filters its stdout and stderr with the values
@@ -259,5 +269,7 @@ This is not a security boundary.
 
 ## Development
 
-    claude plugin test mods/secret-box/claude
-    claude plugin validate --strict mods/secret-box/claude
+```sh
+claude plugin test mods/secret-box/claude
+claude plugin validate --strict mods/secret-box/claude
+```
