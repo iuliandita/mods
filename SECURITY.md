@@ -1,4 +1,11 @@
-# Security policy
+# Security Policy
+
+## Supported Versions
+
+Fixes target the current development branch (`develop`, the default branch during the v0.x
+prerelease); older versions may not receive backports.
+
+## Reporting a Vulnerability
 
 Report suspected bypasses, leaks, unsafe installation or dependency vulnerabilities through
 [GitHub private security reporting](https://github.com/iuliandita/mods/security/advisories/new).
@@ -6,12 +13,12 @@ Do not post working bypasses or secrets in public issues. Include the affected m
 commit, host and version, surface, installation scope or config path, a redacted reproduction
 and impact.
 
-Fixes target the current development branch; older versions may not receive backports.
-This is a personal project without a guaranteed response time.
+## Scope
 
-Mods run unsandboxed with the user's permissions. Egress declarations describe intended behavior,
-not an operating-system security boundary. Read each mod's limits and declared egress; third-party
-harness behavior and user-provided private mods are outside this collection's control.
+Bypasses, leaks, unsafe installation and dependency vulnerabilities in the mods in this
+repository. Each mod's guarantees and limits are below.
+
+### Host coverage
 
 Host coverage differs: Codex does not recheck `write_stdin`, and its secret-box adapter scrubs
 only commands routed through the helper. Guard failures block when its hook runs, but an
@@ -21,11 +28,15 @@ update, review and trust changed hooks again with `/hooks`; guards fail open unt
 See [host compatibility](docs/COMPATIBILITY.md) for the verified
 cases and limits.
 
+### guard-rules
+
 `guard-rules` defaults to denying enforced parser findings. Its opt-in `modeUnparsed=ask` uses
 Claude Code's permission flow for those findings only, trusting the person approving syntax the
 guard cannot inspect. Enforced parsed violations and failed checks still deny; unanswered requests
 denied in the checked headless permission modes, including bypass mode. Other hosts fall back to
 `on` and warn. Interactive approval and prompt timeouts remain unverified.
+
+### secret-box
 
 `secret-box` uses Linux Secret Service or macOS Keychain without network or model calls. In
 all modes, the helper has no plaintext `values` command. Hooks send text to its batched
@@ -58,9 +69,21 @@ may leave large or inaccessible saved outputs unchanged, Codex filters only a wr
 output, and OpenCode does not rewrite saved files. Keychain command tests use mocks; real macOS
 access and host integration remain unverified. See [what secret-box does not protect](mods/secret-box/README.md#what-it-does-not-protect).
 
+### notify
+
 `notify` makes no network or model calls. It starts one local program (`notify-send` or
 `osascript`) with the repo folder name, the harness, the branch name and a fixed reason as text, never message text or
 commands, and without a shell. It reads options only from the plugin options or the user-level
 `notify.json`. A failing notifier is a warning line and never denies an operation. Codex waits
 for the finish hook, capped at one second with a 250 ms notifier timeout; permission
 notifications stay in the background.
+
+## Not in Scope
+
+Mods run unsandboxed with the user's permissions. Egress declarations describe intended behavior,
+not an operating-system security boundary. Read each mod's limits and declared egress; third-party
+harness behavior and user-provided private mods are outside this collection's control.
+
+## Disclosure Expectations
+
+This is a personal project without a guaranteed response time.

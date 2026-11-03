@@ -63,8 +63,10 @@ The Claude Code lines match `mod.json`. See [installation and recovery](../../IN
 
 ## Install
 
-    claude plugin marketplace add iuliandita/mods
-    claude plugin install guard-rules@iuliandita-mods
+```sh
+claude plugin marketplace add iuliandita/mods
+claude plugin install guard-rules@iuliandita-mods
+```
 
 ## Options
 
@@ -97,9 +99,11 @@ never matches and the rule keeps applying. Keep the list to repositories where d
 A name that matches neither list is blocked, and the reason tells the model to ask you. You answer by
 typing the slash command yourself:
 
-    /guard-context <name> protected|relaxed
-    /guard-context forget <name>
-    /guard-context list
+```text
+/guard-context <name> protected|relaxed
+/guard-context forget <name>
+/guard-context list
+```
 
 Classifications are stored per machine, not in your settings or the repository, and a stored name
 wins over the patterns. The command acts only when you typed it (or sent it from a bridge client);
@@ -217,5 +221,7 @@ Codex's `write_stdin` is outside hook coverage.
 
 ## Development
 
-    claude plugin test mods/guard-rules/claude
-    claude plugin validate --strict mods/guard-rules/claude
+```sh
+claude plugin test mods/guard-rules/claude
+claude plugin validate --strict mods/guard-rules/claude
+```
