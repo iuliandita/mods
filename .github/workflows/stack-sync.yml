@@ -1,4 +1,4 @@
-name: stack-sync
+name: Stack Sync
 
 on:
   schedule:
