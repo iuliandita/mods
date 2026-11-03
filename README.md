@@ -44,6 +44,19 @@ installed with `scripts/mods list`, and check the environment with `scripts/mods
 checks; `notify` has none yet. The compatibility page lists the tested behavior and versions.
 Headless parser-permission decisions also have a scoped check; other Claude surfaces remain unverified.
 
+## How it works
+
+```mermaid
+flowchart LR
+    catalog["mods.json<br>catalog of mods"] --> cli["scripts/mods<br>list, install, doctor"]
+    cli -->|"claude plugin install"| claude["Claude Code"]
+    catalog -->|"per-mod README<br>and INSTALL.md"| codex["Codex"]
+    catalog -->|"opencode.json<br>or cli.json"| opencode["OpenCode"]
+    claude --> hooks["hooks and panels run<br>in the host session"]
+    codex --> hooks
+    opencode --> hooks
+```
+
 ## Compatibility
 
 `guard-rules`, `secret-box` and `notify` run on Claude Code, Codex and OpenCode. `statusline` and `delegation-board` run on Claude Code and, as terminal UI plugins, on OpenCode.
@@ -62,6 +75,28 @@ notifications stay in the background.
 
 Put your own mods in `local/mods/<name>/` (gitignored) and install them with
 `scripts/mods install <name> --local`.
+
+## How the stack fits together
+
+Each repo installs on its own. idstack calls skills by name and sits on pstack.
+
+```mermaid
+flowchart LR
+    agents["agents<br>global rules, subagent roles"]
+    skills["skills<br>task skills"]
+    mods["mods<br>hooks and panels"]
+    idstack["idstack<br>infra playbooks"]
+    pstack["pstack"]
+    harness["your coding agent<br>Claude Code, Codex, OpenCode, ..."]
+    agents --> harness
+    skills --> harness
+    mods --> harness
+    idstack --> harness
+    idstack -->|"layered on"| pstack
+    idstack -.->|"calls by name"| skills
+    classDef self fill:#123A6B,stroke:#123A6B,color:#fff
+    class mods self
+```
 
 ## License
 
