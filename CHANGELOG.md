@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-11-03
+
+Plugin versions now match the stable release: every plugin is at 1.0.0 in its Claude Code, Codex, and OpenCode manifests (`guard-rules`, `secret-box`, `notify`, `delegation-board`, `statusline`). No plugin code changed since v1.0.0.
+
 ## [1.0.0] - 2026-11-03
 
 First stable release. The plugin code is the same as v0.3.3, so plugin versions are unchanged: `guard-rules` 0.3.2, `secret-box` 0.3.2, `notify` 0.3.3, the rest 0.3.1. Collection tags do not set plugin versions.
@@ -232,7 +236,8 @@ First collection prerelease. Individual plugin versions remain independent of th
   timer afterwards; `delegation-board` resets on `/clear` and prints a text table when its pane
   is not placed (Claude Desktop).
 
-[Unreleased]: https://github.com/iuliandita/mods/compare/v1.0.0...develop
+[Unreleased]: https://github.com/iuliandita/mods/compare/v1.0.1...develop
+[1.0.1]: https://github.com/iuliandita/mods/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/iuliandita/mods/compare/v0.3.3...v1.0.0
 [0.3.3]: https://github.com/iuliandita/mods/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/iuliandita/mods/compare/v0.3.1...v0.3.2
