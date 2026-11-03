@@ -4,7 +4,7 @@ Hooks and plugins for Claude Code, Codex, and OpenCode that you install one at a
 
 Each mod is a plugin built on its host's hooks or plugin API. Mods run with your permissions and are not sandboxed: read a mod before installing it. Each mod lists what leaves your machine (`egress`) in its README and in `mods.json`.
 
-Status: prerelease (v0.x). Installs come from `develop`, the default branch; `main` becomes the stable channel at v1.0.0.
+Status: stable (v1.0.0). `main` is the stable channel and the install commands below pin it; `develop` is the default branch and the nightly.
 
 ## Install
 
@@ -15,7 +15,7 @@ Set up with an agent:
 Or install by hand. Run these in a terminal; the plugins also load in Claude Desktop sessions.
 
 ```sh
-claude plugin marketplace add iuliandita/mods
+claude plugin marketplace add iuliandita/mods#main
 claude plugin install <mod>@iuliandita-mods
 ```
 

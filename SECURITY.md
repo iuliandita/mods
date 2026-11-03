@@ -2,8 +2,7 @@
 
 ## Supported Versions
 
-Fixes target the current development branch (`develop`, the default branch during the v0.x
-prerelease); older versions may not receive backports.
+Security fixes target `develop` and reach users through `main` and the next tagged release. The only long-lived branches are `develop` and `main`, so fixes are not backported to older releases.
 
 ## Reporting a Vulnerability
 

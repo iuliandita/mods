@@ -11,6 +11,9 @@ from modslib.catalog import CatalogError, Mod, ToolMissing, inject_span, load_al
 MARKETPLACE_NAME = "iuliandita-mods"
 LOCAL_MARKETPLACE_NAME = "iuliandita-mods-local"
 GITHUB_SOURCE = "iuliandita/mods"
+# Install commands pin the stable branch; the default branch is the nightly.
+CLAUDE_STABLE_SOURCE = f"{GITHUB_SOURCE}#main"
+CODEX_STABLE_SOURCE = f"{GITHUB_SOURCE}@main"
 OWNER = {"name": "iuliandita"}
 
 
@@ -55,7 +58,7 @@ def host_install(mod: Mod) -> dict:
     out: dict[str, dict[str, str]] = {}
     if "codex" in mod.hosts:
         out["codex"] = {
-            "install": f"codex plugin marketplace add {GITHUB_SOURCE} && codex plugin add {mod.name}@{MARKETPLACE_NAME}"
+            "install": f"codex plugin marketplace add {CODEX_STABLE_SOURCE} && codex plugin add {mod.name}@{MARKETPLACE_NAME}"
         }
     if "opencode" in mod.hosts:
         has_tui = (mod.path / HOST_BUNDLES["opencode-tui"][0]).is_file()
@@ -78,7 +81,7 @@ def build_catalog(mods: list[Mod]) -> dict:
             {
                 **{k: v for k, v in m.as_dict().items() if k != "hosts"},
                 "install": (
-                    f"claude plugin marketplace add {GITHUB_SOURCE} && "
+                    f"claude plugin marketplace add {CLAUDE_STABLE_SOURCE} && "
                     f"claude plugin install {m.name}@{MARKETPLACE_NAME}"
                 ),
                 **({"hosts": host_install(m)} if m.hosts else {}),

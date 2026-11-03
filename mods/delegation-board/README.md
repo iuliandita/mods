@@ -7,7 +7,7 @@ tool call. Egress is `none`; nothing leaves the machine.
 Install:
 
 ```sh
-claude plugin marketplace add iuliandita/mods
+claude plugin marketplace add iuliandita/mods#main
 claude plugin install delegation-board@iuliandita-mods
 ```
 

@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-03
+
+First stable release. The plugin code is the same as v0.3.3, so plugin versions are unchanged: `guard-rules` 0.3.2, `secret-box` 0.3.2, `notify` 0.3.3, the rest 0.3.1. Collection tags do not set plugin versions.
+
+### Changed
+
+- `main` is now the stable channel and releases are tagged on it. The install commands in the READMEs, INSTALL.md and `mods.json` pin `main` (`iuliandita/mods#main` for Claude Code, `iuliandita/mods@main` for Codex). `develop` stays the default branch and the nightly; drop the suffix to follow it.
+- SECURITY.md uses the shared Supported Versions wording: fixes land on `develop` and reach users through `main` and the next tagged release.
+
+### Notes
+
+- `notify` has not been verified on a real Claude Code, Codex, or OpenCode host; `docs/COMPATIBILITY.md` lists what each mod was verified on.
+
 ## [0.3.3] - 2026-10-29
 
 Patch prerelease, tagged on `develop`. Plugin versions are unchanged: `guard-rules` 0.3.2, `secret-box` 0.3.2, `notify` 0.3.3, the rest 0.3.1.
@@ -219,7 +232,8 @@ First collection prerelease. Individual plugin versions remain independent of th
   timer afterwards; `delegation-board` resets on `/clear` and prints a text table when its pane
   is not placed (Claude Desktop).
 
-[Unreleased]: https://github.com/iuliandita/mods/compare/v0.3.3...develop
+[Unreleased]: https://github.com/iuliandita/mods/compare/v1.0.0...develop
+[1.0.0]: https://github.com/iuliandita/mods/compare/v0.3.3...v1.0.0
 [0.3.3]: https://github.com/iuliandita/mods/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/iuliandita/mods/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/iuliandita/mods/compare/v0.3.0...v0.3.1

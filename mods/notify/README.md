@@ -22,7 +22,7 @@ program, `notify-send` or `osascript`, and makes no network or model calls.
 ## Install
 
 ```sh
-claude plugin marketplace add iuliandita/mods
+claude plugin marketplace add iuliandita/mods#main
 claude plugin install notify@iuliandita-mods
 ```
 
