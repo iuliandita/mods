@@ -1,7 +1,8 @@
 import { statSync } from 'node:fs'
+import { execFile } from 'node:child_process'
 
-import { run } from '../../../host-lib/proc'
-import { makeScrubber, placeholderNames, rewriteCommand, type Scrubber } from '../claude/hooks/scrub'
+import { parseReply, scrubBatch } from '../claude/hooks/remote'
+import { placeholderNames, rewriteCommand, type Scrubber } from '../claude/hooks/scrub'
 
 export type Mode = 'off' | 'dry' | 'on'
 
@@ -11,7 +12,7 @@ export const parseMode = (v: unknown): Mode => (v === 'off' || v === 'dry' ? v :
 export { placeholderNames }
 
 export const LOAD_FAILED =
-  'secret-box: the stored secrets could not be loaded, so the command was blocked before it ran (fail closed). Check that secret-tool works and the keyring is unlocked (run "secret-box names" in a terminal), or set mode to off or dry in ~/.config/iuliandita-mods/secret-box.json.'
+  'secret-box: the stored secrets could not be loaded, so the command was blocked before it ran (fail closed). Check that the keyring backend works and is unlocked (run "secret-box names" in a terminal), or set mode to off or dry in ~/.config/iuliandita-mods/secret-box.json.'
 
 export const helperMissing = (helper: string): string => `secret-box: the helper ${helper} was not found, so the command was blocked (fail closed). Reinstall the plugin.`
 
@@ -23,24 +24,70 @@ export function helperExists(helper: string): boolean {
   }
 }
 
-// Every stored value through the helper, or null when it cannot be read. Never throws, never puts a value in a message.
-export async function loadValues(helper: string): Promise<Map<string, string> | null> {
-  const r = await run('/', [helper, 'values'], undefined, 10_000)
-  if (!r.ok) return null
-  try {
-    const raw: unknown = JSON.parse(r.out)
-    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null
-    return new Map(Object.entries(raw).filter((e): e is [string, string] => typeof e[1] === 'string'))
-  } catch {
-    return null
-  }
+// Only scrubbed text and name metadata cross the process boundary.
+export function request(helper: string, texts: string[]) {
+  return new Promise<ReturnType<typeof parseReply>>((resolve, reject) => {
+    const child = execFile(helper, ['scrub'], { timeout: 10_000, maxBuffer: 4 * 1024 * 1024, encoding: 'utf8' }, (error, stdout) => {
+      if (error) return reject(new Error('scrub failed'))
+      try { resolve(parseReply(stdout, texts.length)) } catch { reject(new Error('invalid scrub reply')) }
+    })
+    child.stdin?.on('error', () => {}) // An early helper exit is reported by execFile.
+    child.stdin?.end(JSON.stringify(texts))
+  })
 }
 
 // The command a host runs instead: the helper fills the placeholders in and scrubs its own output.
 export const rewrite = (helper: string, command: string): string => rewriteCommand(helper, command, true)
 
-const WITHHELD = '[secret-box: this content was withheld because scrubbing failed]'
+export const WITHHELD = '[secret-box: this content was withheld because scrubbing failed]'
 const MAX_DEPTH = 24
+
+// @opencode/ai 2.2.1 schema/messages: only allowlisted fields are structural.
+// Rebuild a minimal message rather than walking arbitrary payloads with a key-name exemption.
+const MESSAGE_ROLES = new Set(['system', 'user', 'assistant', 'tool'])
+const CONTENT_TYPES = new Set(['text', 'reasoning', 'media', 'tool-call', 'tool-result', 'compaction', 'effort'])
+
+function withholdMessages(value: unknown): unknown {
+  if (!Array.isArray(value)) return WITHHELD
+  const toolIds = new Map<string, string>()
+  const toolId = (part: unknown): string => {
+    const original = part !== null && typeof part === 'object' && 'id' in part && typeof part.id === 'string' ? part.id : ''
+    let id = toolIds.get(original)
+    if (id === undefined) {
+      id = `withheld-${toolIds.size + 1}`
+      toolIds.set(original, id)
+    }
+    return id
+  }
+  return value.map((message: unknown) => {
+    const role = message !== null && typeof message === 'object' && 'role' in message
+      && typeof message.role === 'string' && MESSAGE_ROLES.has(message.role) ? message.role : 'user'
+    const content = message !== null && typeof message === 'object' && 'content' in message
+      && Array.isArray(message.content) ? message.content : [null]
+    return {
+      role,
+      content: content.map((part: unknown) => {
+        const type = part !== null && typeof part === 'object' && 'type' in part
+          && typeof part.type === 'string' && CONTENT_TYPES.has(part.type) ? part.type : 'text'
+        switch (type) {
+          case 'tool-call':
+          case 'tool-result': {
+            const provider = part !== null && typeof part === 'object' && 'providerExecuted' in part
+              && typeof part.providerExecuted === 'boolean' ? { providerExecuted: part.providerExecuted } : {}
+            // Server tools need unchecked provider payloads to round-trip through Anthropic.
+            if (provider.providerExecuted === true) return { type: 'text', text: WITHHELD }
+            return { type, id: toolId(part), name: 'withheld', ...provider,
+              ...(type === 'tool-call' ? { input: {} } : { result: { type: 'text', value: WITHHELD } }) }
+          }
+          case 'effort': return { type }
+          case 'reasoning': return { type, text: WITHHELD }
+          // Media and compaction require unchecked assets/provider state; replace the whole part.
+          default: return { type: 'text', text: WITHHELD }
+        }
+      }),
+    }
+  })
+}
 
 // Every string and object key under a value, copied (a class instance keeps its prototype; a value with no
 // own enumerable fields, like a Date, is left as it is). A subtree deeper than MAX_DEPTH or looping back is
@@ -65,14 +112,15 @@ export function scrubValue<T>(value: T, scrub: Scrubber): { value: T; names: str
     path.add(v)
     try {
       if (Array.isArray(v)) return v.map((x) => walk(x, depth + 1, path))
-      const entries = Object.entries(v)
+      // Error.message/stack/cause are non-enumerable but consumed by the host too.
+      const entries = v instanceof Error ? Object.getOwnPropertyNames(v).map((key) => [key, Reflect.get(v, key)] as const) : Object.entries(v)
       if (entries.length === 0) return v
       const out = Object.create(Object.getPrototypeOf(v)) as Record<string, unknown>
       for (const [k, x] of entries) {
         const base = text(k)
         let key = base
-        for (let n = 2; key in out; n++) key = `${base}#${n}`
-        out[key] = walk(x, depth + 1, path)
+        for (let n = 2; Object.hasOwn(out, key); n++) key = `${base}#${n}`
+        Object.defineProperty(out, key, { value: walk(x, depth + 1, path), enumerable: true, configurable: true, writable: true })
       }
       return out
     } finally {
@@ -83,41 +131,25 @@ export function scrubValue<T>(value: T, scrub: Scrubber): { value: T; names: str
   return { value: out, names: [...names], changed }
 }
 
-// Values and their scrubber, loaded on first use and again after a placeholder command; after a failed load it
-// tries again at most every RETRY_MS.
-const RETRY_MS = 30_000
+type Fallback = 'text' | 'messages' | 'system' | 'result' | 'error' | 'prompt'
 
-export function createBox(helper: string, now: () => number = Date.now) {
-  let scrubber: Scrubber | null = null
-  let known: Map<string, string> | null = null
-  let failedAt: number | null = null
-  let inflight: Promise<boolean> | null = null
-
-  const load = (): Promise<boolean> => {
-    inflight ??= (async () => {
-      try {
-        const values = await loadValues(helper)
-        failedAt = values ? null : now()
-        if (values) {
-          known = values
-          scrubber = makeScrubber(values)
-        }
-        return values !== null
-      } finally {
-        inflight = null
+export async function scrubRemote(helper: string, value: unknown, fallback: Fallback = 'text'): Promise<unknown> {
+  try {
+    const r = await scrubBatch((scrub) => scrubValue(value, scrub), (texts) => request(helper, texts))
+    return r.value
+  } catch {
+    switch (fallback) {
+      case 'messages': return withholdMessages(value)
+      case 'system': return [{ type: 'text', text: WITHHELD }]
+      case 'result': return { output: WITHHELD, content: [{ type: 'text', text: WITHHELD }] }
+      case 'prompt': return { text: WITHHELD, files: [], agents: [], skills: [] }
+      case 'error': {
+        const error = new Error(WITHHELD)
+        // Tool.Error is yieldable in Effect. Keep its prototype, never its unchecked own fields.
+        if (value instanceof Error) Object.setPrototypeOf(error, Object.getPrototypeOf(value))
+        return Object.assign(error, { _tag: 'Tool.Error' })
       }
-    })()
-    return inflight
-  }
-
-  return {
-    load,
-    // The scrubber, or null when no values are stored or they cannot be loaded right now.
-    async scrubber(): Promise<Scrubber | null> {
-      if (known !== null) return scrubber
-      if (inflight) await inflight
-      else if (failedAt === null || now() - failedAt >= RETRY_MS) await load()
-      return scrubber
-    },
+      default: return WITHHELD
+    }
   }
 }

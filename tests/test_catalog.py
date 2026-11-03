@@ -18,6 +18,13 @@ def test_loads_a_valid_mod(tmp_path: Path) -> None:
     assert mod.is_local is False
 
 
+@pytest.mark.parametrize("requirements", [None, [], {"win32": ["security"]}, {"darwin": "security"}, {"linux": [False]}])
+def test_invalid_platform_requirements_are_rejected(tmp_path: Path, requirements) -> None:
+    write_mod(tmp_path, "alpha", requires_by_platform=requirements)
+    with pytest.raises(CatalogError, match="requires_by_platform"):
+        load_mods(tmp_path)
+
+
 def test_name_must_match_folder_and_plugin_json(tmp_path: Path) -> None:
     write_mod(tmp_path, "alpha", plugin_name="other")
     with pytest.raises(CatalogError, match="plugin.json name 'other'"):

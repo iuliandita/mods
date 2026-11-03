@@ -17,10 +17,10 @@
       "category": "Developer Tools"
     },
     {
-      "name": "prompt-gate",
+      "name": "notify",
       "source": {
         "source": "local",
-        "path": "./mods/prompt-gate/codex"
+        "path": "./mods/notify/codex"
       },
       "policy": {
         "installation": "AVAILABLE",
@@ -33,18 +33,6 @@
       "source": {
         "source": "local",
         "path": "./mods/secret-box/codex"
-      },
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      },
-      "category": "Developer Tools"
-    },
-    {
-      "name": "skill-pick",
-      "source": {
-        "source": "local",
-        "path": "./mods/skill-pick/codex"
       },
       "policy": {
         "installation": "AVAILABLE",

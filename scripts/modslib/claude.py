@@ -12,10 +12,14 @@ class ClaudeError(Exception):
     """The claude CLI is missing or a call to it failed."""
 
 
+class ClaudeMissing(ClaudeError):
+    """The claude CLI is not on PATH (exit code 3)."""
+
+
 def binary() -> str:
     path = shutil.which("claude")
     if path is None:
-        raise ClaudeError("the claude CLI is not on PATH")
+        raise ClaudeMissing("claude CLI not found: it is not on PATH; install Claude Code and retry")
     return path
 
 
@@ -141,4 +145,12 @@ def install(plugin_id: str, scope: str) -> dict:
 
 def uninstall(plugin_id: str, scope: str) -> dict:
     args = ("plugin", "uninstall", plugin_id, "--scope", scope, "--json")
-    return _last_json(args, run(*args).stdout)
+    # claude exits 1 with a JSON verdict (failureCode) on stdout for a plugin that is not installed
+    proc = run(*args, check=False)
+    try:
+        return _last_json(args, proc.stdout)
+    except ClaudeError:
+        if proc.returncode == 0:
+            raise
+        detail = (proc.stderr or proc.stdout).strip()
+        raise ClaudeError(f"claude {' '.join(args)} failed ({proc.returncode}): {detail}") from None

@@ -4,7 +4,7 @@ export const IDENTITY_ENV =
   /^(?:GIT_(?:AUTHOR|COMMITTER)_(?:NAME|EMAIL)|EMAIL|HOME|XDG_CONFIG_HOME|GIT_CONFIG_(?:GLOBAL|SYSTEM|NOSYSTEM|COUNT|KEY_\d+|VALUE_\d+))$/
 
 // The other variables the guard reads for a call: kube and terraform targets, the git repository and config.
-export const READ_ENV = /^(?:KUBECONFIG|TF_WORKSPACE|TF_DATA_DIR|HELM_KUBE(?:CONTEXT|APISERVER|TOKEN|CAFILE)|GIT_(?:DIR|WORK_TREE|NAMESPACE|CONFIG_PARAMETERS))$/
+export const READ_ENV = /^(?:HOME|KUBECONFIG|TF_(?:WORKSPACE|DATA_DIR|CLI_ARGS(?:_[A-Za-z0-9_]+)?|CLOUD_(?:ORGANIZATION|HOSTNAME|PROJECT))|HELM_KUBE(?:CONTEXT|APISERVER|TOKEN|CAFILE)|GIT_(?:DIR|COMMON_DIR|WORK_TREE|NAMESPACE|CONFIG_PARAMETERS))$/
 
 export function liftAssigns(words: string[]): { assigns: Record<string, string>; rest: string[] } {
   const assigns: Record<string, string> = {}
@@ -19,18 +19,26 @@ export function liftAssigns(words: string[]): { assigns: Record<string, string>;
 
 export const TOOLS = ['git', 'gh', 'glab', 'tea', 'fj', 'kubectl', 'helm', 'terraform', 'tofu']
 export const SHELL_NAMES = ['bash', 'sh', 'zsh', 'dash', 'ksh']
+
+// Only a literal path or filename, never inline code or a command string containing spaces.
+export function isDataWord(word: string): boolean {
+  return /^[\w@%+,=:~./-]+$/.test(word) && (word.includes('/') || /\.[A-Za-z0-9][\w-]*$/.test(word))
+}
 const TOOL_WORD = new RegExp(`(?<![\\w.-])(${TOOLS.join('|')})(?![\\w-])`, 'gi')
 const RUN_WORD = new RegExp(`(?<![\\w.-])(${[...TOOLS, ...SHELL_NAMES].join('|')})(?![\\w-])`, 'g')
 
 // The tool names that appear as words of their own in `text`, matched on word boundaries rather than whitespace.
 // `anyCase` is for the whole command text, where `$GIT` names git too; `shells` adds the shell names.
-export function toolWords(text: string, opts: { anyCase?: boolean; shells?: boolean } = {}): string[] {
+// `commands` ignores directory segments and filename stems, retaining executable basenames such as /usr/bin/git.
+export function toolWords(text: string, opts: { anyCase?: boolean; shells?: boolean; commands?: boolean } = {}): string[] {
   const re = opts.shells ? RUN_WORD : TOOL_WORD
   const flags = opts.anyCase ? 'gi' : 'g'
   // A path segment with a dotted name (`/gh.example/`, `/terraform.tfstate`) is a name, not the tool; elsewhere
   // `git.cmd` (`import git.cmd`) still names it.
   const found = [...text.matchAll(new RegExp(re.source, flags))].filter(
-    (m) => !(text[m.index! - 1] === '/' && /^\.\w/.test(text.slice(m.index! + m[0].length))),
+    (m) => opts.commands
+      ? !/^[/.]/.test(text.slice(m.index! + m[0].length))
+      : !(text[m.index! - 1] === '/' && /^\.\w/.test(text.slice(m.index! + m[0].length))),
   )
   return [...new Set(found.map((m) => m[1]!.toLowerCase()))]
 }

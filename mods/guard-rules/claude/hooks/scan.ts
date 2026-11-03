@@ -51,7 +51,7 @@ export function arithEnd(src: string, i: number): number {
 
 // Arithmetic runs the substitutions in it and evaluates subscripts recursively.
 export function arithOpaque(inner: string): boolean {
-  return /\$\(|`|\[/.test(inner)
+  return /\$\(|`|\[|\bPATH\b/.test(inner)
 }
 
 const ANSI_ESCAPES: Record<string, string> = {

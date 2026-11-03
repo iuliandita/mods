@@ -9,7 +9,7 @@ from modslib import claude
 from modslib.catalog import CatalogError
 from modslib.checks import validate
 from modslib.generate import generate
-from modslib.install import doctor, install_mods, list_mods, uninstall_mods
+from modslib.install import doctor, exit_code, install_mods, list_mods, uninstall_mods
 
 DEFAULT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -20,9 +20,25 @@ class _JsonArgumentParser(argparse.ArgumentParser):
     def error(self, message: str) -> None:
         if _JsonArgumentParser.json_mode:
             print(json.dumps({"ok": False, "errors": [message]}))
-            sys.exit(1)
+            sys.exit(2)
         self.print_usage(sys.stderr)
-        self.exit(1, f"{self.prog}: error: {message}\n")
+        self.exit(2, f"{self.prog}: error: {message}\n")
+
+
+EPILOG = """\
+Environment:
+  MODS_REQUIRE_BUN=1  make generate --check and validate fail when the pinned bun is missing
+                      or has another version, instead of skipping the host bundle check
+  PATH                where the claude and bun commands are found
+  CLAUDE_CONFIG_DIR   read by the claude command that install, uninstall, list, doctor and
+                      validate run; it selects the Claude Code config root
+
+Exit codes:
+  0  done
+  1  failed (generate --check: files are stale; validate: a problem was found)
+  2  usage error
+  3  a required tool is missing (claude, or the pinned bun)
+"""
 
 
 def _wants_json(argv: list[str]) -> bool:
@@ -38,30 +54,52 @@ def _parser() -> argparse.ArgumentParser:
     )
 
     p = _JsonArgumentParser(
-        prog="mods", description="Manage and install Claude Code mods.", allow_abbrev=False
+        prog="mods",
+        description="Manage and install Claude Code mods.",
+        epilog=EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        allow_abbrev=False,
     )
     p.add_argument("--root", type=Path, default=DEFAULT_ROOT, help="repo root")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     sub = p.add_subparsers(dest="cmd", required=True, parser_class=_JsonArgumentParser)
 
-    g = sub.add_parser(
-        "generate", parents=[common], help="write marketplace.json, mods.json and the shared-code copies", allow_abbrev=False
+    def add(name: str, **kw: object) -> argparse.ArgumentParser:
+        return sub.add_parser(
+            name,
+            parents=[common],
+            epilog=EPILOG,
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            allow_abbrev=False,
+            **kw,
+        )
+
+    g = add(
+        "generate", help="write marketplace.json, mods.json and the shared-code copies"
     )
     g.add_argument("--check", action="store_true", help="write nothing; exit 1 if stale")
     g.add_argument("--local", action="store_true", help="also write the local marketplace")
 
-    ls = sub.add_parser(
+    ls = add(
         "list",
-        parents=[common],
         help="list mods and their install state (installed means installed at any scope unless "
         "--scope is given and claude reports a scope)",
-        allow_abbrev=False,
     )
-    ls.add_argument("--scope", choices=("user", "project", "local"), default=None)
+    ls.add_argument(
+        "--scope",
+        choices=("user", "project", "local"),
+        default=None,
+        help="only count installs at this scope (default: any scope)",
+    )
 
-    i = sub.add_parser("install", parents=[common], help="install mods", allow_abbrev=False)
+    i = add("install", help="install mods")
     i.add_argument("names", nargs="+")
-    i.add_argument("--scope", choices=("user", "project", "local"), default="user")
+    i.add_argument(
+        "--scope",
+        choices=("user", "project", "local"),
+        default="user",
+        help="Claude plugin scope to install at (default: user)",
+    )
     i.add_argument("--local", action="store_true", help="include mods from local/ (not with --source)")
     i.add_argument(
         "--source",
@@ -69,19 +107,36 @@ def _parser() -> argparse.ArgumentParser:
         "checked against this clone's catalog (not with --local)",
     )
 
-    u = sub.add_parser("uninstall", parents=[common], help="uninstall mods", allow_abbrev=False)
+    u = add("uninstall", help="uninstall mods")
     u.add_argument("names", nargs="+")
-    u.add_argument("--scope", choices=("user", "project", "local"), default="user")
+    u.add_argument(
+        "--scope",
+        choices=("user", "project", "local"),
+        default="user",
+        help="scope the plugin was installed at (default: user)",
+    )
 
-    sub.add_parser("doctor", parents=[common], help="check the environment", allow_abbrev=False)
+    add("doctor", help="check the environment and installed Codex hook trust (read only)")
 
-    v = sub.add_parser("validate", parents=[common], help="run the CI gates", allow_abbrev=False)
+    v = add("validate", help="run the CI gates")
     v.add_argument("--no-claude", action="store_true", help="skip checks that need the claude CLI")
     return p
 
 
 def _emit(args: argparse.Namespace, payload: dict, text: str) -> None:
-    print(json.dumps(payload) if args.json else text)
+    if args.json:
+        print(json.dumps(payload))
+        return
+    if text:
+        print(text)
+    for note in payload.get("notes", []):
+        print(f"note: {note}", file=sys.stderr)
+    for skip in payload.get("skipped", []):
+        print(f"note: {skip}", file=sys.stderr)
+    for step in payload.get("manual", []):
+        print(f"manual: {step}", file=sys.stderr)
+    for err in payload.get("errors", []):
+        print(f"error: {err}", file=sys.stderr)
 
 
 def _text_for(payload: dict) -> str:
@@ -91,11 +146,11 @@ def _text_for(payload: dict) -> str:
         for m in payload["mods"]:
             missing = [r["bin"] for r in m["requires"] if not r["found"]]
             lines.append(f"{m['name']}: " + (f"missing {', '.join(missing)}" if missing else "ok"))
-        lines += [f"note: {n}" for n in payload["notes"]]
-        lines += [f"error: {e}" for e in payload["errors"]]
+        for hook in payload.get("codex_hooks", []):
+            lines.append(f"codex {hook['mod']} {hook['event']}: {hook['status']}" + (" (disabled)" if not hook['enabled'] else ""))
         return "\n".join(lines)
     if payload.get("errors"):
-        return "\n".join(f"error: {e}" for e in payload["errors"])
+        return ""
     if "installed" in payload or "uninstalled" in payload:
         return "\n".join(payload.get("installed") or payload.get("uninstalled") or []) or "nothing to do"
     if "mods" in payload:
@@ -108,18 +163,18 @@ def _text_for(payload: dict) -> str:
     return json.dumps(payload)
 
 
-def _fail(args: argparse.Namespace, msg: str) -> int:
+def _fail(args: argparse.Namespace, msg: str, code: int = 1) -> int:
     if args.json:
         print(json.dumps({"ok": False, "errors": [msg]}))
     else:
         print(f"error: {msg}", file=sys.stderr)
-    return 1
+    return code
 
 
 def _bad_root(root: Path) -> str | None:
     if root.is_dir() and ((root / "mods").is_dir() or (root / "local" / "mods").is_dir()):
         return None
-    return f"{root} is not a mods repo (needs a mods/ or local/mods/ directory)"
+    return f"{root}: not a mods repo: it has no mods/ or local/mods/ directory; pass --root DIR"
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -127,9 +182,10 @@ def _run(args: argparse.Namespace) -> int:
     if args.cmd == "generate":
         changed = [str(p.relative_to(root)) for p in generate(root, check=args.check, include_local=args.local)]
         if args.check:
-            _emit(args, {"ok": not changed, "errors": [f"generated file is stale: {c}" for c in changed],
+            _emit(args, {"ok": not changed,
+                         "errors": [f"generated file is stale: {c}; run scripts/mods generate" for c in changed],
                          "stale": changed},
-                  "up to date" if not changed else "stale: " + ", ".join(changed))
+                  "up to date" if not changed else "")
             return 1 if changed else 0
         _emit(args, {"ok": True, "errors": [], "written": changed},
               "wrote: " + (", ".join(changed) or "nothing"))
@@ -137,7 +193,7 @@ def _run(args: argparse.Namespace) -> int:
     if args.cmd == "validate":
         problems = validate(root, run_claude=not args.no_claude)
         _emit(args, {"ok": not problems, "errors": problems, "problems": problems},
-              "ok" if not problems else "\n".join(problems))
+              "ok" if not problems else "")
         return 1 if problems else 0
     if args.cmd == "list":
         code, payload = list_mods(root, scope=args.scope)
@@ -159,11 +215,11 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as exc:
         if exc.code == 0:
             raise
-        return 1
+        return exc.code if isinstance(exc.code, int) else 2
     try:
         bad = _bad_root(args.root.resolve())
         if bad:
             return _fail(args, bad)
         return _run(args)
     except (CatalogError, claude.ClaudeError, OSError, RuntimeError, UnicodeDecodeError) as exc:
-        return _fail(args, str(exc))
+        return _fail(args, str(exc), exit_code(exc))

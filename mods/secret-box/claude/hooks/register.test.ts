@@ -1,5 +1,6 @@
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
+import { makeScrubber } from './scrub'
 
 const SECRET = 'p@ss/w0rd-longer'
 const B64 = 'cEBzcy93MHJkLWxvbmdlcg=='
@@ -9,19 +10,22 @@ const done = (stdout: string, exitCode = 0) => ({
   value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
 })
 
-// Stands in for the engine beneath the plugin: the wrapper (`values`), its file, and the Bash tool.
+// Stands in for the engine beneath the plugin: the scrub protocol, its file, and the Bash tool.
 // `files` is the fake disk behind fs.read and fs.write; `stats` overrides what fs.stat reports for a path
 // ('throw' rejects it, 'hang' never answers).
+type StatOverride = Record<string, unknown> | 'throw' | 'hang'
+
 function world(
   on: On,
   values: Record<string, string> | 'fail' | (() => Record<string, string>) = { 'api.token': SECRET, pin: 'abc' },
   bash: object = { stdout: 'ran', stderr: '', interrupted: false },
   files = new Map<string, string>(),
-  stats = new Map<string, Record<string, unknown> | 'throw' | 'hang'>(),
+  stats = new Map<string, StatOverride | (() => StatOverride)>(),
 ) {
   const seen = { commands: [] as string[], loads: 0, toasts: [] as string[], reads: [] as string[], writes: [] as string[] }
   on('fs.stat', (_$, e) => {
-    const over = stats.get(e.path)
+    const configured = stats.get(e.path)
+    const over = typeof configured === 'function' ? configured() : configured
     if (over === 'throw') throw new Error('EIO')
     if (over === 'hang') return new Promise<never>(() => {})
     return { value: { kind: 'file', size: files.get(e.path)?.length ?? 1, mtimeMs: 0, isLink: false, realPath: e.path, ...over } }
@@ -38,9 +42,17 @@ function world(
     return { value: undefined }
   })
   on('process.run', (_$, e) => {
-    if (e.argv[1] !== 'values') return done('', 1)
+    if (e.argv[1] !== 'scrub') return done('', 1)
     seen.loads++
-    return values === 'fail' ? done('', 1) : done(JSON.stringify(typeof values === 'function' ? values() : values))
+    if (values === 'fail') return done('', 1)
+    const stored = typeof values === 'function' ? values() : values
+    const scrub = makeScrubber(Object.entries(stored))
+    const texts: string[] = JSON.parse(e.init?.stdin ?? '[]')
+    if (!texts.every((t) => typeof t === 'string')) return done('', 1)
+    return done(JSON.stringify({
+      results: texts.map((text) => scrub?.(text) ?? { text, names: [] }),
+      names: Object.keys(stored).sort(), short: Object.keys(stored).filter((n) => stored[n]!.length < 6),
+    }))
   })
   on('tool.call', { tool: 'Bash' }, (_$, e) => {
     seen.commands.push(e.command)
@@ -60,23 +72,50 @@ const row = (text: string) => ({
   uuid: 'u1',
 })
 
-test('a placeholder command runs through the wrapper, quoted, and the values reload after it', async ($, on) => {
+test('a placeholder command runs through the wrapper, quoted, and the result is scrubbed in a batch', async ($, on) => {
   const seen = world(on)
   const r = await $.tool.call({ tool: 'Bash', command: `curl -H "Authorization: Bearer {{secret:api.token}}" it's` })
   expect(r.deny).toBeUndefined()
   expect(seen.commands).toHaveLength(1)
-  expect(seen.commands[0]).toMatch(/^\S+\/bin\/secret-box exec -- 'curl -H "Authorization: Bearer \{\{secret:api\.token\}\}" it'\\''s'$/)
+  expect(seen.commands[0]).toMatch(/^\S+\/bin\/secret-box exec --scrub -- 'curl -H "Authorization: Bearer \{\{secret:api\.token\}\}" it'\\''s'$/)
   expect(seen.loads).toBe(2)
 })
 
-test('a command without a valid placeholder is not touched and the values load once', async ($, on) => {
+test('a command without a valid placeholder is not touched and each result uses one batch', async ($, on) => {
   const seen = world(on)
   for (const command of ['ls -la', 'echo {{secret:bad name}}', 'echo {{ secret:x }}']) {
     const r = await $.tool.call({ tool: 'Bash', command })
     expect(r.deny).toBeUndefined()
   }
   expect(seen.commands).toEqual(['ls -la', 'echo {{secret:bad name}}', 'echo {{ secret:x }}'])
+  expect(seen.loads).toBe(3)
+})
+
+test('scrubbing batches nested result text without loading plaintext into the hook', async ($, on) => {
+  const seen = world(on, undefined, { stdout: SECRET, stderr: SECRET, structuredContent: [{ text: SECRET }] })
+  const allowed = await $.tool.call({ tool: 'Bash', command: 'secret-box names' })
+  expect(JSON.stringify(allowed)).not.toContain(SECRET)
   expect(seen.loads).toBe(1)
+})
+
+test('scoped placeholders use the session directory while unscoped names still work', { options: { secretScopes: '{"api.token":["/projects/api/**"]}' } }, async ($, on) => {
+  const seen = world(on)
+  let cwd = '/projects/other'
+  on('session.cwd', () => ({ value: cwd }))
+  const denied = await $.tool.call({ tool: 'Bash', command: 'echo {{secret:api.token}}' })
+  expect(denied.deny).toBe('secret-box: error: api.token is not allowed in this directory; add the path to secretScopes')
+  expect(seen.commands).toEqual([])
+  cwd = '/projects/api/src'
+  expect((await $.tool.call({ tool: 'Bash', command: 'echo {{secret:api.token}}' })).deny).toBeUndefined()
+  cwd = '/projects/other'
+  expect((await $.tool.call({ tool: 'Bash', command: 'echo {{secret:pin}}' })).deny).toBeUndefined()
+})
+
+test('invalid scope options deny a placeholder before it runs', { options: { secretScopes: '{broken' } }, async ($, on) => {
+  const seen = world(on)
+  on('session.cwd', () => ({ value: '/projects/api' }))
+  expect((await $.tool.call({ tool: 'Bash', command: 'echo {{secret:api.token}}' })).deny).toContain('secretScopes is invalid')
+  expect(seen.commands).toEqual([])
 })
 
 test('a Bash call without a placeholder has a known value in its structured result replaced', async ($, on) => {
@@ -99,6 +138,36 @@ test('the saved output file is scrubbed in place once; a failure leaves it, toas
   expect((r.result as { stdout: string }).stdout).toBe('x {{secret:api.token}}')
   expect(seen.writes).toEqual(['/o/tool-results/ok.txt'])
   expect(seen.toasts).toEqual(['secret-box: could not scrub the saved output file (unreadable); it may contain a secret'])
+})
+
+test('a changed or unreadable saved file is not overwritten after scrubbing', async ($, on) => {
+  const changes: [string, StatOverride][] = [
+    ['link', { isLink: true }],
+    ['size', { size: 999 }],
+    ['mtime', { mtimeMs: 1 }],
+    ['target', { realPath: '/other/tool-results/target.txt' }],
+    ['unresolved', { realPath: undefined }],
+    ['kind', { kind: 'dir' }],
+    ['missing', 'throw'],
+  ]
+  const text = `a ${SECRET}`
+  const files = new Map(changes.map(([name]) => [`/o/tool-results/${name}.txt`, text]))
+  const stats = new Map<string, StatOverride | (() => StatOverride)>()
+  const bash = { stdout: SECRET, persistedOutputPath: '' }
+  const seen = world(on, undefined, bash, files, stats)
+  for (const [name, changed] of changes) {
+    const path = `/o/tool-results/${name}.txt`
+    let calls = 0
+    stats.set(path, () => calls++ === 0 ? {} : changed)
+    bash.persistedOutputPath = path
+    const answer = await $.tool.call({ tool: 'Bash', command: 'cat big' })
+    expect((answer.result as { stdout: string }).stdout).toBe('{{secret:api.token}}')
+    expect(files.get(path)).toBe(text)
+    expect(calls).toBe(2)
+  }
+  expect(seen.reads).toEqual([...files.keys()])
+  expect(seen.writes).toEqual([])
+  expect(seen.toasts).toEqual(['secret-box: could not scrub the saved output file (changed-file); it may contain a secret'])
 })
 
 test('a link, a path outside or nested below tool-results, a path with .. and a file over 4 MiB are left alone with one toast', async ($, on) => {
@@ -145,15 +214,13 @@ test('a known value, its base64 and URL forms are replaced in a tool result; a s
   expect(stored.content).toBe('a {{secret:api.token}} b {{secret:api.token}} c {{secret:api.token}} d abc')
 })
 
-test('a value this command used is scrubbed even when the reload after it no longer has it', async ($, on) => {
-  let loads = 0
-  const files = new Map([['/o/tool-results/r.txt', `a ${SECRET}`]])
-  const bash = { stdout: `x ${SECRET}`, stderr: '', interrupted: false, persistedOutputPath: '/o/tool-results/r.txt' }
-  world(on, (): Record<string, string> => (++loads === 1 ? { 'api.token': SECRET } : {}), bash, files)
-  const r = await $.tool.call({ tool: 'Bash', command: 'curl {{secret:api.token}}' })
-  expect(loads).toBe(2)
-  expect((r.result as { stdout: string }).stdout).toBe('x {{secret:api.token}}')
-  expect(files.get('/o/tool-results/r.txt')).toBe('a {{secret:api.token}}')
+test('newly stored values are scrubbed on the next result without a reload', async ($, on) => {
+  let values: Record<string, string> = {}
+  world(on, () => values, { stdout: SECRET })
+  await $.tool.call({ tool: 'Bash', command: 'echo ok' })
+  values = { 'api.token': SECRET }
+  const r = await $.tool.call({ tool: 'Bash', command: 'echo ok' })
+  expect((r.result as { stdout: string }).stdout).toBe('{{secret:api.token}}')
 })
 
 test('attachment, delivery, compaction and notice rows are scrubbed too', async ($, on) => {
@@ -185,6 +252,17 @@ test('when the values cannot be loaded the placeholder command is denied and nev
   const plain = await $.tool.call({ tool: 'Bash', command: 'ls' })
   expect(plain.deny).toBeUndefined()
   expect(seen.commands).toEqual(['ls'])
+})
+
+test('a failed scrub withholds result text and conversation text', async ($, on) => {
+  world(on, 'fail', { stdout: SECRET })
+  const session = mock.session(on)
+  const r = await $.tool.call({ tool: 'Bash', command: 'echo ok' })
+  expect(JSON.stringify(r)).not.toContain(SECRET)
+  expect(JSON.stringify(r)).toContain('withheld')
+  await $.session.append(row(SECRET))
+  expect(JSON.stringify(session.appended())).not.toContain(SECRET)
+  expect(JSON.stringify(session.appended())).toContain('withheld')
 })
 
 test('dry mode toasts what it would do and rewrites nothing', { options: { mode: 'dry' } }, async ($, on) => {

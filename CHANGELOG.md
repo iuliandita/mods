@@ -1,6 +1,151 @@
 # Changelog
 
-## Unreleased
+## [Unreleased]
+
+## [1.0.0] - 2026-11-03
+
+First stable release. The plugin code is the same as v0.3.3, so plugin versions are unchanged: `guard-rules` 0.3.2, `secret-box` 0.3.2, `notify` 0.3.3, the rest 0.3.1. Collection tags do not set plugin versions.
+
+### Changed
+
+- `main` is now the stable channel and releases are tagged on it. The install commands in the READMEs, INSTALL.md and `mods.json` pin `main` (`iuliandita/mods#main` for Claude Code, `iuliandita/mods@main` for Codex). `develop` stays the default branch and the nightly; drop the suffix to follow it.
+- SECURITY.md uses the shared Supported Versions wording: fixes land on `develop` and reach users through `main` and the next tagged release.
+
+### Notes
+
+- `notify` has not been verified on a real Claude Code, Codex, or OpenCode host; `docs/COMPATIBILITY.md` lists what each mod was verified on.
+
+## [0.3.3] - 2026-10-29
+
+Patch prerelease, tagged on `develop`. Plugin versions are unchanged: `guard-rules` 0.3.2, `secret-box` 0.3.2, `notify` 0.3.3, the rest 0.3.1.
+
+Codex users: updating changes the `guard-rules` and `secret-box` hook content, so trust those hooks again in `/hooks` after the update. `scripts/mods doctor` reports hooks that are still untrusted.
+
+### Added
+
+- Renovate replaces Dependabot version updates (`renovate.json`: weekly schedule, 7-day cooldown, grouped GitHub Actions updates, OSV alerts). Automerge is off, so every Renovate PR needs a manual merge.
+- `guard-rules` accepts opt-in `modeUnparsed=ask` on Claude Code for enforced parser findings; parsed violations still deny. Codex and OpenCode fall back to `on` with a warning.
+
+### Fixed
+
+- CI installs the pinned Claude Code CLI from a checked-in lockfile with `npm ci --ignore-scripts`, so the package integrity is verified; the version pin now lives in `.github/ci/claude-code/package.json`.
+- `doctor` no longer doubles the `error:` prefix on Codex hook trust errors; INSTALL.md and the retired-mod steps say leftover Codex `hooks.state` entries for removed plugins are harmless.
+- `secret-box` rechecks saved output metadata and link status immediately before writing, skips changed files, and documents the remaining race window in the engine API.
+- `secret-box` merges overlapping known-value matches in the hooks and helper, including across streamed output chunks, so overlapping values leave no exposed tail.
+- `guard-rules` scans decoded argument words for attribution and retains unparsed findings for encoded tool names, including when state combinations exceed the parser limit.
+- `guard-rules` tracks Terraform argument injection and cloud target overrides, HOME changes and alternate git common directories; injected Terraform arguments no longer bypass mutation checks.
+- `guard-rules` treats secret placeholders in context and workspace values as unknown targets, including switches earlier in the command.
+- `guard-rules` leaves ambiguous kubeconfig keys and unsupported line breaks unclassified instead of falling through to a relaxed context in a later file.
+- `guard-rules` treats cleared or removed infra target variables, empty values, changed HOME and privilege-wrapper environments as custom targets instead of using inherited relaxed lookups.
+- `guard-rules` keeps explicit kubeconfig paths intact and tracks context switches by the first existing file in a `KUBECONFIG` list.
+- `guard-rules` tracks more file writers, attached output options and `dd of=` paths; unresolved writer and redirect targets make later Kubernetes and Terraform writes unclassified.
+- `guard-rules` invalidates stale kube context lookups after more documented switchers and cloud CLI aliases, and checks only the `oc config` verb for read exemptions.
+
+## [0.3.2] - 2026-10-29
+
+Patch prerelease, tagged on `develop`. Only the `notify` plugin changed (now 0.3.3); the other plugins stay at 0.3.1.
+
+Codex users: updating changes the `notify` hook content, so trust the hooks again in `/hooks` after the update. `scripts/mods doctor` reports hooks that are still untrusted.
+
+### Fixed
+
+- `notify` clears `LD_LIBRARY_PATH` and `LD_PRELOAD` for Linux notifications so a host's bundled libraries do not break `notify-send`. Missing notifiers still warn without failing the session. The plugin is at 0.3.3.
+
+### Changed
+
+- `notify` titles a notification `<repo> (<harness>)`, such as `mods (Codex)`, and adds ` on <branch>` to the text, such as `Finished on develop`. The repo is the nearest parent folder with a `.git`; the branch is read from `.git/HEAD` without running git. The plugin is at 0.3.2.
+
+## [0.3.1] - 2026-10-29
+
+Patch prerelease, tagged on `develop`. All five current plugins are now at version 0.3.1.
+
+Codex users: updating changes the hook content, so trust the hooks again in `/hooks` after the update. `scripts/mods doctor` reports hooks that are still untrusted.
+
+### Fixed
+
+- `notify` runs the Codex `Stop` hook synchronously with a one-second cap so `codex exec` waits for finish delivery. Permission hooks stay in the background, and notifier processes still have a 250 ms timeout.
+- `notify` handles OpenCode 2.2.1 `session.execution.succeeded` and keeps legacy `session.idle` without double notifications per execution. Permission and form event names and payloads match the published 2.2.1 schema.
+- `scripts/mods doctor` reports installed Codex hook trust and disabled state and fails for untrusted guard hooks. Install reminders and recovery docs explain re-trusting after every update; Codex hook labels identify the mod and event in `/hooks`.
+- All five current plugins use version 0.3.1 in every host manifest so marketplace updates pick up their changes since v0.2.0. Lint now rejects shipped plugin changes without an increased version since the latest collection tag.
+
+## [0.3.0] - 2026-10-29
+
+Third collection prerelease, tagged on `develop`. Individual plugin versions are unchanged.
+
+### Breaking
+
+- `secret-box` removes the plaintext `values` command; hooks use batched `scrub` calls instead. Scripts that read values with `secret-box values` have no replacement by design; use `exec` to run a command with a placeholder. Directory and Bash-only placeholder limits are documented per host.
+- `secret-box exec` always scrubs its output. `--scrub` is still accepted and changes nothing, but scripts that relied on raw output from `exec` now get scrubbed text.
+- The `prompt-gate` and `skill-pick` mods are removed, with their shared helpers, the Jev client and the Codex and OpenCode adapters. Neither showed a measured benefit, and both made a model call per prompt. No prompt leaves the machine through mods now. To remove an existing install, run `scripts/mods uninstall prompt-gate skill-pick` at the scope you installed at; it also prints the Codex and OpenCode steps. `scripts/mods list` shows them as retired while installed.
+- `guard-rules` is stricter in ways a script or workflow can depend on. It removes editor and pager file exemptions (use a file-reading tool for tool-named editor paths), disables exemptions for PATH tokens and `env -P`/`--path`, narrows data exemptions for scripts, path-qualified commands and editor options, and checks git writes after unresolved directory changes independently of `modeUnparsed`. Commands that were allowed before can now be denied; adjust the command, or set the mod's `mode` to `dry` or `off`.
+
+### Added
+
+- `notify` mod: a desktop notification when the agent finishes or waits on a permission prompt or other input, titled with the project folder, with an optional sound (off by default). Uses `notify-send` on Linux and `osascript` on macOS, warns once when none is available, and makes no network calls. Runs on Claude Code (hooks), Codex (hooks or its `notify` setting) and OpenCode (plugin events); untested on real hosts.
+- `secret-box` automatically uses macOS Keychain through `security`, with platform-specific catalog requirements; Linux keeps `secret-tool`.
+- `secret-box` option `secretScopes` limits named placeholders to configured directory globs on all three hosts.
+- `guard-rules` option `modeUnparsed` (`on`, `dry`, `off`) controls parser findings separately; `on` preserves existing behavior and `ask` remains unsupported.
+
+### Changed
+
+- `secret-box` setup, platform requirements and protection limits are aligned across the root docs, security policy and catalog descriptions.
+- `secret-box` summarizes scrubbing, keyring and scope limits per host in a single README section.
+- `guard-rules` documents rule controls and common false positives in its README, with parser details on a linked page.
+- `scripts/mods list|install|uninstall --help` describe `--scope`; INSTALL.md, CONTRIBUTING.md and AGENTS.md list `stack-check.py` and the exit codes, and `docs/README.md` links every mod.
+
+### Fixed
+
+- `secret-box` replaces provider-executed OpenCode tool calls and results with plain text notices after a scrub failure, so Anthropic accepts the history without unchecked server-tool payloads.
+- `secret-box` scrubs outgoing messages and system content for OpenCode 2.2.1 compaction, generate and title requests as well as primary context, including user `!` shell output, with shared failure withholding.
+- `secret-box` keeps OpenCode 2.2.1 tool-call inputs, provider execution flags, result objects, Error instances and typed prompts usable after a scrub failure, and checks non-enumerable Error fields during scrubbing.
+- `guard-rules` disables exemptions for PATH tokens and `env -P`/`--path`, checks loop output through `done`, and recognizes `ssh`, `php`, `lua`, `tclsh`, `at`, `crontab` and `batch` as input executors.
+- `notify` runs Codex hooks in the background, caps notifier delivery at 250 ms on both Codex entry paths, and skips events with `agent_id`.
+- `guard-rules` removes editor/pager file exemptions, checks data-command inline input and PATH writes, and limits producer checks to named input executors; use a file-reading tool for tool-named editor paths.
+- `delegation-board` on OpenCode honors `mode` `off` from the user-level options file; the panel shows a notice and reads no sessions.
+- `statusline` clears the branch's PR badge when the repository or branch changes, so a failed lookup no longer shows the previous branch's PR.
+- `secret-box` on OpenCode allowlists message roles and content-part fields after a scrub failure, discards arbitrary keys and nested payloads, and withholds results and prompts entirely.
+- `secret-box exec` always scrubs its output (`--scrub` is still accepted); the helper reply is raw UTF-8, so large non-ASCII saved files fit the 4 MiB limit.
+- `scripts/mods uninstall` always prints the Codex and OpenCode steps for retired mods, treats "not installed" in Claude Code as a skip and a missing `claude` CLI as a note, and keeps the steps in the payload when the Claude uninstall really fails.
+- `guard-rules` checks literal pipeline producer words in command runners, executable `man` options and command-bearing environment values; computed pipeline output remains a documented limit.
+- `guard-rules` allowlists editor flags, disables data exemptions after command-resolution changes, and checks dynamic `git -C` directories even with `modeUnparsed=off`.
+- `guard-rules` treats file arguments and known data commands as data while keeping command runners guarded.
+- `guard-rules` follows both plain and scrubbed `secret-box exec` wrappers when checking commands.
+
+### Removed
+
+- The `prompt-gate` and `skill-pick` mods (see Breaking).
+
+## [0.2.0] - 2026-10-29
+
+Second collection prerelease, tagged on `develop`. Individual plugin versions are unchanged.
+
+### Breaking
+
+- `scripts/mods` usage errors (unknown command or flag, bad arguments) now exit 2 instead of 1.
+  Scripts that test for exit 1 should accept 2 as well.
+- A missing `claude` CLI or pinned `bun` now exits 3 instead of 1. Install the tool, or treat 3
+  as "required tool missing".
+- Human-readable errors now go to stderr with an `error:` prefix and a next step, not to stdout.
+  Scripts that parse error text from stdout should read stderr or use `--json`, which still
+  prints `ok` and `errors` on stdout.
+
+### Changed
+
+- `scripts/mods --help` lists Environment and Exit codes sections.
+- README has a logo, a status line and the shared section layout.
+- Changelog uses Keep a Changelog headings and compare links.
+
+### CI
+
+- Job ids are `lint`, `test` and `integration`; a new `security` workflow runs a secret scan
+  and a workflow audit.
+- A `release` workflow publishes GitHub release notes from this changelog on tag push; `v0.*`
+  tags must be on `develop`.
+- The shared stack canon is vendored and checked in `lint`; a weekly `stack-sync` workflow
+  opens an issue on drift.
+- Release process is documented in CONTRIBUTING.md.
+
+### Docs
 
 - Recorded Claude Code 2.1.301 terminal smoke checks for `prompt-gate`, `skill-pick`,
   `delegation-board` and `statusline` in the compatibility docs and generated catalog.
@@ -8,7 +153,7 @@
 - CI still uses a fixed CLI version; individual mods can record runtime verification on
   different versions without rewriting older evidence.
 
-## v0.1.0 - 2026-10-15
+## [0.1.0] - 2026-10-15
 
 First collection prerelease. Individual plugin versions remain independent of this tag.
 
@@ -86,3 +231,12 @@ First collection prerelease. Individual plugin versions remain independent of th
 - `prompt-gate` and `skill-pick` dry mode releases the prompt first and measures from a clock
   timer afterwards; `delegation-board` resets on `/clear` and prints a text table when its pane
   is not placed (Claude Desktop).
+
+[Unreleased]: https://github.com/iuliandita/mods/compare/v1.0.0...develop
+[1.0.0]: https://github.com/iuliandita/mods/compare/v0.3.3...v1.0.0
+[0.3.3]: https://github.com/iuliandita/mods/compare/v0.3.2...v0.3.3
+[0.3.2]: https://github.com/iuliandita/mods/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/iuliandita/mods/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/iuliandita/mods/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/iuliandita/mods/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/iuliandita/mods/releases/tag/v0.1.0

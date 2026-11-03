@@ -11,8 +11,10 @@ for the checked segments and remaining limits.
 
 Install:
 
-    claude plugin marketplace add iuliandita/mods
-    claude plugin install statusline@iuliandita-mods
+```sh
+claude plugin marketplace add iuliandita/mods#main
+claude plugin install statusline@iuliandita-mods
+```
 
 ## What it shows
 
@@ -244,9 +246,11 @@ Pure formatting, parsing and math live in `claude/hooks/segments.ts`, tested in
 `segments.test.ts`, including a parity test against the script's own output; the hooks and engine
 calls live in `claude/hooks/register.tsx`.
 
-    scripts/typecheck statusline
-    claude plugin test mods/statusline/claude
-    claude plugin validate --strict mods/statusline/claude
+```sh
+scripts/typecheck statusline
+claude plugin test mods/statusline/claude
+claude plugin validate --strict mods/statusline/claude
+```
 
 ## OpenCode
 

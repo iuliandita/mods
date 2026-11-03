@@ -6,6 +6,9 @@ import { join } from 'node:path'
 
 import { main, type Io } from './cli'
 import { setup } from './opencode'
+import { request, WITHHELD } from './core'
+import { parseReply, scrubBatch } from '../claude/hooks/remote'
+import { scopeDenied } from '../claude/hooks/scopes'
 
 const SECRET = 'tok_AbC123xyz-Qq9'
 
@@ -66,6 +69,148 @@ test('codex: commands without a placeholder, other tools and bad input are left 
   expect(await hook('not json')).toEqual({ code: 0, out: null })
 })
 
+test('the helper returns scrubbed batches and names without exposing stored values', async () => {
+  const r = await request(helper, [SECRET, `key=${SECRET}`, 'unchanged'])
+  expect(r.results.map((x) => x.text)).toEqual(['{{secret:API_KEY}}', 'key={{secret:API_KEY}}', 'unchanged'])
+  expect(r.names).toEqual(['API_KEY'])
+  expect(JSON.stringify(r)).not.toContain(SECRET)
+})
+
+test('scrub batches deduplicate strings and reject malformed or incomplete replies', async () => {
+  let calls = 0
+  const r = await scrubBatch((scrub) => [SECRET, SECRET].map(scrub), async (texts) => {
+    calls++
+    expect(texts).toEqual([SECRET])
+    return request(helper, texts)
+  })
+  expect(calls).toBe(1)
+  expect(r.map((x) => x.text)).toEqual(['{{secret:API_KEY}}', '{{secret:API_KEY}}'])
+  for (const reply of ['null', '{}', '{"results":[],"names":[],"short":[]}', '{"results":[{"text":3,"names":[]}],"names":[],"short":[]}']) {
+    expect(() => parseReply(reply, 1)).toThrow()
+  }
+})
+
+test('opencode withholds unchecked strings when the scrub helper cannot start', async () => {
+  withMode()
+  const h = await plugin({ helper: join(root, 'missing') })
+  const after = { tool: 'read', id: 'failure', status: 'completed', result: { output: SECRET } }
+  await h.after!(after)
+  expect(JSON.stringify(after.result)).not.toContain(SECRET)
+  expect(JSON.stringify(after.result)).toContain('withheld')
+})
+
+test('opencode fallback allowlists message structure and withholds nested discriminators and keys', async () => {
+  withMode()
+  const h = await plugin({ helper: join(root, 'missing') })
+  const ctx = {
+    messages: [
+      { role: 'user', content: [{ type: 'text', text: SECRET, [SECRET]: true, nested: { type: SECRET, role: 'assistant' } }], [SECRET]: 1 },
+      { role: 'assistant', content: [{ type: 'tool-call', id: SECRET, name: SECRET, input: { type: SECRET, role: SECRET, [SECRET]: 1 } }] },
+      { role: 'tool', content: [{ type: 'tool-result', id: SECRET, name: SECRET, result: { type: 'json', value: { [SECRET]: SECRET } } }] },
+      { role: SECRET, content: [{ type: SECRET, text: SECRET }] },
+    ],
+  }
+  await h.context!(ctx)
+  const text = JSON.stringify(ctx.messages)
+  expect(text).not.toContain(SECRET.slice(0, 8))
+  expect(Object.keys(ctx.messages[0]!)).toEqual(['role', 'content'])
+  expect(Object.keys(ctx.messages[0]!.content[0]!)).toEqual(['type', 'text'])
+  expect(ctx.messages[0]!.role).toBe('user')
+  expect(ctx.messages[0]!.content[0]!.type).toBe('text')
+  expect(ctx.messages[0]!.content[0]).toEqual({ type: 'text', text: expect.stringContaining('withheld') })
+  expect(ctx.messages[1]!.content[0]!.type).toBe('tool-call')
+  expect(ctx.messages[2]!.content[0]!.type).toBe('tool-result')
+  expect(ctx.messages[3]).toEqual({ role: 'user', content: [{ type: 'text', text: expect.stringContaining('withheld') }] })
+  for (const field of ['type', 'role', SECRET]) {
+    const after = { tool: 'read', id: 'failed', status: 'error', result: { [field]: SECRET }, error: { [SECRET]: { type: 'text', role: SECRET } } }
+    await h.after!(after)
+    expect(JSON.stringify([after.result, after.error])).not.toContain(SECRET)
+    expect<unknown>(after.result).toEqual({ output: expect.stringContaining('withheld'), content: [{ type: 'text', text: expect.stringContaining('withheld') }] })
+    expect(after.error).toBeInstanceOf(Error)
+  }
+  const prompt = { prompt: { [SECRET]: { type: SECRET, role: SECRET } } }
+  await h.prompt!(prompt)
+  expect(JSON.stringify(prompt)).not.toContain(SECRET)
+  expect<unknown>(prompt.prompt).toEqual({ text: expect.stringContaining('withheld'), files: [], agents: [], skills: [] })
+})
+
+test('opencode fallback replaces provider-executed tool calls and results with plain text notices', async () => {
+  withMode()
+  const h = await plugin({ helper: join(root, 'missing') })
+  for (const name of ['context', 'compaction', 'generate', 'title'] as const) {
+    const ctx = { messages: [{ role: 'assistant', content: [
+      { type: 'tool-call', id: SECRET, name: 'web_search', input: { query: SECRET }, providerExecuted: true, [SECRET]: SECRET },
+      { type: 'tool-result', id: SECRET, name: 'web_search', result: { type: 'json', value: { [SECRET]: SECRET } }, providerExecuted: true, [SECRET]: SECRET },
+    ] }] }
+    await h[name]!(ctx)
+    expect<unknown>(ctx.messages).toEqual([{ role: 'assistant', content: [
+      { type: 'text', text: WITHHELD },
+      { type: 'text', text: WITHHELD },
+    ] }])
+    expect(JSON.stringify(ctx)).not.toContain(SECRET)
+  }
+})
+
+test('opencode fallback keeps client tool pairing and only a false provider execution flag', async () => {
+  withMode()
+  const h = await plugin({ helper: join(root, 'missing') })
+  for (const providerExecuted of [false, SECRET, undefined]) {
+    const ctx = { messages: [
+      { role: 'assistant', content: [{ type: 'tool-call', id: SECRET, name: SECRET, input: SECRET, providerExecuted }] },
+      { role: 'tool', content: [{ type: 'tool-result', id: SECRET, name: SECRET, result: SECRET, providerExecuted }] },
+    ] }
+    await h.context!(ctx)
+    const call = ctx.messages[0]!.content[0]!
+    const result = ctx.messages[1]!.content[0]!
+    expect(call).toHaveProperty('input', {})
+    expect(call.id).toBe(result.id)
+    for (const part of [call, result]) {
+      if (typeof providerExecuted === 'boolean') expect(part.providerExecuted).toBe(providerExecuted)
+      else expect(part).not.toHaveProperty('providerExecuted')
+    }
+    expect(JSON.stringify(ctx)).not.toContain(SECRET)
+  }
+})
+
+test('opencode fallback replaces error fields and prompt attachments with usable notices', async () => {
+  withMode()
+  const h = await plugin({ helper: join(root, 'missing') })
+  class ToolError extends Error {}
+  const failed = { tool: 'shell', id: 'failed', status: 'error',
+    result: { output: SECRET, content: [{ type: 'text', text: SECRET }], [SECRET]: SECRET },
+    error: new ToolError(SECRET, { cause: SECRET }),
+  }
+  await h.after!(failed)
+  expect(failed.error).toBeInstanceOf(ToolError)
+  expect(failed.error.message).toContain('withheld')
+  expect(failed.error.stack).not.toContain(SECRET)
+  expect(failed.error).not.toHaveProperty('cause')
+  expect(failed.error).not.toHaveProperty('metadata')
+  expect<unknown>(failed.result).toEqual({ output: expect.stringContaining('withheld'), content: [{ type: 'text', text: expect.stringContaining('withheld') }] })
+  const prompt = { prompt: { text: SECRET, files: [{ uri: SECRET }], agents: [{ name: SECRET }], skills: [{ id: SECRET }], [SECRET]: SECRET } }
+  await h.prompt!(prompt)
+  expect<unknown>(prompt.prompt).toEqual({ text: expect.stringContaining('withheld'), files: [], agents: [], skills: [] })
+  expect(JSON.stringify([failed, prompt])).not.toContain(SECRET)
+})
+
+test('opencode scrubs non-enumerable Error messages, stacks and causes when the helper works', async () => {
+  withMode()
+  const h = await plugin()
+  const failed = { tool: 'shell', id: 'error', status: 'error', error: new Error(SECRET, { cause: SECRET }) }
+  await h.after!(failed)
+  expect(failed.error).toBeInstanceOf(Error)
+  expect(failed.error.message).toBe('{{secret:API_KEY}}')
+  expect(failed.error.stack).not.toContain(SECRET)
+  expect(failed.error.cause).toBe('{{secret:API_KEY}}')
+})
+
+test('the helper reply stays near the text size for non-ASCII text, so a large file still fits the 4 MiB cap', async () => {
+  const big = '汉'.repeat(700_000)
+  const r = await request(helper, [big, '\ud800 lone'])
+  expect(r.results[0]!.text).toBe(big)
+  expect(r.results[1]!.text).toBe('\ud800 lone')
+})
+
 test('codex: off leaves the command alone, dry only reports, an unreadable options file counts as on', async () => {
   withMode('off')
   expect((await hook(bash('echo {{secret:API_KEY}}'))).out).toBeNull()
@@ -74,7 +219,7 @@ test('codex: off leaves the command alone, dry only reports, an unreadable optio
   expect(dry.systemMessage).toContain('API_KEY')
   expect(dry.hookSpecificOutput).toBeUndefined()
   writeFileSync(options, '{ broken')
-  expect((await hook(bash('echo {{secret:API_KEY}}'))).out.hookSpecificOutput.permissionDecision).toBe('allow')
+  expect((await hook(bash('echo {{secret:API_KEY}}'))).out.hookSpecificOutput.permissionDecision).toBe('deny')
 })
 
 test('codex: a missing helper blocks a placeholder command only', async () => {
@@ -85,19 +230,97 @@ test('codex: a missing helper blocks a placeholder command only', async () => {
   expect((await hook(bash('echo hi'), missing)).out).toBeNull()
 })
 
-type Hooks = { before?: (e: any) => Promise<void> | void; after?: (e: any) => Promise<void> | void; context?: (e: any) => Promise<void> | void; prompt?: (e: any) => Promise<void> | void }
+type RequestHook = 'context' | 'compaction' | 'generate' | 'title'
+type Hooks = { before?: (e: any) => Promise<void> | void; after?: (e: any) => Promise<void> | void; prompt?: (e: any) => Promise<void> | void } & Partial<Record<RequestHook, (e: { messages: unknown; system?: unknown }) => Promise<void> | void>>
 
 async function plugin(over: { helper?: string } = {}): Promise<Hooks> {
   const h: Hooks = {}
   await setup(
     {
+      location: { directory: '/projects' },
       tool: { hook: async (name: string, cb: any) => void (name === 'execute.before' ? (h.before = cb) : (h.after = cb)) } as any,
-      session: { hook: async (name: string, cb: any) => void (name === 'context' ? (h.context = cb) : (h.prompt = cb)) } as any,
+      session: { hook: async (name: RequestHook | 'prompt', cb: any) => void (h[name] = cb) } as any,
     },
     { helper, options, ...over },
   )
   return h
 }
+
+test('opencode scrubs messages and system content for every model request and withholds both on failure', async () => {
+  withMode()
+  for (const helperPath of [helper, join(root, 'missing')]) {
+    const h = await plugin({ helper: helperPath })
+    for (const name of ['context', 'compaction', 'generate', 'title'] as const) {
+      const event = { messages: [{ role: 'user', content: [{ type: 'text', text: SECRET }] }],
+        system: [{ type: 'text', text: SECRET, [SECRET]: SECRET }], options: { maxTokens: 1000 } }
+      await h[name]!(event)
+      expect(JSON.stringify(event)).not.toContain(SECRET)
+      expect(event.messages[0]!.content[0]!.text).toBe(helperPath === helper ? '{{secret:API_KEY}}' : '[secret-box: this content was withheld because scrubbing failed]')
+      expect(event.system[0]!.text).toBe(event.messages[0]!.content[0]!.text)
+      expect(event.options).toEqual({ maxTokens: 1000 })
+    }
+  }
+})
+
+test('opencode compaction scrubs user ! shell output without execute.after or prompt', async () => {
+  withMode()
+  const h = await plugin()
+  const shell = spawnSync('printf', ['%s', SECRET], { encoding: 'utf8' })
+  expect(shell.status).toBe(0)
+  // OpenCode 2.2.1 projects a stored shell row into this user-message text.
+  const prefix = 'The following shell command was executed by the user:\n\nCommand:\nprint-token\n\nOutput:\n'
+  const event = { messages: [{ role: 'user', content: [{ type: 'text', text: prefix + shell.stdout }] }] }
+  expect(JSON.stringify(event)).toContain(SECRET)
+  await h.compaction!(event)
+  expect(event.messages[0]!.content[0]!.text).toBe(prefix + '{{secret:API_KEY}}')
+  expect(JSON.stringify(event)).not.toContain(SECRET)
+})
+
+test('opencode request scrubbing honors off and dry on every model request', async () => {
+  for (const mode of ['off', 'dry']) {
+    withMode(mode)
+    const h = await plugin({ helper: join(root, 'missing') })
+    for (const name of ['context', 'compaction', 'generate', 'title'] as const) {
+      const event = { messages: [{ role: 'user', content: [{ type: 'text', text: SECRET }] }], system: [{ type: 'text', text: SECRET }] }
+      const original = structuredClone(event)
+      await h[name]!(event)
+      expect(event).toEqual(original)
+    }
+  }
+})
+
+test('scope globs match whole normalized directories and invalid options fail closed', () => {
+  for (const [paths, cwd, allowed] of [
+    [['/projects/api/**'], '/projects/api', true], [['/projects/api/**'], '/projects/api/src', true],
+    [['/projects/api/**'], '/projects/api-other', false], [['/projects/*/src'], '/projects/api/src', true],
+    [['/projects/*/src'], '/projects/api/deep/src', false], [['/projects/ap?'], '/projects/api/', true],
+    [['/projects/api'], '/projects/api/../other', false], [[], '/projects/api', false],
+    [['/projects/api/**'], '', false],
+  ] as const) {
+    expect(scopeDenied({ API_KEY: paths }, ['API_KEY'], cwd) === null).toBe(allowed)
+  }
+  expect(scopeDenied('{"API_KEY":["/projects/api/**"]}', ['API_KEY', 'UNSCOPED'], '/projects/api')).toBeNull()
+  expect(scopeDenied({ API_KEY: [] }, ['UNSCOPED'], '/other')).toBeNull()
+  for (const raw of ['{', '[]', null, { API_KEY: 'all' }, { API_KEY: ['relative'] }, { API_KEY: ['/projects/../*'] }]) {
+    expect(scopeDenied(raw, ['API_KEY'], '/projects/api')).toContain('secretScopes is invalid')
+  }
+})
+
+test('both ports enforce scopes using the tool workdir and deny unreadable scope settings', async () => {
+  writeFileSync(options, JSON.stringify({ secretScopes: { API_KEY: ['/projects/api/**'] } }))
+  const h = await plugin()
+  for (const [workdir, allowed] of [['api', true], ['api/src', true], ['other', false], ['api/../other', false]] as const) {
+    const command = 'echo {{secret:API_KEY}}'
+    const result = await hook(JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Bash', cwd: '/projects', tool_input: { command, workdir } }))
+    expect(result.out.hookSpecificOutput.permissionDecision).toBe(allowed ? 'allow' : 'deny')
+    const call = h.before!({ tool: 'shell', id: workdir, input: { command, workdir } })
+    if (allowed) await call
+    else await expect(call).rejects.toThrow('API_KEY is not allowed in this directory; add the path to secretScopes')
+  }
+  expect((await hook(bash('echo {{secret:API_KEY}}'))).out.hookSpecificOutput.permissionDecision).toBe('deny')
+  writeFileSync(options, '{ broken')
+  await expect(h.before!({ tool: 'shell', id: 'broken', input: { command: 'echo {{secret:API_KEY}}' } })).rejects.toThrow('could not be read')
+})
 
 test('opencode: a shell command with a placeholder is rewritten, its result and the conversation are scrubbed', async () => {
   withMode()

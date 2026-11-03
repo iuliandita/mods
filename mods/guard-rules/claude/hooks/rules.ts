@@ -1,11 +1,12 @@
 import { COMMIT_SUBS, createFollower, protectedBranchViolations } from './branch'
 import { contextViolations, followSwitch, isMutating, newContextState, stepContext, type Classes } from './context'
 import { annotates, identityViolations } from './identity'
-import { extractCalls, resolvePath, type Call, type GhCall, type GitCall, type Parsed } from './shell'
+import { extractCalls, resolvePath, tokenize, type Call, type GhCall, type GitCall, type Parsed } from './shell'
 import { taintConfig, type ConfigTaint } from './state'
 import { SHELL_NAMES, toolWords } from './words'
 
 export type Mode = 'off' | 'dry' | 'on'
+export type UnparsedMode = Mode | 'ask'
 export type RuleId = 'attribution' | 'protected-branch' | 'identity' | 'context' | 'unparsed' | 'config' | 'lookup'
 export type Violation = { rule: RuleId; mode: Mode; message: string }
 export type IdentityRule = { prefix: string; email: string }
@@ -15,6 +16,7 @@ export type Config = {
   protectedBranch: Mode
   identity: Mode
   context: Mode
+  unparsed: UnparsedMode
   protectedBranches: string[]
   unprotectedRepos: string[]
   identityRules: IdentityRule[]
@@ -35,6 +37,8 @@ export interface Env {
   contexts(): Promise<Classes>
   // Null when the file cannot be read.
   read(path: string): Promise<string | null>
+  // Throws when existence cannot be established; omitted by in-memory test environments.
+  exists?(path: string): Promise<boolean>
 }
 
 export type Verdict = { enforced: Violation[]; dry: Violation[] }
@@ -80,7 +84,7 @@ function parseMode(value: unknown, name: string, errors: string[]): Mode {
   const v = value === undefined || value === null ? '' : String(value).trim().toLowerCase()
   if (v === '') return 'on'
   if (v === 'off' || v === 'dry' || v === 'on') return v
-  errors.push(`${name} must be off, dry or on`)
+  errors.push(`${name} must be ${name === 'modeUnparsed' ? 'off, dry, on or ask' : 'off, dry or on'}`)
   return 'on'
 }
 
@@ -118,6 +122,7 @@ export function parseConfig(options: Readonly<Record<string, unknown>>): Config 
     protectedBranch: parseMode(options.modeProtectedBranch, 'modeProtectedBranch', errors),
     identity: parseMode(options.modeIdentity, 'modeIdentity', errors),
     context: parseMode(options.modeContext, 'modeContext', errors),
+    unparsed: String(options.modeUnparsed ?? '').trim().toLowerCase() === 'ask' ? 'ask' : parseMode(options.modeUnparsed, 'modeUnparsed', errors),
     protectedBranches: branches,
     unprotectedRepos: parseList(options.unprotectedRepos, ''),
     identityRules,
@@ -175,10 +180,16 @@ function strictest(modes: Mode[]): Mode {
 // cannot follow, is unparsed by itself. Git and forge tools take the strictest git-side mode, infra tools the
 // context mode, and a shell name both.
 function unparsedViolations(command: string, parsed: Parsed, guarded: Call[], cfg: Config): Violation[] {
+  if (cfg.unparsed === 'off') return []
+  const cap = (mode: Mode): Mode => cfg.unparsed === 'dry' && mode === 'on' ? 'dry' : mode
   const tools = new Map<string, string>()
   // `${G:-git}` names git through a default-value operator.
   const plain = command.replace(/["'\\]/g, '').replace(/\$\{\w*:?[-=+?]/g, ' ')
-  if (parsed.opaque.length) for (const t of toolWords(plain, { anyCase: true })) tools.set(t, parsed.opaque[0]!)
+  if (parsed.opaque.length) {
+    const why = parsed.opaque[0]!
+    for (const t of toolWords(plain, { anyCase: true })) tools.set(t, why)
+    for (const call of parsed.calls) tools.set(call.kind === 'infra' ? call.tool : call.kind === 'gh' ? call.cli : 'git', why)
+  }
   for (const l of parsed.local) for (const t of l.tools) if (!tools.has(t)) tools.set(t, l.why)
   const call = guarded.find((c): c is GitCall => c.kind === 'git' && c.opaque !== undefined)
   if (call && !tools.has('git')) tools.set('git', call.opaque!)
@@ -190,12 +201,12 @@ function unparsedViolations(command: string, parsed: Parsed, guarded: Call[], cf
   if (gitWhy !== undefined) {
     out.push({
       rule: 'unparsed',
-      mode: strictest(cfg.identityRules.length ? [cfg.attribution, cfg.protectedBranch, cfg.identity] : [cfg.attribution, cfg.protectedBranch]),
+      mode: cap(strictest(cfg.identityRules.length ? [cfg.attribution, cfg.protectedBranch, cfg.identity] : [cfg.attribution, cfg.protectedBranch])),
       message: `unparsed: this command uses ${gitWhy}, which the guard cannot follow, and it names git or a forge CLI. ${hint}`,
     })
   }
   if (infraWhy !== undefined) {
-    out.push({ rule: 'unparsed', mode: cfg.context, message: `unparsed: this command uses ${infraWhy}, which the guard cannot follow, and it names kubectl, helm or terraform. ${hint}` })
+    out.push({ rule: 'unparsed', mode: cap(cfg.context), message: `unparsed: this command uses ${infraWhy}, which the guard cannot follow, and it names kubectl, helm or terraform. ${hint}` })
   }
   return out
 }
@@ -226,6 +237,9 @@ export async function evaluate(command: string, cfg: Config, rawEnv: Env): Promi
   }
   if (cfg.attribution !== 'off' && parsed.calls.some(isMessageCall)) {
     all.push(...attributionViolations(command, cfg))
+    // Scan words separately so quote boundaries and escapes cannot split a trailer, and a word's start stays visible.
+    for (const word of tokenize(command).cmds.flatMap((c) => c.argv)) all.push(...attributionViolations(word, cfg))
+    for (const call of parsed.calls) for (const word of call.args) all.push(...attributionViolations(word, cfg))
     for (const call of parsed.calls) {
       if (call.kind !== 'gh' || !isMessageCall(call)) continue
       for (const path of bodyFiles(call, env.home)) {
@@ -235,6 +249,7 @@ export async function evaluate(command: string, cfg: Config, rawEnv: Env): Promi
     }
   }
   const follow = createFollower(env)
+  const directoryMode = strictest(cfg.identityRules.length ? [cfg.attribution, cfg.protectedBranch, cfg.identity] : [cfg.attribution, cfg.protectedBranch])
   let created = false
   let taint: ConfigTaint = { config: false, upstream: false }
   const switched = newContextState()
@@ -242,10 +257,17 @@ export async function evaluate(command: string, cfg: Config, rawEnv: Env): Promi
     if (call.kind === 'infra') {
       stepContext(switched, call.flow.chain)
       all.push(...(await contextViolations(call, cfg, env, switched)))
-      followSwitch(call, switched, env.home)
+      await followSwitch(call, switched, env)
       continue
     }
     if (call.kind !== 'git') continue
+    if (call.unresolvedDir && isGuarded(call, cfg)) {
+      all.push({
+        rule: 'lookup',
+        mode: directoryMode,
+        message: `lookup: the directory for git ${call.sub} cannot be resolved, so its repository cannot be checked. Use a literal directory or run the directory change on its own first.`,
+      })
+    }
     follow.step(call.flow.chain)
     if (cfg.protectedBranch !== 'off') all.push(...(await protectedBranchViolations(call, cfg, env, follow, taint)))
     if (cfg.identity !== 'off') all.push(...(await identityViolations(call, cfg, env, created, taint.config)))

@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import { dataDir, home as accountHome, loadOptions, optionsPath, ownDirs } from '../../../host-lib/options'
@@ -14,6 +14,21 @@ export const configPath = (): string => optionsPath('guard-rules')
 export const guardDirs = ownDirs
 
 export const storePath = (): string => join(dataDir(), 'guard-rules', 'contexts.json')
+
+export const ASK_UNSUPPORTED = 'guard-rules: warning: modeUnparsed=ask is supported only on Claude Code; this host treats it as on (deny).'
+
+// Codex starts a process per hook. An exclusive marker keeps the notice to one per account's data directory.
+export function warnAskOnce(warn: (message: string) => void, store = storePath()): void {
+  try {
+    mkdirSync(dirname(store), { recursive: true, mode: 0o700 })
+    writeFileSync(join(dirname(store), 'ask-notice'), '', { flag: 'wx', mode: 0o600 })
+  } catch (e) {
+    if (e instanceof Error && 'code' in e && e.code === 'EEXIST') return
+    warn(`${ASK_UNSUPPORTED} The warning marker could not be saved, so this notice may repeat.`)
+    return
+  }
+  warn(ASK_UNSUPPORTED)
+}
 
 // The Claude plugin's option names and string values. A missing file is the defaults; a file that cannot be read as
 // an object makes the config invalid, which denies git and forge writes until it is fixed.
@@ -61,6 +76,15 @@ export function nodeEnv(cwd: string, classes: () => Classes = loadClasses): Env 
     git: (dir, args, vars) => run(dir, ['git', '-C', dir, ...args], vars),
     run,
     contexts: async () => classes(),
+    exists: async (path) => {
+      try {
+        statSync(path)
+        return true
+      } catch (e) {
+        if (e instanceof Error && 'code' in e && e.code === 'ENOENT') return false
+        throw e
+      }
+    },
     read: async (path) => {
       try {
         return readFileSync(path, 'utf8')

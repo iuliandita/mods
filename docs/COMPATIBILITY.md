@@ -10,37 +10,29 @@ Labels: **works** (the behavior described below was run on the real host), **unt
 not verify every rule, mode or surface. Claude surface declarations remain in each `mod.json`.
 
 Versions checked: Claude Code 2.1.296 (`guard-rules`, `secret-box`) and 2.1.301
-(the other four mods), Codex CLI 0.162.1, OpenCode 2.0.29.
+(`delegation-board`, `statusline`), plus 2.1.312 for headless `guard-rules` parser permissions,
+Codex CLI 0.162.1, OpenCode 2.0.29.
 
 | Mod | Claude Code | Codex | OpenCode |
 | --- | --- | --- | --- |
 | `guard-rules` | **works** (terminal verified) | **works** | **works** |
 | `secret-box` | **works** (terminal verified) | **works**, partly: placeholders and the command's own output, see below | **works** |
-| `prompt-gate` | **works** (terminal verified) | **works**, judged by a nested Codex session (luna, low effort) | **works**, judged by DeepSeek Flash; `on` runs as `flag` |
-| `skill-pick` | **works** (terminal verified) | **works**, judged by a nested Codex session (luna, low effort); no use records | **works**; no use records |
 | `delegation-board` | **works** (terminal verified) | **not possible**: hooks cannot draw anything | **works**: a panel of child sessions, opened with `/board` |
 | `statusline` | **works** (terminal verified) | **not possible**: the status line only takes built-in items | **works**, reduced: one line, no rate-limit bars |
+| `notify` | **untested**: hook tests with a mocked engine only | **untested**: finish and permission events, see below | **untested**: idle, permission and form events, see below |
 
 ## Claude terminal verification
 
 On 2026-10-16, authenticated terminal sessions on Claude Code 2.1.301 checked:
 
-- `prompt-gate` 0.1.0: `on` mode with `classifier=haiku` dropped a vague prompt with a question,
-  accepted its identical resend without another classifier call, and passed a concrete prompt.
-  `/prompt-gate` reported the configured mode and stored summary.
-- `skill-pick` 0.1.0: `on` mode with `picker=haiku` picked a synthetic arithmetic skill from
-  the engine's listing; the main model loaded it with `Skill` and answered the arithmetic prompt.
-  The first turn recorded the documented `no-listing` result; the next turn picked the skill.
-  `/skill-pick` and `/skill-pick last` reported the results.
 - `delegation-board` 0.1.0: the pane opened on a real subagent spawn, showed running and completed
   parent/child rows and token totals, and matched `/board status`. `/board` closed and reopened
   it; `/board clear` removed finished rows.
 - `statusline` 0.2.7: the band drew alongside the board, with live model, context, rate-limit,
   cache, cost and elapsed-time figures after real turns.
 
-The adviser calls used real Haiku 5.5 responses. These were terminal smoke checks, not checks of
-every mode or segment. They did not verify Jev runtime paths, provider-outage behavior, board
-failure/wait states, optional pricing or statusline resume. Desktop, VS Code and headless remain
+These were terminal smoke checks, not checks of every mode or segment. They did not verify
+board failure/wait states, optional pricing or statusline resume. Desktop, VS Code and headless remain
 unverified. Automated hook tests cover more branches with mocked engine interfaces; passing them
 alone does not change a surface's status. CI's fixed CLI version is independent of each mod's
 recorded runtime verification version.
@@ -55,6 +47,7 @@ recorded runtime verification version.
 | Options | plugin options | `~/.config/iuliandita-mods/guard-rules.json` | the same file |
 | Classify an environment | `/guard-context` | `node .../guard-rules.mjs context` in your terminal | the same bundle |
 | Dry mode | toast | `systemMessage` (not checked how Codex shows it) | written to the host log |
+| `modeUnparsed=ask` | classic `PreToolUse` permission request for enforced parser findings only | falls back to `on`, warns once per account's data directory | falls back to `on`, warns once per plugin session |
 | If the guard itself fails | denies | denies; the hook command turns any failure into exit 2 | denies |
 | Not checked | | text typed into a running terminal session (`write_stdin`); file tools other than `apply_patch`, `Edit`, `Write` | |
 | Own files fenced off | n/a | `apply_patch`, `Edit`, `Write`, shell text | every non-shell tool, shell text |
@@ -62,6 +55,14 @@ recorded runtime verification version.
 What was run on the real hosts: a commit on `main` is blocked and the model sees the reason, and
 the same commit goes through once the repository is listed in `unprotectedRepos`. The other rules
 share the same code and its unit tests; they were not each run on Codex or OpenCode.
+
+On Claude Code 2.1.312, an isolated `claude -p` driver checked `on`, `dry`, `off` and `ask` without
+a model request: `on` denied, `dry` and `off` ran the harmless command, and `ask` returned a classic
+permission request and denied unanswered. The unanswered request denied in default, `acceptEdits`,
+`plan`, `dontAsk` and `bypassPermissions` modes, including with Bash allowed. Engine tests cover
+parsed hard denials, failed checks, other classic denials and rewritten commands. Interactive
+approval, timeout behavior, Desktop and VS Code remain unverified. Codex/OpenCode fallback and
+warning frequency are covered by adapter tests, not new real-host checks.
 
 Why the differences:
 
@@ -76,8 +77,10 @@ Why the differences:
 - **Codex lets a failed hook through.** With the hook exiting 1, Codex reported "PreToolUse
   Failed" and ran the command, so only exit code 2 blocks. The plugin's hook command maps any
   other failure (no `node`, a missing bundle, a crash) to 2, and the guard answers within 15
-  seconds, inside the hook's 30 second timeout. The hook also needs your trust once (`/hooks` in
-  Codex) or it is skipped.
+  seconds, inside the hook's 30 second timeout. After every install or update, review and trust
+  changed hooks again with `/hooks`; Codex fails open until then, including under `codex exec`.
+  `scripts/mods doctor` reports each installed collection hook and fails for an untrusted or
+  disabled guard.
 - **Codex does not hook `write_stdin`.** Its docs say input written to a running terminal session
   does not run `PreToolUse` again, so a shell started in one call and fed commands in later calls
   is not checked.
@@ -94,11 +97,44 @@ Why the differences:
 | | Claude Code | Codex | OpenCode |
 | --- | --- | --- | --- |
 | Fill a placeholder in a command | rewrites the Bash command | `PreToolUse` replaces the command with `secret-box exec --scrub -- '...'` | `execute.before` changes the shell input the same way |
-| Scrub the command's own output | rewrites the tool result | the helper filters its own stdout and stderr | `execute.after` rewrites the result, and the helper filters too |
+| Optional `secretScopes` directory globs | checks `$.session.cwd()` (session directory; no separate Bash cwd exposed) | checks the hook directory and tool `workdir` | checks the project directory and tool `workdir` |
+| Plaintext `values` command | removed from the helper in every mode | the same helper | the same helper |
+| Placeholder checks | `Bash` only | `Bash` only; excludes `write_stdin` and other non-Bash calls | `shell` and `bash` only |
+| Scrub the command's own output | the helper filters stdout/stderr, then the hook rewrites the tool result | the helper filters its own stdout and stderr | `execute.after` rewrites the result, and the helper filters too |
 | Scrub a tool result that is not a placeholder command | rewrites the tool result | **not possible**: `PostToolUse` cannot redact output | `execute.after` rewrites every tool's result and error |
-| Scrub every conversation row and the prompt | `session.append` and `session.send` | **not possible**: no hook changes the conversation or the prompt | session `context` and `prompt` hooks |
+| Scrub every conversation row and the prompt | `session.append` and `session.send` | **not possible**: no hook changes the conversation or the prompt | outgoing messages/system in `context`, `compaction`, `generate`, `title`; typed `prompt` |
 | `/secret-box` status command | yes | no documented way | not ported; use `secret-box names` |
 | If the mod fails | denies a placeholder command | denies when the hook runs and fails inside its own code; a hook that cannot start lets the command through with the placeholder unfilled | denies a placeholder command |
+
+The [per-host limits summary](../mods/secret-box/README.md#what-it-does-not-protect) covers failed
+loads, saved output, short values and child-process access. Scope checks, removal of `values`,
+and batched scrubbing are covered by automated tests, not new real-host verification. Arbitrary scripts, dynamically built commands
+and direct keyring reads remain out of scope. Scopes use only the directory listed above.
+The installed Claude API describes `$.session.cwd()` as the session directory, exposes no
+separate Bash directory and does not guarantee it follows a persistent shell `cd`.
+A failed scrub withholds checked text on Claude Code; sent Claude messages are refused. OpenCode
+replaces result content, errors and prompt text with notices, clears prompt attachments, and
+rebuilds messages from allowlisted roles and content-part fields, discarding unchecked keys and
+nested payloads. The fallbacks match the OpenCode 2.2.1 types: provider-executed tool calls and
+results become plain text notices; client tool inputs are empty objects and an explicit
+`providerExecuted: false` is preserved. Results keep `output` and text `content`, errors
+keep their Error prototype, and prompts keep `text`, `files`, `agents` and `skills`. These shapes
+are covered by adapter tests. A failed-scrub history with server-tool pairs also passed the published
+`@opencode/ai` 2.2.1 Anthropic adapter's request conversion and body schema encoding. This is not
+new authenticated host verification.
+The four request hooks and `!` shell-output projection were checked against the published
+`@opencode/plugin`, `@opencode/schema` and `@opencode/ai` 2.2.1 types and installed binary. All
+share the same message scrubber and fallback; failed system scrubs become a text notice.
+Stored history and output files, opaque media/provider payloads, later hook additions, tool
+definitions, request options and transport headers are not covered by these request checks.
+Each scrub reads current values, so new secrets need no reload and removed or rotated
+values are unknown to later scrubs, including saved-file checks. A wrapped command retains its
+initial values while filtering its own stdout and stderr.
+
+Claude Code saved-file scrubbing rechecks kind, link status, resolved path, size and modification
+time immediately before writing and skips changed files. The engine API exposes no inode,
+no-follow write or rename: same-metadata replacements and swaps after the check can still race
+the write. These checks have engine-mock coverage, not new real-host verification.
 
 What was run on the real hosts, with a throwaway file-backed store: on Codex 0.162.1 a placeholder
 command ran through the helper and printed the placeholder, not the value, and the sandbox still
@@ -116,67 +152,26 @@ Why the differences:
   own prompt) is not scrubbed on Codex.
 - **The helper delays output.** To catch a value split across two reads it holds back the last few
   bytes of each stream until more arrives or the command exits.
+- **Hooks do not load plaintext values.** Claude Code and OpenCode send distinct strings from
+  each result or conversation update to `secret-box scrub` in one JSON batch over stdin. The response contains
+  scrubbed text and name metadata only. Saved Claude output files use separate batches. A
+  failed or oversized response (over 4 MiB) withholds checked text; saved files stay best-effort.
 - **The helper's scrubber is a port.** `bin/secret-box` carries a Python copy of the TypeScript
   scrubber's list of forms; `tests/test_secret_box_scrub.py` compares them and fails when they
   drift. One known gap: a lone UTF-16 surrogate has no JSON-escaped form in Python.
 - **Codex hooks run as `allow`** so the replaced command is used. The documented rule is that
   `updatedInput` is accepted only with `allow`.
 
-The helper that reads the keyring (`bin/secret-box`) is a plain script. The Linux keyring backend is
-the only one so far.
+The helper that reads the keyring (`bin/secret-box`) is a plain Python script. It automatically
+uses `secret-tool` on Linux or `/usr/bin/security` on macOS; Windows is unsupported. Both backends
+keep the same helper commands. The macOS backend lists names from service-prefix metadata,
+stores a versioned UTF-8/base64 envelope, and sends set commands over stdin instead of argv.
+Its encoded set command must be under 4096 bytes. Backend tests mock `security`; real macOS
+Keychain access, prompts and host integration remain unverified. The `requires_by_platform`
+catalog field lets `scripts/mods doctor` check only the current platform's backend binary.
 
-## prompt-gate and skill-pick
-
-| | Claude Code | Codex | OpenCode |
-| --- | --- | --- | --- |
-| Hook | `prompt.submit` | `UserPromptSubmit` command hook | `session.prompt` hook |
-| Small model | the engine's model call | a nested `codex exec` session on `gpt-6-luna` at low effort (read-only, hooks off, throwaway directory), about 18k tokens of your plan per measured call; a failure means "error" and the prompt goes through. The mod's `model` option counts only when it names a `gpt-*` model | the host's `generate.text` with a DeepSeek Flash model picked from the host's model list, at low/minimal effort when available; up to three candidates are tried per call. With no eligible candidates it uses the host's default model. An explicit `model` must be `provider/model` |
-| Stop a vague prompt (`on`) | drops it with the question | `decision: block` with the question; sending it again unchanged runs it | **runs as `flag`**: a throw stops the prompt but shows only a generic error, and the terminal UI sends it again |
-| Add a note (`flag`, skill-pick `on`) | adds context | `additionalContext` | appends the note to the prompt text |
-| Dry mode | measures from a timer after the prompt went on | the hook returns at once and starts a detached process that measures | measures from a timer in the host process |
-| Skill catalog (skill-pick) | the engine's skill listing | read from `SKILL.md` files in the folders Codex uses | `skill.list` |
-| Use records and agreement (skill-pick) | from the `Skill` tool call | **not possible**: Codex has no skill tool call to watch | **not ported** |
-| Options | plugin options | `~/.config/iuliandita-mods/<mod>.json` | the same file |
-| Stats | `/prompt-gate`, `/skill-pick` | `node .../<mod>.mjs summary\|last\|clear` | the same bundle |
-| Privacy notice for Jev | toast | `systemMessage` on the first prompt | host log |
-
-What was run on the real hosts, with a stand-in model call for most checks and one real nested luna call on Codex:
-on Codex 0.162.1 a vague prompt was blocked with its question and the same prompt went through
-when sent again, `flag` put the note in the model's context, `dry` measured from the detached
-process and logged a record, and skill-pick put a skill name from the real skill folders in the
-model's context. On OpenCode 2.0.29 the note reached the model for both mods and `skill.list`
-supplied the catalog. The real OpenCode classification ran through the fallback list of DeepSeek Flash candidates
-(18 s on a fresh process, so the call has a 20 s deadline); a failure is an error and the prompt
-goes through.
-
-Why the differences:
-
-- **A Codex hook has no model.** The hook starts a nested `codex exec` session on luna, which uses
-  your Codex plan (about 18k tokens per prompt) and sends the prompt to OpenAI only. With
-  `TYPESAFE_API_KEY` set it also goes to Jev, as in the Claude plugin. `jevPaths` limits every model
-  call on Codex and OpenCode, not only Jev: outside those folders no prompt is judged. The
-  `model` default `haiku` selects the host-specific default above. `classifier` / `picker`
-  still control Jev selection; setting either to `haiku` disables Jev, not the host model call.
-- **Model calls have host-specific costs.** OpenCode uses the selected provider's billing and
-  cannot cap output tokens or cancel a timed-out request. Its 20-second deadline only stops
-  waiting; the request may continue. Codex and OpenCode do not return usage through these
-  adapters, so zero model-token figures in the mod's log do not mean a free call. Dry mode
-  still makes model calls; `off` stops them.
-- **Dry mode on Codex needs a second process.** A hook must answer before the model sees the
-  prompt, and the hook process ends with its answer, so a detached `measure` process does the work.
-  It stops itself after 60 seconds.
-- **Bounced prompts are remembered in a file on Codex** (the hook is a new process each time), in
-  the mod's store under `~/.local/share/iuliandita-mods`, per working directory.
-- **Where a prompt goes is announced once.** The first dry-mode prompt on Codex carries a
-  notice that each prompt is judged by a nested Codex session and costs plan tokens; with a Jev key,
-  one for Jev. Dry mode spawns a nested judgement per prompt until the mode is set to `off`.
-- **The vocabulary file is confined.** `AGENTS.md` or `CLAUDE.md` is read only when it resolves to a
-  regular file under the working directory, up to 64 KiB; skill files are read for their front
-  matter only, at most 300 folders per directory and 100 repository skills, and the user's and
-  system skills come before the repository's.
-- **The OpenCode note is part of your message.** The flag line is appended to the prompt text, so
-  it shows in the history.
-- **OpenCode cannot bounce a prompt.** The hook's only way to stop one is to throw.
+The Keychain command behavior follows Apple's [security manual](https://github.com/apple-oss-distributions/Security/blob/main/SecurityTool/macOS/security.1)
+and its [command parser](https://github.com/apple-oss-distributions/Security/blob/main/SecurityTool/macOS/security.c).
 
 ## delegation-board and statusline
 
@@ -188,9 +183,10 @@ Why the differences:
 | Open the board | `/board` | | `/board`, or **Delegation board** in the command palette (`ctrl+p`) |
 | Setup | plugin install | | `plugins` in `~/.config/opencode/cli.json` (the global file; there is no project-level terminal config) |
 
-The OpenCode terminal plugins do not read the Claude options or the user-level JSON option
-files used by the hook adapters. Remove their entries from `cli.json` and restart OpenCode
-to disable them. They make no model or forge calls of their own.
+The OpenCode terminal plugins do not read the Claude options. `statusline` reads no option file;
+`delegation-board` reads only `mode` from the user-level `delegation-board.json` (`off` draws a
+notice and reads no sessions). Remove their entries from `cli.json` and restart OpenCode to
+remove them. They make no model or forge calls of their own.
 
 What was run on the real host (OpenCode 2.0.29): the statusline line drew above the prompt in and
 out of a git repository, showed the branch, and redrew while a turn ran; after a real subagent run
@@ -208,6 +204,32 @@ Why the differences:
   records per session.
 - **The keymap layer is global.** A layer in the default mode was accepted but its command never
   reached the palette.
+
+## notify
+
+| | Claude Code | Codex | OpenCode |
+| --- | --- | --- | --- |
+| Agent finished | `classic.Stop` hook | Synchronous `Stop` hook (one-second cap), including `codex exec`, or the `notify` setting (`agent-turn-complete`, completion only) | `session.execution.succeeded` on 2.2.1; `session.idle` on older versions, deduplicated per execution |
+| Permission needed | `classic.Notification`, type `permission_prompt` | Background `PermissionRequest` hook | `permission.asked` |
+| Waiting for input | `classic.Notification`, types `idle_prompt` and `elicitation_dialog` | **not available** | `form.created` |
+| Subagents | not notified | events with `agent_id` are skipped; `SubagentStop` is not hooked | not notified when seen created with a parent; sessions that existed before the plugin loaded are not told apart |
+| Options | plugin options | `~/.config/iuliandita-mods/notify.json` | the same file, read per event |
+| Notifier | `notify-send` (Linux), `osascript` (macOS) | the same | the same |
+| Missing notifier | one warning toast per session | one stderr line per hook run | one log line per distinct warning |
+
+Nothing here was run on a real host. The Claude events are checked against the installed API types
+and tests with a mocked engine; the Codex events against the hook schemas shipped in Codex CLI 0.165.0
+(`stop.command.input`, `permission-request.command.input`) and the `agent-turn-complete` payload of
+the `notify` setting; the OpenCode events against the published `@opencode/schema` 2.2.1 types
+(a dependency of `@opencode/ai` 2.2.1). `permission.asked` still carries `data.sessionID`, and
+`form.created` carries `data.form.sessionID`. Success and legacy idle events share one finish
+notice per execution, reset by `session.execution.started` or the older busy-status event.
+Codex's `Stop` hook is synchronous with a one-second hook timeout so `codex exec` waits for it.
+`PermissionRequest` keeps `async: true` so delivery does not delay approval prompts. Both commands
+end in `exit 0`. Both Codex entry paths give the notifier a 250 ms process timeout; a slow notifier
+may show nothing, and Codex cancels unfinished background permission hooks when the session ends. The legacy
+`notify` setting waits up to that timeout. Notifications show the
+repo folder name, the harness, the branch name and a fixed reason only, never message text or commands.
 
 ## How a mod gets a host
 

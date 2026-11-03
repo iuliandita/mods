@@ -94,7 +94,7 @@ export function forms(value: string): string[] {
 
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-// One pass with the longest form first, so a replacement is never scanned again.
+// Merge overlapping matches before replacing; adjacent matches remain separate.
 // Takes name/value pairs; a name may appear more than once (an old and a new value).
 export function makeScrubber(values: Iterable<readonly [string, string]>): Scrubber | null {
   const byForm = new Map<string, string>()
@@ -102,15 +102,26 @@ export function makeScrubber(values: Iterable<readonly [string, string]>): Scrub
     for (const f of forms(value)) if (!byForm.has(f)) byForm.set(f, name)
   }
   if (byForm.size === 0) return null
-  const re = new RegExp([...byForm.keys()].sort((a, b) => b.length - a.length || (a < b ? -1 : 1)).map(escape).join('|'), 'g')
+  const re = new RegExp(`(?=(${[...byForm.keys()].sort((a, b) => b.length - a.length || (a < b ? -1 : 1)).map(escape).join('|')}))`, 'g')
   return (text) => {
+    const spans: { start: number; end: number; name: string }[] = []
+    for (const hit of text.matchAll(re)) {
+      const start = hit.index
+      const end = start + hit[1]!.length
+      const last = spans[spans.length - 1]
+      if (last && start < last.end) last.end = Math.max(last.end, end)
+      else spans.push({ start, end, name: byForm.get(hit[1]!)! })
+    }
     const names = new Set<string>()
-    const out = text.replace(re, (hit) => {
-      const name = byForm.get(hit) as string
+    const out: string[] = []
+    let pos = 0
+    for (const { start, end, name } of spans) {
+      out.push(text.slice(pos, start), `{{secret:${name}}}`)
       names.add(name)
-      return `{{secret:${name}}}`
-    })
-    return { text: out, names: [...names] }
+      pos = end
+    }
+    out.push(text.slice(pos))
+    return { text: out.join(''), names: [...names] }
   }
 }
 

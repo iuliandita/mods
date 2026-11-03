@@ -223,13 +223,13 @@ function resolvePath(base, p, home) {
   return "/" + out.join("/");
 }
 function hasVariable(p) {
-  return p.includes("$") || p.includes("`");
+  return p.includes("$") || p.includes("`") || /\{\{secret:[^}]*\}\}/.test(p);
 }
 
 // mods/guard-rules/claude/hooks/words.ts
 var ASSIGN = /^[A-Za-z_][A-Za-z0-9_]*=/;
 var IDENTITY_ENV = /^(?:GIT_(?:AUTHOR|COMMITTER)_(?:NAME|EMAIL)|EMAIL|HOME|XDG_CONFIG_HOME|GIT_CONFIG_(?:GLOBAL|SYSTEM|NOSYSTEM|COUNT|KEY_\d+|VALUE_\d+))$/;
-var READ_ENV = /^(?:KUBECONFIG|TF_WORKSPACE|TF_DATA_DIR|HELM_KUBE(?:CONTEXT|APISERVER|TOKEN|CAFILE)|GIT_(?:DIR|WORK_TREE|NAMESPACE|CONFIG_PARAMETERS))$/;
+var READ_ENV = /^(?:HOME|KUBECONFIG|TF_(?:WORKSPACE|DATA_DIR|CLI_ARGS(?:_[A-Za-z0-9_]+)?|CLOUD_(?:ORGANIZATION|HOSTNAME|PROJECT))|HELM_KUBE(?:CONTEXT|APISERVER|TOKEN|CAFILE)|GIT_(?:DIR|COMMON_DIR|WORK_TREE|NAMESPACE|CONFIG_PARAMETERS))$/;
 function liftAssigns(words) {
   const assigns = {};
   let k = 0;
@@ -242,12 +242,15 @@ function liftAssigns(words) {
 }
 var TOOLS = ["git", "gh", "glab", "tea", "fj", "kubectl", "helm", "terraform", "tofu"];
 var SHELL_NAMES = ["bash", "sh", "zsh", "dash", "ksh"];
+function isDataWord(word) {
+  return /^[\w@%+,=:~./-]+$/.test(word) && (word.includes("/") || /\.[A-Za-z0-9][\w-]*$/.test(word));
+}
 var TOOL_WORD = new RegExp(`(?<![\\w.-])(${TOOLS.join("|")})(?![\\w-])`, "gi");
 var RUN_WORD = new RegExp(`(?<![\\w.-])(${[...TOOLS, ...SHELL_NAMES].join("|")})(?![\\w-])`, "g");
 function toolWords(text, opts = {}) {
   const re = opts.shells ? RUN_WORD : TOOL_WORD;
   const flags = opts.anyCase ? "gi" : "g";
-  const found = [...text.matchAll(new RegExp(re.source, flags))].filter((m) => !(text[m.index - 1] === "/" && /^\.\w/.test(text.slice(m.index + m[0].length))));
+  const found = [...text.matchAll(new RegExp(re.source, flags))].filter((m) => opts.commands ? !/^[/.]/.test(text.slice(m.index + m[0].length)) : !(text[m.index - 1] === "/" && /^\.\w/.test(text.slice(m.index + m[0].length))));
   return [...new Set(found.map((m) => m[1].toLowerCase()))];
 }
 var esc = (s) => s.replace(/[.+^${}()|[\]\\*?]/g, "\\$&");
@@ -430,12 +433,13 @@ var GIT_FLAGS = new Set([
   "--list-cmds"
 ]);
 var GIT_OPAQUE = new Set(["--git-dir", "--work-tree", "--namespace", "--config-env", "--bare"]);
-var GIT_OPAQUE_ENV = ["GIT_DIR", "GIT_WORK_TREE", "GIT_NAMESPACE"];
+var GIT_OPAQUE_ENV = ["GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_NAMESPACE"];
 var PUSH_OPTION_VALUE = new Set(["-o", "--push-option"]);
 function parseGit(s, argv, dyn0, dir0, home, flow, mark) {
   const dyn = argv.map((a, k) => (dyn0[k] ?? false) || SECRET_PLACEHOLDER.test(a));
   let dir = dir0;
-  let ok = !GIT_OPAQUE_ENV.some((k) => (k in s.assigns));
+  let unresolvedDir = false;
+  let ok = !GIT_OPAQUE_ENV.some((k) => (k in s.assigns)) && !s.unset?.includes("GIT_COMMON_DIR");
   const overrides = {};
   const config = [];
   let i = 1;
@@ -446,9 +450,10 @@ function parseGit(s, argv, dyn0, dir0, home, flow, mark) {
       mark(`a git ${a} value built from a variable, substitution or glob`);
     if (a === "-C") {
       const target = argv[i + 1] ?? "";
-      if (hasVariable(target) || dyn[i + 1])
+      if (hasVariable(target) || dyn[i + 1]) {
         ok = false;
-      else
+        unresolvedDir = true;
+      } else
         dir = joinPath(dir, target, home);
       i += 2;
     } else if (a === "-c") {
@@ -503,7 +508,8 @@ function parseGit(s, argv, dyn0, dir0, home, flow, mark) {
       op: s.op,
       flow,
       ...scrubbed ? { scrubbed } : {},
-      ...dynArgs.some(Boolean) ? { dynArgs } : {}
+      ...dynArgs.some(Boolean) ? { dynArgs } : {},
+      ...unresolvedDir ? { unresolvedDir: true } : {}
     },
     ok
   };
@@ -591,7 +597,7 @@ function parseInfra(s, argv, dyn, tool, dir0, home, flow, mark) {
     else if (takesValue(tool, a))
       loose = true;
   }
-  return { kind: "infra", tool, sub: verb, args: argv.slice(at + 1), dir, assigns: s.assigns, context, kubeconfig, custom, unsure, flow };
+  return { kind: "infra", tool, sub: verb, args: argv.slice(at + 1), dir, assigns: s.assigns, unset: s.unset, clear: s.clear, context, kubeconfig, custom, unsure, flow };
 }
 function positionals(call) {
   const value = INFRA_VALUE[call.tool];
@@ -649,7 +655,7 @@ function arithEnd(src, i) {
   return -1;
 }
 function arithOpaque(inner) {
-  return /\$\(|`|\[/.test(inner);
+  return /\$\(|`|\[|\bPATH\b/.test(inner);
 }
 var ANSI_ESCAPES = {
   a: "\x07",
@@ -900,7 +906,7 @@ function tokenize(src, depth = 0) {
           break;
         if (body[j + 2] === "(" && arithEnd(body, j + 1) === e) {
           if (arithOpaque(body.slice(j + 3, e - 2)))
-            opaque.push("arithmetic with a substitution or subscript");
+            opaque.push("arithmetic with a substitution, subscript or PATH reference");
         } else {
           sub(body.slice(j + 2, e - 1));
         }
@@ -976,7 +982,7 @@ function tokenize(src, depth = 0) {
         cur += src.slice(i, end);
         if (src[i + 2] === "(" && arithEnd(src, i + 1) === end) {
           if (arithOpaque(src.slice(i + 3, end - 2)))
-            opaque.push("arithmetic with a substitution or subscript");
+            opaque.push("arithmetic with a substitution, subscript or PATH reference");
         } else {
           sub(src.slice(i + 2, end - 1));
         }
@@ -1080,7 +1086,7 @@ function tokenize(src, depth = 0) {
     } else if (c === "(" && src[i + 1] === "(" && !inWord && !words.length && arithEnd(src, i) !== -1) {
       const end = arithEnd(src, i);
       if (arithOpaque(src.slice(i + 2, end - 2)))
-        opaque.push("arithmetic with a substitution or subscript");
+        opaque.push("arithmetic with a substitution, subscript or PATH reference");
       endCmd();
       i = end;
     } else if (c === ">" || c === "<" || c === "&" && src[i + 1] === ">") {
@@ -1428,7 +1434,7 @@ var WRAPPERS = {
   exec: { short: "a" }
 };
 var ENV_VALUE_SHORT = "uCSaPL";
-var ENV_VALUE_LONG = new Set(["--unset", "--chdir", "--split-string", "--argv0"]);
+var ENV_VALUE_LONG = new Set(["--unset", "--chdir", "--split-string", "--argv0", "--path"]);
 var ENV_ESCAPES = { f: "\f", n: `
 `, r: "\r", t: "\t", v: "\v", "#": "#", $: "$", '"': '"', "'": "'", "\\": "\\" };
 function splitEnvString(s) {
@@ -1540,7 +1546,9 @@ function unwrapEnv(argv0, dyn0, assigns, dropped) {
       k++;
     } else
       break;
-    if (opt === "u" || opt === "--unset") {
+    if (opt === "P" || opt === "--path")
+      dropped.opaque.push("an env command search path");
+    else if (opt === "u" || opt === "--unset") {
       delete assigns[value];
       dropped.unset.add(value);
     } else if (opt === "C" || opt === "--chdir") {
@@ -1667,13 +1675,18 @@ function shellScript(argv) {
 // mods/guard-rules/claude/hooks/extract.ts
 var OPAQUE_TOOLS = new Set(["git", "gh", "glab", "tea", "fj", "kubectl", "helm", "terraform", "tofu", ...SHELLS]);
 var TEXT_HEADS = new Set(["echo", "printf", "man", "which", "type", "grep", "rg", "cat"]);
+var DATA_HEADS = new Set(["ls", "mkdir", "rmdir", "touch", "cp", "mv", "rm", "head", "tail", "wc", "tee", "curl", "basename", "dirname", "realpath", "readlink", "file", "stat", "du", "df", "cut", "uniq", "diff", "cmp"]);
+var INPUT_EXECUTORS = new Set(["xargs", ...SHELLS, "awk", "gawk", "mawk", "perl", "ruby", "node", "env", "parallel", "watch", "script", "ssh", "php", "lua", "tclsh", "at", "crontab", "batch"]);
+var SED_FLAGS = new Set(["-n", "--quiet", "--silent", "-E", "-r", "--regexp-extended"]);
 var STRUCTURES = {
   case: "a case statement",
   select: "a select loop",
   coproc: "a coprocess",
   trap: "a trap",
   alias: "an alias",
-  function: "a function definition"
+  function: "a function definition",
+  hash: "a changed command hash table",
+  enable: "a changed shell builtin"
 };
 var FLOW_HEADS = new Set(["[", "[[", "test", "for", "true", "false", ":"]);
 var SINGLE_PIPE = /(?:^|[^|])\|(?:[^|]|$)/;
@@ -1683,6 +1696,7 @@ var MAX_QUEUE = 4000;
 var DECLARES = new Set(["declare", "typeset", "local", "readonly"]);
 var SUBST_TEXT = /[$<>]\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)|`[^`]*`/g;
 var SHELL_ENV = new Set(["IFS", "BASH_ENV", "ENV", "GIT_CONFIG_PARAMETERS"]);
+var EXEC_ENV = /^(?:PAGER|MANPAGER|LESS(?:OPEN|CLOSE)?|EDITOR|VISUAL|BROWSER|MANOPT|SHELL|GIT_.*|.*_(?:PAGER|EDITOR|BROWSER))$/;
 var DYNAMIC = "built from a variable, substitution or glob";
 var PLAIN_WORD = /^[\w./+@%:,=~-]+$/;
 var KUBE_SWITCHERS = {
@@ -1690,19 +1704,43 @@ var KUBE_SWITCHERS = {
   "kubectl-ctx": [[]],
   kubens: [[]],
   aws: [["eks", "update-kubeconfig"]],
-  gcloud: [["get-credentials"]],
-  az: [["aks", "get-credentials"]],
-  doctl: [["kubeconfig", "save"], ["cluster", "create"]],
-  oc: [["login"], ["project"], ["config"]],
+  gcloud: [["get-credentials"], ["container", "clusters", "create|create-auto"]],
+  az: [["aks|fleet|aksarc", "get-credentials"], ["connectedk8s", "proxy"]],
+  doctl: [["kubernetes|kube|k8s|k", "cluster|clusters|c", "kubeconfig|kubecfg|k8scfg|config|cfg", "save|s"], ["kubernetes|kube|k8s|k", "cluster|clusters|c", "create"]],
+  oc: [["login"], ["project"], ["new-project"], ["config"]],
   kind: [["export", "kubeconfig"], ["create", "cluster"]],
   minikube: [["update-context"], ["start"], ["profile"]],
-  k3d: [["kubeconfig", "merge"], ["cluster", "create"]]
+  k3d: [["kubeconfig", "merge|write"], ["cluster", "create"]],
+  eksctl: [["create", "cluster"], ["utils", "write-kubeconfig"]],
+  tsh: [["kube", "login"]],
+  vcluster: [["connect|create"]],
+  talosctl: [["kubeconfig"]],
+  scw: [["k8s", "kubeconfig", "install"]],
+  ibmcloud: [["ks", "cluster", "config"]],
+  civo: [["kubernetes", "config"]]
 };
 var KUBECTX_READ = new Set(["-c", "--current", "-h", "--help"]);
 var OC_CONFIG_READ = new Set(["view", "get-contexts", "current-context", "get-clusters", "get-users"]);
-var FILE_WRITERS = new Set(["cp", "mv", "ln", "install", "rsync", "tee", "truncate", "dd", "sed", "perl"]);
+var FILE_WRITERS = new Set(["cp", "mv", "ln", "install", "rsync", "tee", "truncate", "dd", "scp", "sponge"]);
+var INPLACE_WRITERS = new Set(["sed", "perl", "yq", "sops"]);
+var FILE_OUTPUT_OPTIONS = {
+  cp: ["-t", "--target-directory", "--target"],
+  mv: ["-t", "--target-directory", "--target"],
+  ln: ["-t", "--target-directory", "--target"],
+  install: ["-t", "--target-directory", "--target"],
+  curl: ["-o", "--output"],
+  wget: ["-O", "--output-document"],
+  sops: ["--output"],
+  gpg: ["-o", "--output"],
+  age: ["-o", "--output"]
+};
 var KUBE_FILE = /(?:^|\/)\.kube(?:\/|$)|kubeconfig/i;
 var WORKSPACE_FILE = /(?:^|\/)\.terraform(?:\/environment)?\/?$/;
+function resetsInfraEnv(s) {
+  const at = s.cmd.argv.indexOf(s.argv[0] ?? "");
+  const prefix = at === -1 ? s.cmd.argv : s.cmd.argv.slice(0, at);
+  return prefix.some((a) => /(?:^|[\s/])(?:sudo|doas)(?:\s|$)/.test(a));
+}
 function mark(w, why) {
   if (!w.opaque.includes(why))
     w.opaque.push(why);
@@ -1761,7 +1799,7 @@ function applyBuiltin(w, s) {
     applyPopd(w.st, argv, s.dyn, effect);
   else if (name === "set")
     applySet(w.st, argv, effect);
-  else if ((name === "source" || name === ".") && (argv.length === 1 || s.dyn[1] || argv[1] === "/dev/stdin" || argv[1] === "-"))
+  else if (name === "source" || name === ".")
     mark(w, "a sourced script the guard cannot read");
   else
     return false;
@@ -1790,9 +1828,11 @@ function emitToolCalls(w, s) {
     const at = here ?? w.st.startDir;
     if (name === "git") {
       const r = parseGit(simple, argv, s.dyn, at, w.st.home, flow, slot);
-      const why = !r.ok ? "a git option or repository the guard cannot follow" : here === null ? "a directory the guard cannot tell" : unknown ? "a variable the guard cannot tell" : undefined;
+      const why = !r.ok ? "a git option or repository the guard cannot follow" : unknown ? "a variable the guard cannot tell" : undefined;
       if (r.call && why)
         r.call.opaque = why;
+      if (r.call && here === null)
+        r.call.unresolvedDir = true;
       if (r.call)
         w.calls.push(r.call);
     } else if (name === "gh" || name === "glab" || name === "tea" || name === "fj") {
@@ -1801,9 +1841,11 @@ function emitToolCalls(w, s) {
         w.calls.push(call);
     } else {
       const call = parseInfra(simple, argv, s.dyn, name, at, w.st.home, flow, slot);
+      if (call && resetsInfraEnv(s))
+        call.custom = true;
       const located = name === "terraform" || name === "tofu" || Boolean(call?.kubeconfig || simple.assigns.KUBECONFIG);
       const opaque = call !== null && call.dir.split("/").includes("..");
-      const files = (call?.kubeconfig || simple.assigns.KUBECONFIG || "").split(":").filter(Boolean);
+      const files = call?.kubeconfig ? [call.kubeconfig] : (simple.assigns.KUBECONFIG || "").split(":").filter(Boolean);
       const switched = name === "kubectl" || name === "helm" ? w.kube || files.some((f) => w.written.has(basename(f))) : w.workspace;
       if (call && (here === null && located || unknown || opaque && located || switched))
         call.custom = true;
@@ -1818,8 +1860,9 @@ function inlineScript(w, s) {
   let from = argv.length;
   if (name === "secret-box") {
     if (argv[1] === "exec") {
-      if (argv[2] === "--" && argv[3] !== undefined)
-        script = argv.slice(from = 3).join(" ");
+      const separator = argv[2] === "--scrub" ? 3 : 2;
+      if (argv[separator] === "--" && argv[separator + 1] !== undefined)
+        script = argv.slice(from = separator + 1).join(" ");
       else
         mark(w, "a secret-box exec without a script");
     }
@@ -1855,14 +1898,42 @@ function inlineScript(w, s) {
   for (const why of inner.opaque)
     mark(w, why);
   const outer = u.assigns;
-  const drop = { unset: [...u.unset], clear: u.clear, chdir: u.chdir };
+  const drop = { unset: [...u.unset], clear: u.clear || resetsInfraEnv(s), chdir: u.chdir };
   w.queue.splice(s.idx + 1, 0, ...inner.cmds.map((c) => ({ ...c, op: c.op === "" ? s.cmd.op : c.op, ...c.argv.length ? { assigns: { ...outer, ...c.assigns }, ...drop } : {} })));
 }
 function markSwitch(w, s) {
   const words = s.argv.slice(1);
-  const inPlace = words.some((a) => /^-[a-zA-Z]*i|^--in-place/.test(a));
-  const writes = FILE_WRITERS.has(s.name) && (inPlace || s.name !== "sed" && s.name !== "perl");
-  for (const f of [...s.cmd.outputs ?? [], ...writes ? words.filter((a) => !a.startsWith("-")) : []]) {
+  const inPlace = INPLACE_WRITERS.has(s.name) && words.some((a) => /^-[a-zA-Z]*i|^--in-?place(?:=|$)/.test(a));
+  const awkInPlace = s.name === "gawk" && words.some((a, i) => (a === "-i" || a === "--include") && words[i + 1] === "inplace" || a === "-iinplace" || a === "--include=inplace");
+  const options = Object.hasOwn(FILE_OUTPUT_OPTIONS, s.name) ? FILE_OUTPUT_OPTIONS[s.name] : [];
+  const outputOption = (a) => options.find((opt) => a === opt || a.startsWith(opt + (opt.startsWith("--") ? "=" : "")));
+  const writes = FILE_WRITERS.has(s.name) || inPlace || awkInPlace || words.some((a) => outputOption(a) !== undefined);
+  const targets = (s.cmd.outputs ?? []).map((path) => ({ path, dynamic: hasVariable(path) || SECRET_PLACEHOLDER.test(path) }));
+  if (writes)
+    for (let i = 1;i < s.argv.length; i++) {
+      const a = s.argv[i];
+      const opt = outputOption(a);
+      let path = a;
+      if (a.startsWith("-")) {
+        if (a.startsWith("--") && a.includes("="))
+          path = a.slice(a.indexOf("=") + 1);
+        else {
+          if (opt === undefined || a === opt)
+            continue;
+          path = a.slice(opt.length);
+        }
+      } else if (s.name === "dd") {
+        if (!a.startsWith("of="))
+          continue;
+        path = a.slice(3);
+      }
+      targets.push({ path, dynamic: Boolean(s.dyn[i]) || hasVariable(path) || SECRET_PLACEHOLDER.test(path) });
+    }
+  for (const { path: f, dynamic } of targets) {
+    if (dynamic) {
+      w.kube = w.workspace = true;
+      continue;
+    }
     w.written.add(basename(f));
     if (KUBE_FILE.test(f))
       w.kube = true;
@@ -1870,21 +1941,96 @@ function markSwitch(w, s) {
       w.workspace = true;
   }
   const rows = Object.hasOwn(KUBE_SWITCHERS, s.name) ? KUBE_SWITCHERS[s.name] : [];
-  if (!rows.some((row) => row.every((r) => words.includes(r))))
+  if (!rows.some((row) => row.every((r) => r.split("|").some((alias) => words.includes(alias)))))
     return;
   if ((s.name === "kubectx" || s.name === "kubens" || s.name === "kubectl-ctx") && words.every((a) => KUBECTX_READ.has(a)))
     return;
-  if (s.name === "oc" && words[0] === "config" && words.slice(1).some((a) => OC_CONFIG_READ.has(a)))
+  if (s.name === "oc" && words[0] === "config" && OC_CONFIG_READ.has(words[1] ?? ""))
     return;
   w.kube = true;
 }
+function sedFileSlots(s) {
+  const files = new Set;
+  const scripts = [];
+  let options = true;
+  for (let i = 1;i < s.argv.length; i++) {
+    const a = s.argv[i];
+    if (s.dyn[i])
+      return null;
+    if (options && a === "--")
+      options = false;
+    else if (options && SED_FLAGS.has(a))
+      continue;
+    else if (options && (a === "-e" || a === "--expression")) {
+      const script = s.argv[++i];
+      if (script === undefined || s.dyn[i])
+        return null;
+      scripts.push(script);
+    } else if (options && a.startsWith("-"))
+      return null;
+    else if (!scripts.length)
+      scripts.push(a);
+    else
+      files.add(i);
+  }
+  return !scripts.length || scripts.some((script) => script.includes("e")) ? null : files;
+}
+function pipedWords(w, s) {
+  const words = [];
+  let cmd = s.cmd;
+  let idx = s.idx;
+  if (cmd.op === "$(") {
+    while (idx > 0 && w.queue[idx - 1].op === "$(")
+      idx--;
+    while (idx < w.queue.length - 1 && w.queue[idx].op === "$(") {
+      const nested = w.queue[idx++];
+      words.push(...nested.argv, ...Object.values(nested.assigns), ...nested.input ?? []);
+    }
+    cmd = w.queue[idx];
+    words.push(...cmd.input ?? []);
+  }
+  while (SINGLE_PIPE.test(cmd.op)) {
+    do {
+      idx--;
+    } while (idx >= 0 && w.queue[idx].op === "$(");
+    if (idx < 0)
+      break;
+    cmd = w.queue[idx];
+    if (cmd.argv[0] === "}" || cmd.argv[0] === "fi" || cmd.argv[0] === "done" || w.queue[idx + 1].op.includes(")")) {
+      return w.queue.flatMap((c) => [...c.argv, ...Object.values(c.assigns), ...c.input ?? []]);
+    }
+    const u = unwrap(cmd);
+    const name = basename(u.argv[0] ?? "");
+    const modeled = name === "git" || name === "gh" || name === "glab" || name === "tea" || name === "fj" || INFRA_TOOLS.has(name);
+    words.push(...u.argv.slice(modeled ? 1 : 0), ...Object.values(u.assigns), ...cmd.input ?? []);
+  }
+  return words;
+}
 function markOpaque(w, s) {
-  if (FLOW_HEADS.has(s.name) || TEXT_HEADS.has(s.name) && !(s.name === "rg" && s.argv.some((a) => a === "--pre" || a.startsWith("--pre="))))
+  if (s.u.clear || s.u.unset.has("PATH"))
+    mark(w, "a cleared PATH for an unmodeled command");
+  const bare = s.argv[0] === s.name;
+  const executableOption = s.name === "rg" ? s.argv.some((a) => a === "--pre" || a.startsWith("--pre=")) : s.name === "man" && s.argv.slice(1).some((a) => /^-[^-]*[PH]|^--(?:pager|html)(?:=|$)/.test(a));
+  if (bare && (FLOW_HEADS.has(s.name) || TEXT_HEADS.has(s.name) && !executableOption))
     return;
-  const words = s.argv.slice(1).map((a, i) => s.dyn[i + 1] ? a.replace(SUBST_TEXT, " ") : a);
+  const sedFiles = s.name === "sed" ? sedFileSlots(s) : new Set;
+  const data = bare && (DATA_HEADS.has(s.name) || s.name === "brew" && s.argv[1] === "install");
+  const executor = INPUT_EXECUTORS.has(s.name) || /^python[\d.]*$/.test(s.name) || s.name === "sed" && sedFiles === null;
+  const words = s.argv.slice(1).map((a, i) => {
+    if (data)
+      return "";
+    if (executor)
+      return a;
+    if (s.dyn[i + 1])
+      return a.replace(SUBST_TEXT, " ");
+    if (s.name === "man")
+      return a.replace(/^-[^-]*?[PH]/, " ");
+    return bare && s.name === "sed" && sedFiles?.has(i + 1) && isDataWord(a) ? "" : a;
+  });
   if (!PLAIN_WORD.test(s.argv[0]))
     words.push(s.argv[0]);
-  const tools = toolWords([...words, ...s.cmd.input ?? []].join(" "), { shells: true });
+  const input = s.name === "sed" && sedFiles !== null ? [] : [...s.cmd.input ?? [], ...executor ? pipedWords(w, s) : []];
+  const tools = toolWords([...words, ...input].join(" "), { shells: true });
   if (tools.length)
     w.local.push({ why: `${s.name} with ${tools.join(", ")} among its words`, tools });
 }
@@ -1925,6 +2071,22 @@ function extractCalls(src, startDir, home) {
     for (const k of assigned)
       if (SHELL_ENV.has(k))
         mark(w, `an assignment to ${k}`);
+    if ([...cmd.argv, ...Object.entries(s.u.assigns).flat(), ...cmd.outputs ?? []].some((a) => /\bPATH\b|^-vPATH\b/.test(a)))
+      mark(w, "a possible write to PATH");
+    const settings = Object.entries(s.u.assigns);
+    if (s.name === "export" || DECLARES.has(s.name))
+      for (const a of s.argv.slice(1)) {
+        const eq = a.indexOf("=");
+        if (eq > 0)
+          settings.push([a.slice(0, eq), a.slice(eq + 1)]);
+      }
+    for (const [key, value] of settings) {
+      if (!EXEC_ENV.test(key))
+        continue;
+      const tools = toolWords(value, { shells: key !== "SHELL" || !isDataWord(value), commands: true });
+      if (tools.length)
+        w.local.push({ why: `an assignment to ${key} with ${tools.join(", ")} among its words`, tools });
+    }
     if (s.dyn[0]) {
       const tools = mayName(s.argv[0], [...OPAQUE_TOOLS]);
       if (tools.length)
@@ -2319,6 +2481,8 @@ var HELM_DRY = new Set(["install", "upgrade", "uninstall", "delete", "rollback"]
 var DRY_VALUES = new Set(["client", "server", "true"]);
 var CUSTOM = "(custom target)";
 var HELM_TARGET_ENV = ["HELM_KUBEAPISERVER", "HELM_KUBETOKEN", "HELM_KUBECAFILE"];
+var TF_TARGET_ENV = ["TF_DATA_DIR", "TF_CLOUD_ORGANIZATION", "TF_CLOUD_HOSTNAME", "TF_CLOUD_PROJECT"];
+var TF_ARGS_ENV = /^TF_CLI_ARGS(?:_[A-Za-z0-9_]+)?$/;
 var CONTROL = /[\u0000-\u001f\u007f]/;
 var CONTROL_ALL = new RegExp(CONTROL.source, "g");
 function isDryRun(call) {
@@ -2339,6 +2503,8 @@ function isDryRun(call) {
 }
 function isMutating(call) {
   if (call.unsure)
+    return true;
+  if ((call.tool === "terraform" || call.tool === "tofu") && Object.keys(call.assigns).some((k) => TF_ARGS_ENV.test(k)))
     return true;
   const next = positionals(call)[0] ?? "";
   if (call.tool === "kubectl") {
@@ -2402,14 +2568,22 @@ function stepContext(state, chain) {
   state.contexts.step(chain);
   state.workspaces.step(chain);
 }
-function kubeconfigOf(call) {
-  return call.kubeconfig || call.assigns.KUBECONFIG || "";
+function kubeconfigs(call, home) {
+  if (call.kubeconfig)
+    return [call.kubeconfig];
+  return call.assigns.KUBECONFIG?.split(":").filter(Boolean).length ? call.assigns.KUBECONFIG.split(":").filter(Boolean) : [resolvePath("/", "~/.kube/config", home)];
 }
-function kubeKey(call, home) {
-  const entries = kubeconfigOf(call).split(":").filter(Boolean);
-  if (!entries.length)
-    return resolvePath("/", "~/.kube/config", home);
-  return entries.map((p) => /[$`]/.test(p) ? p : resolvePath(call.dir, p, home)).join(":");
+async function kubeKey(call, env) {
+  const entries = kubeconfigs(call, env.home).map((p) => hasVariable(p) ? p : resolvePath(call.dir, p, env.home));
+  if (entries.length === 1)
+    return entries[0];
+  for (const path of entries) {
+    if (hasVariable(path))
+      return path;
+    if (env.exists ? await env.exists(path) : await env.read(path) !== null)
+      return path;
+  }
+  return entries[entries.length - 1];
 }
 var CONFIG_READ = new Set(["view", "get-contexts", "current-context", "get-clusters", "get-users"]);
 function known(name) {
@@ -2417,14 +2591,23 @@ function known(name) {
 }
 var CTX_PLUGINS = new Set(["ctx", "kubectx", "switch", "konfig"]);
 var CTX_READ = new Set(["-c", "--current", "-h", "--help"]);
-function followSwitch(call, state, home) {
+function changedEnvironment(call, home) {
+  const targets = call.tool === "kubectl" || call.tool === "helm" ? ["HOME", "KUBECONFIG", "HELM_KUBECONTEXT", ...HELM_TARGET_ENV] : ["HOME", "TF_WORKSPACE", ...TF_TARGET_ENV, ...[...Object.keys(call.assigns), ...call.unset ?? []].filter((k) => TF_ARGS_ENV.test(k))];
+  return Boolean(call.clear || call.unset?.some((k) => targets.includes(k)) || targets.some((k) => Object.hasOwn(call.assigns, k) && call.assigns[k] === "") || Object.hasOwn(call.assigns, "HOME") && call.assigns.HOME !== home);
+}
+function terraformTargetOverride(call) {
+  return TF_TARGET_ENV.some((k) => Object.hasOwn(call.assigns, k)) || Object.keys(call.assigns).some((k) => TF_ARGS_ENV.test(k));
+}
+async function followSwitch(call, state, env) {
   const [verb, target, value] = positionals(call);
-  const key = kubeKey(call, home);
+  const key = await kubeKey(call, env);
+  const uncertain = call.custom || changedEnvironment(call, env.home) || (call.tool === "terraform" || call.tool === "tofu") && terraformTargetOverride(call);
+  const switched = (name) => uncertain ? UNKNOWN : known(name);
   if (call.tool === "kubectl" && call.sub === "config") {
     if ((verb === "use-context" || verb === "use") && target)
-      state.contexts.set(key, [known(target)], call.flow);
+      state.contexts.set(key, [switched(target)], call.flow);
     else if (verb === "set" && target === "current-context" && value)
-      state.contexts.set(key, [known(value)], call.flow);
+      state.contexts.set(key, [switched(value)], call.flow);
     else if (verb !== undefined && !CONFIG_READ.has(verb))
       state.contexts.set(key, [UNKNOWN], call.flow);
   }
@@ -2432,7 +2615,7 @@ function followSwitch(call, state, home) {
     state.contexts.set(key, [UNKNOWN], call.flow);
   }
   if ((call.tool === "terraform" || call.tool === "tofu") && call.sub === "workspace" && (verb === "select" || verb === "new") && target) {
-    state.workspaces.set(`${call.tool}\x00${call.dir}`, [known(target)], call.flow);
+    state.workspaces.set(`${call.tool}\x00${call.dir}`, [switched(target)], call.flow);
   }
 }
 function lastPart(path) {
@@ -2440,6 +2623,8 @@ function lastPart(path) {
   return parts[parts.length - 1] ?? "";
 }
 function parseCurrentContext(text) {
+  if (/\r(?!\n)|[\u0085\u2028\u2029]/.test(text))
+    return null;
   const lines = text.replace(/^﻿/, "").split(/\r?\n/);
   const first = lines.find((l) => l.trim() !== "" && !l.trimStart().startsWith("#"));
   if (first !== undefined && /^\s*[{[]/.test(first))
@@ -2448,6 +2633,8 @@ function parseCurrentContext(text) {
     return null;
   const key = /^(?:current-context|"current-context"|'current-context')[ \t]*:(?:[ \t]+(.*))?$/;
   const at = lines.flatMap((l, i) => key.test(l) ? [i] : []);
+  if (lines.some((l, i) => l.includes("current-context") && !at.includes(i) || /^[^:#]*\\/.test(l)))
+    return null;
   if (at.length === 0)
     return "";
   if (at.length > 1)
@@ -2475,9 +2662,9 @@ function parseCurrentContext(text) {
     return null;
   return plain;
 }
-async function fileContext(config, dir, env) {
-  for (const path of config.split(":").filter(Boolean)) {
-    if (/[$`]/.test(path))
+async function fileContext(paths, dir, env) {
+  for (const path of paths) {
+    if (hasVariable(path))
       return null;
     const text = await env.read(resolvePath(dir, path, env.home));
     if (text === null)
@@ -2492,7 +2679,7 @@ async function fileContext(config, dir, env) {
 }
 async function candidates(call, env, state) {
   const kube = call.tool === "kubectl" || call.tool === "helm";
-  const switched = kube ? state.contexts.get(kubeKey(call, env.home)) : state.workspaces.get(`${call.tool}\x00${call.dir}`);
+  const switched = kube ? state.contexts.get(await kubeKey(call, env)) : state.workspaces.get(`${call.tool}\x00${call.dir}`);
   const out = [];
   for (const p of switched) {
     const list = p === UNKNOWN ? [{ name: CUSTOM, kind: "target" }] : await candidatesAt(call, env, state, p);
@@ -2505,23 +2692,24 @@ async function candidates(call, env, state) {
 async function candidatesAt(call, env, state, p) {
   const first = (r) => r.ok ? r.out.split(`
 `)[0]?.trim() ?? "" : "";
+  const changed = changedEnvironment(call, env.home);
   if (call.tool === "kubectl" || call.tool === "helm") {
     const named = call.context || (call.tool === "helm" ? call.assigns.HELM_KUBECONTEXT : "");
     if (named && hasVariable(named))
       return [{ name: CUSTOM, kind: "target" }];
-    const config = kubeconfigOf(call);
+    const config = kubeconfigs(call, env.home);
     const switched = p === REAL ? undefined : p;
-    const current = !named && switched === undefined && config ? await fileContext(config, call.dir, env) : undefined;
-    const file = lastPart(config.split(":")[0] ?? "");
+    const current = !named && switched === undefined && (call.kubeconfig || call.assigns.KUBECONFIG) ? await fileContext(config, call.dir, env) : undefined;
+    const file = lastPart(config[0] ?? "");
     const base = named ? { name: named, kind: "context" } : switched !== undefined ? { name: switched, kind: "context" } : typeof current === "string" ? { name: current || "(none)", kind: "context" } : current === null && file ? { name: file, kind: "kubeconfig" } : undefined;
-    if (call.custom || current === null || call.tool === "helm" && HELM_TARGET_ENV.some((k) => call.assigns[k]))
+    if (changed || call.custom || current === null || call.tool === "helm" && HELM_TARGET_ENV.some((k) => call.assigns[k]))
       return base ? [{ name: CUSTOM, kind: "target" }, { ...base, weak: true }] : [{ name: CUSTOM, kind: "target" }];
     if (base)
       return [base];
     const r = await env.run(call.dir, ["kubectl", "config", "current-context"]);
     return r.failed ? null : [{ name: first(r) || "(none)", kind: "context" }];
   }
-  if (call.custom || call.assigns.TF_DATA_DIR)
+  if (changed || call.custom || terraformTargetOverride(call))
     return [{ name: CUSTOM, kind: "target" }];
   const [verb, target] = positionals(call);
   const targeted = call.sub === "workspace" && verb !== undefined && ["new", "delete", "select"].includes(verb) ? target : undefined;
@@ -2706,7 +2894,7 @@ function parseMode(value, name, errors) {
     return "on";
   if (v === "off" || v === "dry" || v === "on")
     return v;
-  errors.push(`${name} must be off, dry or on`);
+  errors.push(`${name} must be ${name === "modeUnparsed" ? "off, dry, on or ask" : "off, dry or on"}`);
   return "on";
 }
 function parseConfig(options) {
@@ -2733,6 +2921,7 @@ function parseConfig(options) {
     protectedBranch: parseMode(options.modeProtectedBranch, "modeProtectedBranch", errors),
     identity: parseMode(options.modeIdentity, "modeIdentity", errors),
     context: parseMode(options.modeContext, "modeContext", errors),
+    unparsed: String(options.modeUnparsed ?? "").trim().toLowerCase() === "ask" ? "ask" : parseMode(options.modeUnparsed, "modeUnparsed", errors),
     protectedBranches: branches,
     unprotectedRepos: parseList(options.unprotectedRepos, ""),
     identityRules,
@@ -2786,11 +2975,18 @@ function strictest(modes) {
   return modes.includes("on") ? "on" : modes.includes("dry") ? "dry" : "off";
 }
 function unparsedViolations(command, parsed, guarded, cfg) {
+  if (cfg.unparsed === "off")
+    return [];
+  const cap = (mode) => cfg.unparsed === "dry" && mode === "on" ? "dry" : mode;
   const tools = new Map;
   const plain = command.replace(/["'\\]/g, "").replace(/\$\{\w*:?[-=+?]/g, " ");
-  if (parsed.opaque.length)
+  if (parsed.opaque.length) {
+    const why = parsed.opaque[0];
     for (const t of toolWords(plain, { anyCase: true }))
-      tools.set(t, parsed.opaque[0]);
+      tools.set(t, why);
+    for (const call of parsed.calls)
+      tools.set(call.kind === "infra" ? call.tool : call.kind === "gh" ? call.cli : "git", why);
+  }
   for (const l of parsed.local)
     for (const t of l.tools)
       if (!tools.has(t))
@@ -2806,12 +3002,12 @@ function unparsedViolations(command, parsed, guarded, cfg) {
   if (gitWhy !== undefined) {
     out.push({
       rule: "unparsed",
-      mode: strictest(cfg.identityRules.length ? [cfg.attribution, cfg.protectedBranch, cfg.identity] : [cfg.attribution, cfg.protectedBranch]),
+      mode: cap(strictest(cfg.identityRules.length ? [cfg.attribution, cfg.protectedBranch, cfg.identity] : [cfg.attribution, cfg.protectedBranch])),
       message: `unparsed: this command uses ${gitWhy}, which the guard cannot follow, and it names git or a forge CLI. ${hint}`
     });
   }
   if (infraWhy !== undefined) {
-    out.push({ rule: "unparsed", mode: cfg.context, message: `unparsed: this command uses ${infraWhy}, which the guard cannot follow, and it names kubectl, helm or terraform. ${hint}` });
+    out.push({ rule: "unparsed", mode: cap(cfg.context), message: `unparsed: this command uses ${infraWhy}, which the guard cannot follow, and it names kubectl, helm or terraform. ${hint}` });
   }
   return out;
 }
@@ -2842,6 +3038,11 @@ async function evaluate(command, cfg, rawEnv) {
   }
   if (cfg.attribution !== "off" && parsed.calls.some(isMessageCall)) {
     all.push(...attributionViolations(command, cfg));
+    for (const word of tokenize(command).cmds.flatMap((c) => c.argv))
+      all.push(...attributionViolations(word, cfg));
+    for (const call of parsed.calls)
+      for (const word of call.args)
+        all.push(...attributionViolations(word, cfg));
     for (const call of parsed.calls) {
       if (call.kind !== "gh" || !isMessageCall(call))
         continue;
@@ -2853,6 +3054,7 @@ async function evaluate(command, cfg, rawEnv) {
     }
   }
   const follow = createFollower(env);
+  const directoryMode = strictest(cfg.identityRules.length ? [cfg.attribution, cfg.protectedBranch, cfg.identity] : [cfg.attribution, cfg.protectedBranch]);
   let created = false;
   let taint = { config: false, upstream: false };
   const switched = newContextState();
@@ -2860,11 +3062,18 @@ async function evaluate(command, cfg, rawEnv) {
     if (call.kind === "infra") {
       stepContext(switched, call.flow.chain);
       all.push(...await contextViolations(call, cfg, env, switched));
-      followSwitch(call, switched, env.home);
+      await followSwitch(call, switched, env);
       continue;
     }
     if (call.kind !== "git")
       continue;
+    if (call.unresolvedDir && isGuarded(call, cfg)) {
+      all.push({
+        rule: "lookup",
+        mode: directoryMode,
+        message: `lookup: the directory for git ${call.sub} cannot be resolved, so its repository cannot be checked. Use a literal directory or run the directory change on its own first.`
+      });
+    }
     follow.step(call.flow.chain);
     if (cfg.protectedBranch !== "off")
       all.push(...await protectedBranchViolations(call, cfg, env, follow, taint));
@@ -2904,7 +3113,7 @@ function formatDeny(violations) {
 }
 
 // mods/guard-rules/host/env.ts
-import { mkdirSync, readFileSync as readFileSync2, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync as readFileSync2, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join as join2 } from "node:path";
 
 // host-lib/options.ts
@@ -2960,6 +3169,7 @@ function run(dir, argv, vars, timeoutMs = TIMEOUT_MS) {
 var configPath = () => optionsPath("guard-rules");
 var guardDirs = ownDirs;
 var storePath = () => join2(dataDir(), "guard-rules", "contexts.json");
+var ASK_UNSUPPORTED = "guard-rules: warning: modeUnparsed=ask is supported only on Claude Code; this host treats it as on (deny).";
 function loadConfig(path = configPath()) {
   const loaded = loadOptions("guard-rules", path);
   return loaded.error ? { ...parseConfig({}), error: loaded.error } : parseConfig(loaded.options);
@@ -2985,6 +3195,16 @@ function nodeEnv(cwd, classes = loadClasses) {
     git: (dir, args, vars) => run(dir, ["git", "-C", dir, ...args], vars),
     run,
     contexts: async () => classes(),
+    exists: async (path) => {
+      try {
+        statSync(path);
+        return true;
+      } catch (e) {
+        if (e instanceof Error && "code" in e && e.code === "ENOENT")
+          return false;
+        throw e;
+      }
+    },
     read: async (path) => {
       try {
         return readFileSync2(path, "utf8");
@@ -3055,6 +3275,7 @@ async function checkCommand(command, cfg, env) {
 // mods/guard-rules/host/opencode.ts
 var SHELL_TOOLS = new Set(["shell", "bash"]);
 async function setup(ctx, options = { config: undefined }) {
+  let warnedAsk = false;
   await ctx.tool.hook("execute.before", async (event) => {
     if (!SHELL_TOOLS.has(event.tool.toLowerCase())) {
       const result = checkTool(event.input, ctx.location.directory, process.env.HOME || userInfo2().homedir);
@@ -3066,7 +3287,12 @@ async function setup(ctx, options = { config: undefined }) {
     if (typeof input?.command !== "string")
       throw new Error("guard-rules: a shell call without a command cannot be checked, so it was blocked (fail closed).");
     const cwd = typeof input.workdir === "string" && input.workdir !== "" ? resolve(ctx.location.directory, input.workdir) : ctx.location.directory;
-    const result = await checkCommand(input.command, loadConfig(options.config), nodeEnv(cwd));
+    const cfg = loadConfig(options.config);
+    if (cfg.unparsed === "ask" && !warnedAsk) {
+      warnedAsk = true;
+      console.error(ASK_UNSUPPORTED);
+    }
+    const result = await checkCommand(input.command, cfg, nodeEnv(cwd));
     if (result.notice)
       console.error(result.notice);
     if (result.deny)

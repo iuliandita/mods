@@ -1,9 +1,9 @@
 import { REAL, UNKNOWN, type Flow, type Possible } from './flow'
-import { INFRA_TOOLS, parseGh, parseGit, parseInfra, type Call, type InfraTool } from './calls'
+import { INFRA_TOOLS, parseGh, parseGit, parseInfra, SECRET_PLACEHOLDER, type Call, type InfraTool } from './calls'
 import { tokenize, type Simple } from './lex'
-import { basename } from './paths'
+import { basename, hasVariable } from './paths'
 import { applyAssign, applyCd, applyDeclare, applyExport, applyPopd, applyPushd, applySet, applyUnset, dirOf, move, newProcState, UNSET, type ProcState } from './state'
-import { IDENTITY_ENV, mayName, READ_ENV, toolWords } from './words'
+import { IDENTITY_ENV, isDataWord, mayName, READ_ENV, toolWords } from './words'
 import { SHELLS, shellScript, unwrap } from './wrappers'
 
 // `opaque` lists constructs the guard does not model anywhere in the command (unparsed when the text names a
@@ -16,6 +16,9 @@ export type Parsed = { calls: Call[]; ok: boolean; opaque: string[]; local: Loca
 const OPAQUE_TOOLS = new Set(['git', 'gh', 'glab', 'tea', 'fj', 'kubectl', 'helm', 'terraform', 'tofu', ...SHELLS])
 // `cat` only copies its input, so a commit message heredoc (`"$(cat <<'EOF' ...)"`) that names a tool stays data.
 const TEXT_HEADS = new Set(['echo', 'printf', 'man', 'which', 'type', 'grep', 'rg', 'cat'])
+const DATA_HEADS = new Set(['ls', 'mkdir', 'rmdir', 'touch', 'cp', 'mv', 'rm', 'head', 'tail', 'wc', 'tee', 'curl', 'basename', 'dirname', 'realpath', 'readlink', 'file', 'stat', 'du', 'df', 'cut', 'uniq', 'diff', 'cmp'])
+const INPUT_EXECUTORS = new Set(['xargs', ...SHELLS, 'awk', 'gawk', 'mawk', 'perl', 'ruby', 'node', 'env', 'parallel', 'watch', 'script', 'ssh', 'php', 'lua', 'tclsh', 'at', 'crontab', 'batch'])
+const SED_FLAGS = new Set(['-n', '--quiet', '--silent', '-E', '-r', '--regexp-extended'])
 // Shell constructs the guard does not follow: code defined here and run later, or a branch it does not model.
 const STRUCTURES: Record<string, string> = {
   case: 'a case statement',
@@ -24,6 +27,8 @@ const STRUCTURES: Record<string, string> = {
   trap: 'a trap',
   alias: 'an alias',
   function: 'a function definition',
+  hash: 'a changed command hash table',
+  enable: 'a changed shell builtin',
 }
 // Commands the guard models that only test or iterate: their words name tools as data.
 const FLOW_HEADS = new Set(['[', '[[', 'test', 'for', 'true', 'false', ':'])
@@ -35,27 +40,49 @@ const DECLARES = new Set(['declare', 'typeset', 'local', 'readonly'])
 const SUBST_TEXT = /[$<>]\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)|`[^`]*`/g
 // Variables that change how the shell or git reads every later word.
 const SHELL_ENV = new Set(['IFS', 'BASH_ENV', 'ENV', 'GIT_CONFIG_PARAMETERS'])
+// Values these programs can interpret as commands or command options, including exported settings.
+const EXEC_ENV = /^(?:PAGER|MANPAGER|LESS(?:OPEN|CLOSE)?|EDITOR|VISUAL|BROWSER|MANOPT|SHELL|GIT_.*|.*_(?:PAGER|EDITOR|BROWSER))$/
 const DYNAMIC = 'built from a variable, substitution or glob'
 const PLAIN_WORD = /^[\w./+@%:,=~-]+$/
 // Commands that switch the kube context, or rewrite what a context points at, in a kubeconfig the guard read before
 // the command ran: each row is the words that must all appear after the command name (empty: any arguments).
+// A pipe separates documented aliases for one word. These are conservative matches, not full CLI parsers.
 const KUBE_SWITCHERS: Record<string, string[][]> = {
   kubectx: [[]],
   'kubectl-ctx': [[]],
   kubens: [[]],
   aws: [['eks', 'update-kubeconfig']],
-  gcloud: [['get-credentials']],
-  az: [['aks', 'get-credentials']],
-  doctl: [['kubeconfig', 'save'], ['cluster', 'create']],
-  oc: [['login'], ['project'], ['config']],
+  gcloud: [['get-credentials'], ['container', 'clusters', 'create|create-auto']],
+  az: [['aks|fleet|aksarc', 'get-credentials'], ['connectedk8s', 'proxy']],
+  doctl: [['kubernetes|kube|k8s|k', 'cluster|clusters|c', 'kubeconfig|kubecfg|k8scfg|config|cfg', 'save|s'], ['kubernetes|kube|k8s|k', 'cluster|clusters|c', 'create']],
+  oc: [['login'], ['project'], ['new-project'], ['config']],
   kind: [['export', 'kubeconfig'], ['create', 'cluster']],
   minikube: [['update-context'], ['start'], ['profile']],
-  k3d: [['kubeconfig', 'merge'], ['cluster', 'create']],
+  k3d: [['kubeconfig', 'merge|write'], ['cluster', 'create']],
+  eksctl: [['create', 'cluster'], ['utils', 'write-kubeconfig']],
+  tsh: [['kube', 'login']],
+  vcluster: [['connect|create']],
+  talosctl: [['kubeconfig']],
+  scw: [['k8s', 'kubeconfig', 'install']],
+  ibmcloud: [['ks', 'cluster', 'config']],
+  civo: [['kubernetes', 'config']],
 }
 const KUBECTX_READ = new Set(['-c', '--current', '-h', '--help'])
 const OC_CONFIG_READ = new Set(['view', 'get-contexts', 'current-context', 'get-clusters', 'get-users'])
-// Commands that write the files named among their words (`sed` and `perl` only with -i).
-const FILE_WRITERS = new Set(['cp', 'mv', 'ln', 'install', 'rsync', 'tee', 'truncate', 'dd', 'sed', 'perl'])
+// Operand paths are conservative: even a source can name a file whose lookup may become stale.
+const FILE_WRITERS = new Set(['cp', 'mv', 'ln', 'install', 'rsync', 'tee', 'truncate', 'dd', 'scp', 'sponge'])
+const INPLACE_WRITERS = new Set(['sed', 'perl', 'yq', 'sops'])
+const FILE_OUTPUT_OPTIONS: Record<string, string[]> = {
+  cp: ['-t', '--target-directory', '--target'],
+  mv: ['-t', '--target-directory', '--target'],
+  ln: ['-t', '--target-directory', '--target'],
+  install: ['-t', '--target-directory', '--target'],
+  curl: ['-o', '--output'],
+  wget: ['-O', '--output-document'],
+  sops: ['--output'],
+  gpg: ['-o', '--output'],
+  age: ['-o', '--output'],
+}
 const KUBE_FILE = /(?:^|\/)\.kube(?:\/|$)|kubeconfig/i
 const WORKSPACE_FILE = /(?:^|\/)\.terraform(?:\/environment)?\/?$/
 
@@ -89,6 +116,14 @@ type Step = {
   loop: boolean
   effect: Flow
   here: (d: Possible<string>) => string | null
+}
+
+// Privilege wrappers may reset HOME and target variables under host policy. Inspect only the stripped prefix;
+// an env -S prefix can contain several words in one argument. Do not guess sudoers or doas configuration.
+function resetsInfraEnv(s: Step): boolean {
+  const at = s.cmd.argv.indexOf(s.argv[0] ?? '')
+  const prefix = at === -1 ? s.cmd.argv : s.cmd.argv.slice(0, at)
+  return prefix.some((a) => /(?:^|[\s/])(?:sudo|doas)(?:\s|$)/.test(a))
 }
 
 function mark(w: Walk, why: string): void {
@@ -147,7 +182,7 @@ function applyBuiltin(w: Walk, s: Step): boolean {
   else if (name === 'popd') applyPopd(w.st, argv, s.dyn, effect)
   else if (name === 'set') applySet(w.st, argv, effect)
   // A sourced script is not read; one the shell makes up or reads from stdin is not even a file.
-  else if ((name === 'source' || name === '.') && (argv.length === 1 || s.dyn[1] || argv[1] === '/dev/stdin' || argv[1] === '-')) mark(w, 'a sourced script the guard cannot read')
+  else if (name === 'source' || name === '.') mark(w, 'a sourced script the guard cannot read')
   else return false
   return true
 }
@@ -177,20 +212,22 @@ function emitToolCalls(w: Walk, s: Step): void {
     const at = here ?? w.st.startDir
     if (name === 'git') {
       const r = parseGit(simple, argv, s.dyn, at, w.st.home, flow, slot)
-      const why = !r.ok ? 'a git option or repository the guard cannot follow' : here === null ? 'a directory the guard cannot tell' : unknown ? 'a variable the guard cannot tell' : undefined
+      const why = !r.ok ? 'a git option or repository the guard cannot follow' : unknown ? 'a variable the guard cannot tell' : undefined
       if (r.call && why) r.call.opaque = why
+      if (r.call && here === null) r.call.unresolvedDir = true
       if (r.call) w.calls.push(r.call)
     } else if (name === 'gh' || name === 'glab' || name === 'tea' || name === 'fj') {
       const call = parseGh(argv, s.dyn, name, at, flow, slot)
       if (call) w.calls.push(call)
     } else {
       const call = parseInfra(simple, argv, s.dyn, name as InfraTool, at, w.st.home, flow, slot)
+      if (call && resetsInfraEnv(s)) call.custom = true
       // Terraform is classified by its directory, and a relative kubeconfig path depends on it.
       const located = name === 'terraform' || name === 'tofu' || Boolean(call?.kubeconfig || simple.assigns.KUBECONFIG)
       // A `..` left for the OS to resolve hides the directory names terraform is classified by.
       const opaque = call !== null && call.dir.split('/').includes('..')
       // An earlier command may have switched the context or workspace, or written the kubeconfig the guard reads.
-      const files = (call?.kubeconfig || simple.assigns.KUBECONFIG || '').split(':').filter(Boolean)
+      const files = call?.kubeconfig ? [call.kubeconfig] : (simple.assigns.KUBECONFIG || '').split(':').filter(Boolean)
       const switched = name === 'kubectl' || name === 'helm' ? w.kube || files.some((f) => w.written.has(basename(f))) : w.workspace
       if (call && ((here === null && located) || unknown || (opaque && located) || switched)) call.custom = true
       if (call) w.calls.push(call)
@@ -204,9 +241,10 @@ function inlineScript(w: Walk, s: Step): void {
   let script: string | undefined
   let from = argv.length
   if (name === 'secret-box') {
-    // `secret-box exec -- SCRIPT` runs SCRIPT through a shell; an exec form without a script cannot be read.
+    // `secret-box exec [--scrub] -- SCRIPT` runs SCRIPT through a shell.
     if (argv[1] === 'exec') {
-      if (argv[2] === '--' && argv[3] !== undefined) script = argv.slice((from = 3)).join(' ')
+      const separator = argv[2] === '--scrub' ? 3 : 2
+      if (argv[separator] === '--' && argv[separator + 1] !== undefined) script = argv.slice((from = separator + 1)).join(' ')
       else mark(w, 'a secret-box exec without a script')
     }
   } else if (name === 'eval') {
@@ -238,7 +276,7 @@ function inlineScript(w: Walk, s: Step): void {
   for (const why of inner.opaque) mark(w, why)
   // The wrapper's own assignments and `env -u`/`-i` apply to the inner script, which runs in the wrapper's place in the chain.
   const outer = u.assigns
-  const drop = { unset: [...u.unset], clear: u.clear, chdir: u.chdir }
+  const drop = { unset: [...u.unset], clear: u.clear || resetsInfraEnv(s), chdir: u.chdir }
   w.queue.splice(s.idx + 1, 0, ...inner.cmds.map((c) => ({ ...c, op: c.op === '' ? s.cmd.op : c.op, ...(c.argv.length ? { assigns: { ...outer, ...c.assigns }, ...drop } : {}) })))
 }
 
@@ -249,27 +287,121 @@ function inlineScript(w: Walk, s: Step): void {
 // whether or not the command surely ran.
 function markSwitch(w: Walk, s: Step): void {
   const words = s.argv.slice(1)
-  const inPlace = words.some((a) => /^-[a-zA-Z]*i|^--in-place/.test(a))
-  const writes = FILE_WRITERS.has(s.name) && (inPlace || (s.name !== 'sed' && s.name !== 'perl'))
-  for (const f of [...(s.cmd.outputs ?? []), ...(writes ? words.filter((a) => !a.startsWith('-')) : [])]) {
+  const inPlace = INPLACE_WRITERS.has(s.name) && words.some((a) => /^-[a-zA-Z]*i|^--in-?place(?:=|$)/.test(a))
+  const awkInPlace = s.name === 'gawk' && words.some((a, i) =>
+    ((a === '-i' || a === '--include') && words[i + 1] === 'inplace') || a === '-iinplace' || a === '--include=inplace')
+  const options = Object.hasOwn(FILE_OUTPUT_OPTIONS, s.name) ? FILE_OUTPUT_OPTIONS[s.name]! : []
+  const outputOption = (a: string) => options.find((opt) => a === opt || a.startsWith(opt + (opt.startsWith('--') ? '=' : '')))
+  const writes = FILE_WRITERS.has(s.name) || inPlace || awkInPlace || words.some((a) => outputOption(a) !== undefined)
+  const targets = (s.cmd.outputs ?? []).map((path) => ({ path, dynamic: hasVariable(path) || SECRET_PLACEHOLDER.test(path) }))
+  if (writes) for (let i = 1; i < s.argv.length; i++) {
+    const a = s.argv[i]!
+    const opt = outputOption(a)
+    let path = a
+    if (a.startsWith('-')) {
+      if (a.startsWith('--') && a.includes('=')) path = a.slice(a.indexOf('=') + 1)
+      else {
+        if (opt === undefined || a === opt) continue
+        path = a.slice(opt.length)
+      }
+    } else if (s.name === 'dd') {
+      if (!a.startsWith('of=')) continue
+      path = a.slice(3)
+    }
+    targets.push({ path, dynamic: Boolean(s.dyn[i]) || hasVariable(path) || SECRET_PLACEHOLDER.test(path) })
+  }
+  for (const { path: f, dynamic } of targets) {
+    if (dynamic) {
+      w.kube = w.workspace = true
+      continue
+    }
     w.written.add(basename(f))
     if (KUBE_FILE.test(f)) w.kube = true
     if (WORKSPACE_FILE.test(f)) w.workspace = true
   }
   const rows = Object.hasOwn(KUBE_SWITCHERS, s.name) ? KUBE_SWITCHERS[s.name]! : []
-  if (!rows.some((row) => row.every((r) => words.includes(r)))) return
+  if (!rows.some((row) => row.every((r) => r.split('|').some((alias) => words.includes(alias))))) return
   if ((s.name === 'kubectx' || s.name === 'kubens' || s.name === 'kubectl-ctx') && words.every((a) => KUBECTX_READ.has(a))) return
-  if (s.name === 'oc' && words[0] === 'config' && words.slice(1).some((a) => OC_CONFIG_READ.has(a))) return
+  if (s.name === 'oc' && words[0] === 'config' && OC_CONFIG_READ.has(words[1] ?? '')) return
   w.kube = true
 }
 
+// Only known sed options can separate scripts from files. Any `e` in a script keeps all words visible:
+// this deliberately includes harmless occurrences rather than trying to parse sed's execution syntax.
+function sedFileSlots(s: Step): Set<number> | null {
+  const files = new Set<number>()
+  const scripts: string[] = []
+  let options = true
+  for (let i = 1; i < s.argv.length; i++) {
+    const a = s.argv[i]!
+    if (s.dyn[i]) return null
+    if (options && a === '--') options = false
+    else if (options && SED_FLAGS.has(a)) continue
+    else if (options && (a === '-e' || a === '--expression')) {
+      const script = s.argv[++i]
+      if (script === undefined || s.dyn[i]) return null
+      scripts.push(script)
+    } else if (options && a.startsWith('-')) return null
+    else if (!scripts.length) scripts.push(a)
+    else files.add(i)
+  }
+  return !scripts.length || scripts.some((script) => script.includes('e')) ? null : files
+}
+
+// Literal words are evidence about piped text, not an evaluation of the producer's output. Include all
+// stages through pass-through commands; substitutions are queued separately and do not break a pipeline.
+function pipedWords(w: Walk, s: Step): string[] {
+  const words: string[] = []
+  let cmd = s.cmd
+  let idx = s.idx
+  // A nested input executor may consume the enclosing command's stdin (for example tee >(xargs env)).
+  if (cmd.op === '$(') {
+    while (idx > 0 && w.queue[idx - 1]!.op === '$(') idx--
+    while (idx < w.queue.length - 1 && w.queue[idx]!.op === '$(') {
+      const nested = w.queue[idx++]!
+      words.push(...nested.argv, ...Object.values(nested.assigns), ...(nested.input ?? []))
+    }
+    cmd = w.queue[idx]!
+    words.push(...(cmd.input ?? []))
+  }
+  while (SINGLE_PIPE.test(cmd.op)) {
+    do { idx-- } while (idx >= 0 && w.queue[idx]!.op === '$(')
+    if (idx < 0) break
+    cmd = w.queue[idx]!
+    // Group output is not evaluated: conservatively check the enclosing command's literal words.
+    if (cmd.argv[0] === '}' || cmd.argv[0] === 'fi' || cmd.argv[0] === 'done' || w.queue[idx + 1]!.op.includes(')')) {
+      return w.queue.flatMap((c) => [...c.argv, ...Object.values(c.assigns), ...(c.input ?? [])])
+    }
+    const u = unwrap(cmd)
+    const name = basename(u.argv[0] ?? '')
+    // A modeled tool call is already checked; its executable name is not evidence about its output.
+    const modeled = name === 'git' || name === 'gh' || name === 'glab' || name === 'tea' || name === 'fj' || INFRA_TOOLS.has(name)
+    words.push(...u.argv.slice(modeled ? 1 : 0), ...Object.values(u.assigns), ...(cmd.input ?? []))
+  }
+  return words
+}
+
 function markOpaque(w: Walk, s: Step): void {
-  if (FLOW_HEADS.has(s.name) || (TEXT_HEADS.has(s.name) && !(s.name === 'rg' && s.argv.some((a) => a === '--pre' || a.startsWith('--pre='))))) return
+  if (s.u.clear || s.u.unset.has('PATH')) mark(w, 'a cleared PATH for an unmodeled command')
+  const bare = s.argv[0] === s.name
+  const executableOption = s.name === 'rg' ? s.argv.some((a) => a === '--pre' || a.startsWith('--pre='))
+    : s.name === 'man' && s.argv.slice(1).some((a) => /^-[^-]*[PH]|^--(?:pager|html)(?:=|$)/.test(a))
+  if (bare && (FLOW_HEADS.has(s.name) || (TEXT_HEADS.has(s.name) && !executableOption))) return
+  const sedFiles = s.name === 'sed' ? sedFileSlots(s) : new Set<number>()
+  const data = bare && (DATA_HEADS.has(s.name) || (s.name === 'brew' && s.argv[1] === 'install'))
+  const executor = INPUT_EXECUTORS.has(s.name) || /^python[\d.]*$/.test(s.name) || (s.name === 'sed' && sedFiles === null)
   // Substitutions are followed as calls of their own, so their text is not this command's words. A command word
   // that is not a plain name or path (`"git push" origin main`) counts among them.
-  const words = s.argv.slice(1).map((a, i) => (s.dyn[i + 1] ? a.replace(SUBST_TEXT, ' ') : a))
+  const words = s.argv.slice(1).map((a, i) => {
+    if (data) return ''
+    if (executor) return a
+    if (s.dyn[i + 1]) return a.replace(SUBST_TEXT, ' ')
+    if (s.name === 'man') return a.replace(/^-[^-]*?[PH]/, ' ')
+    return bare && s.name === 'sed' && sedFiles?.has(i + 1) && isDataWord(a) ? '' : a
+  })
   if (!PLAIN_WORD.test(s.argv[0]!)) words.push(s.argv[0]!)
-  const tools = toolWords([...words, ...(s.cmd.input ?? [])].join(' '), { shells: true })
+  const input = s.name === 'sed' && sedFiles !== null ? [] : [...(s.cmd.input ?? []), ...(executor ? pipedWords(w, s) : [])]
+  const tools = toolWords([...words, ...input].join(' '), { shells: true })
   if (tools.length) w.local.push({ why: `${s.name} with ${tools.join(', ')} among its words`, tools })
 }
 
@@ -295,6 +427,18 @@ export function extractCalls(src: string, startDir: string, home: string): Parse
     for (const why of s.u.opaque) mark(w, why)
     const assigned = [...Object.keys(s.u.assigns), ...(s.name === 'export' || DECLARES.has(s.name) ? s.argv.slice(1).map((a) => a.split('=')[0]!) : [])]
     for (const k of assigned) if (SHELL_ENV.has(k)) mark(w, `an assignment to ${k}`)
+    // PATH tokens can change command resolution through any builtin, including `{PATH}` redirections.
+    if ([...cmd.argv, ...Object.entries(s.u.assigns).flat(), ...(cmd.outputs ?? [])].some((a) => /\bPATH\b|^-vPATH\b/.test(a))) mark(w, 'a possible write to PATH')
+    const settings = Object.entries(s.u.assigns)
+    if (s.name === 'export' || DECLARES.has(s.name)) for (const a of s.argv.slice(1)) {
+      const eq = a.indexOf('=')
+      if (eq > 0) settings.push([a.slice(0, eq), a.slice(eq + 1)])
+    }
+    for (const [key, value] of settings) {
+      if (!EXEC_ENV.test(key)) continue
+      const tools = toolWords(value, { shells: key !== 'SHELL' || !isDataWord(value), commands: true })
+      if (tools.length) w.local.push({ why: `an assignment to ${key} with ${tools.join(', ')} among its words`, tools })
+    }
     if (s.dyn[0]) {
       const tools = mayName(s.argv[0]!, [...OPAQUE_TOOLS])
       if (tools.length) w.local.push({ why: `a command word that may expand to ${tools.join(', ')}`, tools })

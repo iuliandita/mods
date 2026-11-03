@@ -47,15 +47,15 @@ def _usage(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
     return ["install"]
 
 
-@pytest.mark.parametrize("setup", [_bad_catalog, _oserror, _usage])
-def test_every_failure_is_exit_1_with_one_json_object(
-    setup, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize(("setup", "exit_code"), [(_bad_catalog, 1), (_oserror, 1), (_usage, 2)])
+def test_every_failure_has_its_exit_code_and_one_json_object(
+    setup, exit_code: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     argv = setup(tmp_path, monkeypatch)
     code = main(["--json", *argv])
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
-    assert code == 1 and payload["ok"] is False and payload["errors"]
+    assert code == exit_code and payload["ok"] is False and payload["errors"]
     assert captured.out.count("\n") == 1
     assert "Traceback" not in captured.err
 
@@ -73,8 +73,8 @@ def test_install_passes_scope_and_names(
 SHAPES = [
     (["list"], False, 0, {"claude", "mods"}),
     (["list"], True, 1, {"claude", "mods"}),
-    (["doctor"], False, 0, {"claude", "mods", "notes", "source"}),
-    (["doctor"], True, 1, {"claude", "mods", "notes", "source"}),
+    (["doctor"], False, 0, {"claude", "mods", "notes", "source", "codex_hooks"}),
+    (["doctor"], True, 1, {"claude", "mods", "notes", "source", "codex_hooks"}),
     (["validate", "--no-claude"], False, 0, {"problems"}),
     (["validate", "--no-claude"], True, 1, {"problems"}),
     (["install", "alpha"], False, 0, {"installed"}),
@@ -117,7 +117,7 @@ def test_abbreviated_json_flag_is_a_json_error_not_accepted(
 ) -> None:
     code, out, _ = run(capsys, *argv)
     payload = json.loads(out)
-    assert code == 1 and payload["ok"] is False and "--js" in payload["errors"][0]
+    assert code == 2 and payload["ok"] is False and "--js" in payload["errors"][0]
 
 
 @pytest.mark.parametrize("command", ["list", "generate"])
@@ -159,3 +159,62 @@ def test_an_unusable_root_is_one_json_failure(
     payload = json.loads(captured.out)
     assert code == 1 and payload["ok"] is False and payload["errors"]
     assert captured.out.count("\n") == 1 and "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["install", "nope"], ["uninstall", "nope"], ["generate", "--check"]],
+)
+def test_human_failures_go_to_stderr_with_prefix(
+    argv: list[str], fake_claude: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_mod(tmp_path, "alpha")
+    code, out, err = run(capsys, "--root", str(tmp_path), *argv)
+    assert code == 1 and out == ""
+    lines = err.splitlines()
+    assert lines and all(line.startswith("error: ") for line in lines), err
+
+
+@pytest.mark.parametrize("argv", [[], ["install"], ["validate"], ["generate"], ["doctor"], ["list"], ["uninstall"]])
+def test_help_lists_environment_and_exit_codes(
+    argv: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as stop:
+        main([*argv, "--help"])
+    out = capsys.readouterr().out
+    assert stop.value.code == 0
+    assert "Environment:" in out and "MODS_REQUIRE_BUN" in out
+    assert "Exit codes:" in out and "3  a required tool is missing" in out
+
+
+def test_missing_claude_exits_3_with_the_json_shape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_mod(tmp_path, "alpha")
+    generate(tmp_path)
+    monkeypatch.setattr("modslib.claude.shutil.which", lambda name: None)
+    code, out, _ = run(capsys, "--json", "--root", str(tmp_path), "install", "alpha")
+    payload = json.loads(out)
+    assert code == 3 and payload["ok"] is False and "claude CLI not found" in payload["errors"][0]
+
+
+def test_uninstall_json_for_a_retired_mod(
+    fake_claude: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_mod(tmp_path, "alpha")
+    code, out, _ = run(capsys, "--root", str(tmp_path), "uninstall", "prompt-gate", "--json")
+    payload = json.loads(out)
+    assert code == 0 and payload["ok"] is True
+    assert payload["uninstalled"] == ["prompt-gate@iuliandita-mods"]
+    assert any("codex plugin remove" in step for step in payload["manual"])
+    code, _, err = run(capsys, "--root", str(tmp_path), "uninstall", "skill-pick")
+    assert code == 0 and "manual: skill-pick: codex" in err
+
+
+def test_uninstall_prints_the_manual_steps_when_claude_is_missing(
+    no_claude: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_mod(tmp_path, "alpha")
+    code, _, err = run(capsys, "--root", str(tmp_path), "uninstall", "prompt-gate")
+    assert code == 0 and "note: prompt-gate: claude CLI not found" in err
+    assert "manual: prompt-gate: codex" in err

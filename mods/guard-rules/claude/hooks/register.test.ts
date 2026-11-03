@@ -85,6 +85,83 @@ test('dry mode reports through a toast and lets the command run', { options: { m
   expect(toasts[0]).toContain('Co-Authored-By')
 })
 
+test('ask mode returns a classic permission ask only for enforced parser findings', {
+  options: { modeUnparsed: 'ask' },
+  plugins: [{
+    name: 'permission-observer',
+    tier: 'prepend',
+    register(on) {
+      on('classic.PreToolUse', { tool: 'Bash' }, async ($, e, next) => {
+        const result = await next(e)
+        $.ui.toast(JSON.stringify(result))
+        return result
+      })
+    },
+  }],
+}, async ($, on) => {
+  world(on)
+  const decisions: string[] = []
+  on('ui.toast', (_$, e) => {
+    decisions.push(e.text)
+    return { value: undefined }
+  })
+  on('classic.PreToolUse', () => ({}))
+  await $.tool.call({ tool: 'Bash', command: 'xargs git push' })
+  expect(decisions).toHaveLength(1)
+  expect(decisions[0]).toContain('"ask":"guard-rules: unparsed:')
+  expect(decisions[0]).not.toContain('"allow"')
+  decisions.length = 0
+  await $.tool.call({ tool: 'Bash', command: 'git status' })
+  expect(decisions).toEqual(['{}'])
+})
+
+test('ask mode keeps parsed violations as hard denies', {
+  options: { modeUnparsed: 'ask', identityRules: '[{"prefix":"/h/","email":"me@personal.example"}]' },
+}, async ($, on) => {
+  world(on, { branch: 'main' })
+  on('store.get', () => ({ value: {} }))
+  for (const [command, reason] of [
+    ['xargs git push; git commit -m x', 'protected branch'],
+    ['xargs git push; git commit -m "Co-Authored-By: A"', 'attribution'],
+    ['xargs git push; git commit -m x', 'identity'],
+    ['xargs git push; kubectl --context prod delete pod x', 'context'],
+    ['xargs git push; git -C "$D" push', 'lookup'],
+  ] as const) {
+    expect((await $.tool.call({ tool: 'Bash', command })).deny, command).toContain(reason)
+  }
+})
+
+test('ask mode fails closed when its classic permission check fails', { options: { modeUnparsed: 'ask' } }, async ($, on) => {
+  let reads = 0
+  on('session.cwd', () => {
+    if (++reads > 1) throw new Error('unavailable')
+    return { value: '/h/personal/repo' }
+  })
+  on('env.get', () => ({ value: '/h' }))
+  let ran = false
+  on('tool.call', { tool: 'Bash' }, () => {
+    ran = true
+    return { result: { stdout: 'ran', stderr: '', interrupted: false } as never }
+  })
+  const result = await $.tool.call({ tool: 'Bash', command: 'xargs git push' })
+  expect(JSON.stringify(result)).toContain('permission check failed')
+  expect(JSON.stringify(result)).toContain('fail closed')
+  expect(ran).toBe(false)
+})
+
+test('ask mode preserves other classic denials and checks rewritten commands', { options: { modeUnparsed: 'ask' } }, async ($, on) => {
+  world(on, { branch: 'main' })
+  let rewrite = false
+  on('classic.PreToolUse', () => rewrite
+    ? { allow: true, updatedInput: { command: 'git commit -m x' } }
+    : { deny: 'another permission gate denied this call' })
+  const denied = await $.tool.call({ tool: 'Bash', command: 'xargs git push' })
+  expect(JSON.stringify(denied)).toContain('another permission gate denied')
+  rewrite = true
+  const rewritten = await $.tool.call({ tool: 'Bash', command: 'xargs git push' })
+  expect(JSON.stringify(rewritten)).toContain('protected branch')
+})
+
 test('a wrapper prefix or a spelled-out git or gh command does not hide a trailer', async ($, on) => {
   world(on)
   const trailer = '-m x -m "Co-Authored-By: a"'

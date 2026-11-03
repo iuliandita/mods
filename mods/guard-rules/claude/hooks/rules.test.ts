@@ -137,6 +137,38 @@ test('attribution: PR bodies, annotated tags and --trailer are scanned, lightwei
   expect((await evaluate(`gh constructor create --body ${TRAILER}`, cfg(), e)).enforced).toEqual([])
 })
 
+test('attribution: decoded words catch split trailers and escaped newlines without matching prose', async () => {
+  const messages = [
+    'Co-Authored-By:A',
+    '"Co-Authored-""By: A"',
+    String.raw`$'Co-Authored\x2dBy: A'`,
+    String.raw`Co-Authored-\By:A`,
+    String.raw`$'subject\012\012Co-Authored-By: A'`,
+  ]
+  for (const message of messages) {
+    for (const command of [`git commit -m ${message}`, `gh pr create --body ${message}`]) {
+      expect((await evaluate(command, cfg(), fakeEnv())).enforced.map((v) => v.rule), command).toEqual(['attribution'])
+      const dry = await evaluate(command, cfg({ modeAttribution: 'dry' }), fakeEnv())
+      expect(dry.enforced, command).toEqual([])
+      expect(dry.dry.map((v) => v.rule), command).toEqual(['attribution'])
+      expect((await evaluate(command, cfg({ modeAttribution: 'off' }), fakeEnv())).enforced, command).toEqual([])
+    }
+  }
+  expect((await evaluate('git commit -m "docs: explain Co-Authored-""By: trailers"', cfg(), fakeEnv())).enforced).toEqual([])
+})
+
+test('unparsed: decoded calls retain opaque syntax and fan-out reasons for both tool families', async () => {
+  const fanout = ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL', 'EMAIL'].map((key) => `export ${key}=a; export ${key}=b;`).join(' ')
+  for (const tool of [String.raw`$'\x67it' status`, String.raw`$'\x67h' pr list`, String.raw`$'\x6bubectl' get pods`]) {
+    for (const prefix of ['f() { :; };', fanout]) {
+      const command = `${prefix} ${tool}`
+      const v = await evaluate(command, cfg(), fakeEnv())
+      expect(v.enforced.map((x) => x.rule), command).toContain('unparsed')
+      expect(v.enforced[0]?.message, command).toContain(prefix === fanout ? 'more than 16 combinations' : 'a function definition')
+    }
+  }
+})
+
 test('protected branch: commits on develop or main are denied; feature, detached, unborn and aborts pass', async () => {
   for (const sub of ['commit -m x', 'merge feature', 'rebase main']) {
     const v = await evaluate(`git ${sub}`, cfg(), fakeEnv({ branch: 'develop' }))
@@ -327,7 +359,7 @@ test('context: a switch earlier in the same command decides the environment of l
     expect((await evaluate(command, cfg(), fakeEnv({ context: 'dev-1', workspace: 'dev' }))).enforced, command).toHaveLength(1)
   }
   expect((await evaluate('kubectl config use-context dev-1 && kubectl apply -f x.yaml', cfg(), fakeEnv({ context: 'prod-eu' }))).enforced).toEqual([])
-  expect((await evaluate('export TF_WORKSPACE=prod && unset TF_WORKSPACE && terraform apply', cfg(), fakeEnv({ workspace: 'dev' }))).enforced).toEqual([])
+  expect((await evaluate('export TF_WORKSPACE=prod && unset TF_WORKSPACE && terraform apply', cfg(), fakeEnv({ workspace: 'dev' }))).enforced).toHaveLength(1)
   expect((await evaluate('export TF_WORKSPACE=prod && TF_WORKSPACE=dev terraform apply', cfg(), fakeEnv({ workspace: 'dev' }))).enforced).toEqual([])
 })
 
@@ -467,16 +499,23 @@ test('sudo -D and --chdir move the directory of the wrapped command, and a non-l
 })
 
 test('a non-literal cd makes the directory unknown, so writes that depend on it fail closed', async () => {
-  for (const command of ['cd "$D" && git commit -m x', 'cd $(mktemp -d) && git push origin x', 'cd /w/envs/dev && cd "$D" && terraform apply']) {
-    expect((await evaluate(command, cfg(), fakeEnv({ workspace: 'default' }))).enforced, command).toHaveLength(1)
+  for (const modeUnparsed of ['on', 'dry', 'off']) {
+    for (const command of ['cd "$D" && git commit -m x', 'cd $(mktemp -d) && git push origin x']) {
+      expect((await evaluate(command, cfg({ modeUnparsed }), fakeEnv())).enforced.map((v) => v.rule), command).toEqual(['lookup'])
+    }
   }
+  expect((await evaluate('cd /w/envs/dev && cd "$D" && terraform apply', cfg(), fakeEnv({ workspace: 'default' }))).enforced).toHaveLength(1)
   for (const command of ['cd "$D" && git status', 'cd "$D" && cd /h/personal/repo && git commit -m x']) {
     expect((await evaluate(command, cfg(), fakeEnv())).enforced, command).toEqual([])
   }
+  const dry = await evaluate('cd "$D" && git push', cfg({ modeAttribution: 'off', modeProtectedBranch: 'dry', modeUnparsed: 'off' }), fakeEnv())
+  expect(dry.enforced).toEqual([])
+  expect(dry.dry.map((v) => v.rule)).toEqual(['lookup'])
+  expect((await evaluate('cd "$D" && git push', cfg({ modeAttribution: 'off', modeProtectedBranch: 'off', modeUnparsed: 'off' }), fakeEnv())).enforced).toEqual([])
 })
 
 test('git global options the guard cannot follow make a write unparsed', async () => {
-  for (const command of ['git -C/x commit -m y', 'git -cuser.email=a@b.c commit -m y', 'git --git-dir=/x/.git commit -m y', 'git --work-tree /x commit -m y', 'git --frobnicate commit -m y', 'GIT_DIR=/x/.git git commit -m y', 'git -C "$D" push origin x']) {
+  for (const command of ['git -C/x commit -m y', 'git -cuser.email=a@b.c commit -m y', 'git --git-dir=/x/.git commit -m y', 'git --work-tree /x commit -m y', 'git --frobnicate commit -m y', 'GIT_DIR=/x/.git git commit -m y']) {
     expect((await evaluate(command, cfg(), fakeEnv())).enforced.map((x) => x.rule), command).toEqual(['unparsed'])
   }
   for (const command of ['git --no-pager -c core.x=y commit -m y', 'git --git-dir=/x/.git log']) {
@@ -652,6 +691,24 @@ test('unparsed: identity counts toward the mode only when identity rules are set
   expect([...v.enforced, ...v.dry]).toEqual([])
   const ruled = await evaluate('git commit -m "oops', cfg({ modeAttribution: 'off', modeProtectedBranch: 'off', identityRules: IDENTITIES }), fakeEnv())
   expect(ruled.enforced.map((x) => x.rule)).toContain('unparsed')
+})
+
+test('unparsed mode caps only parser findings and preserves the inherited defaults', async () => {
+  for (const mode of ['on', 'dry', 'off', 'ask']) {
+    for (const command of ['xargs git push', 'xargs kubectl apply']) {
+      const v = await evaluate(command, cfg({ modeUnparsed: mode }), fakeEnv())
+      expect(v.enforced.map((x) => x.rule)).toEqual(mode === 'on' || mode === 'ask' ? ['unparsed'] : [])
+      expect(v.dry.map((x) => x.rule)).toEqual(mode === 'dry' ? ['unparsed'] : [])
+    }
+    const parsed = await evaluate('git push origin main', cfg({ modeUnparsed: mode }), fakeEnv())
+    expect(parsed.enforced.map((x) => x.rule)).toContain('protected-branch')
+  }
+  expect(cfg().unparsed).toBe('on')
+  expect(cfg({ modeUnparsed: 'ask' }).error).toBeUndefined()
+  expect(cfg({ modeUnparsed: 'ask' }).unparsed).toBe('ask')
+  expect(cfg({ modeUnparsed: 'invalid' }).error).toContain('modeUnparsed must be off, dry, on or ask')
+  const off = await evaluate('xargs kubectl apply', cfg({ modeUnparsed: 'dry', modeContext: 'off' }), fakeEnv())
+  expect([...off.enforced, ...off.dry]).toEqual([])
 })
 
 const SECRET = '{{secret:branch}}'

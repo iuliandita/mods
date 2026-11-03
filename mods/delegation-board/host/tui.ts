@@ -1,3 +1,4 @@
+import { loadOptions } from '../../../host-lib/options'
 import { bind, clean, defaultMakeText, duration, money, ticker, toMs, tokens, type Data, type MakeText, type SessionInfo } from '../../../host-lib/tui'
 
 const PANEL = 'iuliandita.delegation-board'
@@ -69,7 +70,16 @@ export function table(all: readonly Row[]): string {
   return [head, ...body].join('\n')
 }
 
-export async function setup(ctx: Ctx, makeText?: MakeText): Promise<() => void> {
+export const OFF_TEXT = 'delegation-board: off (mode is off in ~/.config/iuliandita-mods/delegation-board.json).'
+
+// Only the user-level options file counts, never anything a repository can set. An unreadable file or any other
+// value than `off` counts as on.
+export const isOff = (path?: string): boolean => {
+  const loaded = loadOptions('delegation-board', path)
+  return !loaded.error && loaded.options.mode === 'off'
+}
+
+export async function setup(ctx: Ctx, makeText?: MakeText, optionsFile?: string): Promise<() => void> {
   // The layer is made before the first await: the host ties it to the plugin's setup call.
   ctx.keymap.layer(() => ({
     mode: 'global',
@@ -89,6 +99,8 @@ export async function setup(ctx: Ctx, makeText?: MakeText): Promise<() => void> 
     append: 'session.panel',
     render: (input) => {
       if (input.name !== PANEL) return make('')
+      // Read each time the panel opens, so editing the file needs no restart.
+      if (isOff(optionsFile)) return make(OFF_TEXT)
       const draw = (): string => table(rows(ctx.data, input.sessionID, Date.now()))
       const node = make(draw())
       void ctx.data.session.sync(input.sessionID).catch(() => {})

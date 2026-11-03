@@ -1,4 +1,4 @@
-name: ci
+name: CI
 
 on:
   pull_request:
@@ -8,17 +8,50 @@ on:
 permissions:
   contents: read
 
-env:
-  # Fixed CI baseline; mod.json verified_on records each mod's manual runtime check separately.
-  CLAUDE_CODE_VERSION: "2.1.296"
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  unit:
-    runs-on: ubuntu-latest
+  lint:
+    name: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      MODS_REQUIRE_BUN: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      # the version in .bun-version builds the committed host bundles; generate --check rebuilds them
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: "1.7.12"
+          ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSLo /tmp/actionlint.tar.gz "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  /tmp/actionlint.tar.gz" | sha256sum --check
+          tar -xzf /tmp/actionlint.tar.gz -C "$HOME/.local/bin" actionlint
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: actionlint -color
+      - run: pip install -r requirements-dev.txt
+      - run: scripts/mods generate --check
+      - run: scripts/typecheck --hosts
+      - run: scripts/mods validate --no-claude
+      - run: python3 scripts/check-plugin-versions.py
+      - run: python3 .github/stack/stack-check.py
+
+  test:
+    name: test
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       MODS_REQUIRE_BUN: "1"
@@ -39,11 +72,10 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: python -m pytest -q -m "not integration"
       - run: bun test mods/*/host
-      - run: scripts/typecheck --hosts
-      - run: scripts/mods validate --no-claude
 
-  mods:
-    runs-on: ubuntu-latest
+  integration:
+    name: integration
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
       MODS_REQUIRE_CLAUDE: "1"
@@ -61,12 +93,58 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
-      # Pinned independently of the per-mod manual runtime verification versions.
-      - run: npm install -g --ignore-scripts @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
-      # install.cjs is run by hand: --ignore-scripts skips the install script and the native binary
-      # needs it; integrity relies on the registry's per-version signature, not a lockfile
-      - run: node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs"
-      - run: claude --version | grep -F "$CLAUDE_CODE_VERSION"
+      # CI baseline lives in .github/ci/claude-code (package.json pin, package-lock.json integrity);
+      # mod.json verified_on records each mod's manual runtime check separately.
+      - run: npm ci --ignore-scripts --prefix .github/ci/claude-code
+      # install.cjs is run by hand: --ignore-scripts skips the install script and the native binary needs it
+      - run: node .github/ci/claude-code/node_modules/@anthropic-ai/claude-code/install.cjs
+      - run: echo "$GITHUB_WORKSPACE/.github/ci/claude-code/node_modules/.bin" >> "$GITHUB_PATH"
+      - run: claude --version | grep -F "$(node -p "require('./.github/ci/claude-code/package.json').dependencies['@anthropic-ai/claude-code']")"
       - run: pip install -r requirements-dev.txt
       - run: python -m pytest -q -m integration
       - run: scripts/mods validate
+
+  markdown:
+    name: markdown
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install markdownlint-cli2
+        run: |
+          mkdir -p "$RUNNER_TEMP/markdownlint-cli2"
+          cp .github/tools/markdownlint/package.json .github/tools/markdownlint/package-lock.json "$RUNNER_TEMP/markdownlint-cli2/"
+          npm ci --prefix "$RUNNER_TEMP/markdownlint-cli2" --ignore-scripts --no-audit --no-fund
+          echo "$RUNNER_TEMP/markdownlint-cli2/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Lint Markdown
+        run: markdownlint-cli2
+
+  links:
+    name: links
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install lychee
+        env:
+          LYCHEE_VERSION: "0.24.2"
+          LYCHEE_SHA256: "1f4e0ef7f6554a6ed33dd7ac144fb2e1bbed98598e7af973042fc5cd43951c9a"
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSLo /tmp/lychee.tar.gz "https://github.com/lycheeverse/lychee/releases/download/lychee-v${LYCHEE_VERSION}/lychee-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${LYCHEE_SHA256}  /tmp/lychee.tar.gz" | sha256sum --check
+          tar -xzf /tmp/lychee.tar.gz -C "$HOME/.local/bin" --strip-components=1 lychee-x86_64-unknown-linux-gnu/lychee
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Check links
+        run: |
+          mapfile -t markdown_files < <(
+            {
+              printf '%s\n' AGENTS.md CHANGELOG.md CONTRIBUTING.md INSTALL.md README.md SECURITY.md
+              find docs mods -type f -name '*.md' -not -path '*/node_modules/*'
+            } | sort -u
+          )
+          lychee --config lychee.toml "${markdown_files[@]}"

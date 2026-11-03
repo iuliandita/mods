@@ -4,15 +4,53 @@ Mods run unsandboxed with your permissions. Read the selected mod's README, requ
 `mod.json` surface status, and declared egress before installing. A local source loads the
 checkout's current code, so do development in a separate checkout or worktree.
 
+The install commands below pin `main`, the stable release channel. `develop` is the default branch and
+the nightly; drop the `#main` (Claude Code) or `@main` (Codex) suffix to follow it.
+
 ## Marketplace installation
 
 ```bash
-claude plugin marketplace add iuliandita/mods
+claude plugin marketplace add iuliandita/mods#main
 claude plugin install guard-rules@iuliandita-mods --scope user
 ```
 
 Install from a terminal. User scope can load in Desktop sessions, but loading is not equivalent
 to verified hook behavior. Each mod's manifest records actual surface coverage.
+
+## Host and backend setup
+
+`mods.json` lists the install command per host for each mod that supports it, and each mod's
+README describes the host setup. [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) shows what works
+where.
+
+For `guard-rules`, `modeUnparsed` defaults to `on`. Set it to `ask` in the Claude plugin options
+to request permission for parser findings; enforced parsed violations still deny. Codex and OpenCode
+treat `ask` as `on` with a warning. See the [mode controls](mods/guard-rules/README.md#quiet-a-rule)
+for headless behavior and verification limits.
+
+For `secret-box`, install Python 3 and `bash`, plus `secret-tool` on Linux (with an unlocked
+Secret Service keyring). macOS uses the built-in `/usr/bin/security` and an unlocked Keychain;
+backend selection is automatic. Windows is unsupported. `scripts/mods doctor --json` checks
+common binaries plus the current platform's `requires_by_platform` entries. Missing backend
+binaries appear in the mod's `requires` results; the JSON envelope and exit codes are unchanged.
+Real macOS Keychain access and prompts remain unverified.
+
+Store values with `secret-box set NAME` in your own terminal, never in the chat. Run
+`secret-box names` to check backend access without printing values. The helper has no plaintext
+`values` command; hooks use batched `scrub` calls instead. Placeholder checks cover only
+Claude Code and Codex `Bash`, and OpenCode `shell`/`bash`; Codex `write_stdin` is not covered. Configure optional
+`secretScopes` directory globs in the Claude plugin options or the user-level
+`~/.config/iuliandita-mods/secret-box.json` file on Codex and OpenCode. Unlisted names remain
+unrestricted; malformed settings deny placeholder commands. See the mod's
+[options](mods/secret-box/README.md#options) and [limits](mods/secret-box/README.md#what-it-does-not-protect).
+
+For `notify`, install `notify-send` (libnotify) on Linux; macOS uses the built-in `osascript`.
+A missing notifier is a one-line `notify: warning:` and never a failure; `scripts/mods doctor`
+lists it under the mod's `requires`. On Codex and OpenCode set options in
+`~/.config/iuliandita-mods/notify.json`; see the mod's [README](mods/notify/README.md) for the events
+each host supports. Codex's finish hook runs synchronously, including under `codex exec`, with a
+one-second hook cap; permission hooks stay in the background. Events with `agent_id` are skipped,
+and notifier delivery has a 250 ms process timeout. It has no verified runtime check on any host yet.
 
 ## Clone CLI and scopes
 
@@ -37,7 +75,7 @@ Private mods use `scripts/mods install <name> --local`; they register `<clone>/l
 
 ## Updates and source mismatch
 
-Collection tags (starting with the `v0.1.0` prerelease) identify a repository snapshot. Each
+Collection tags (`v1.0.0` is the first stable one; `v0.1.0` to `v0.3.3` were prereleases) identify a repository snapshot. Each
 plugin keeps its own version; a collection tag does not set every plugin to that version.
 
 There is no `scripts/mods update` command. For a GitHub marketplace, refresh and update with
@@ -70,7 +108,8 @@ Do not remove unrelated marketplaces or assume removal restores an earlier plugi
 
 ## Partial failures and recovery
 
-JSON commands emit one object with `ok` and `errors`; failure exits 1. `install` adds `installed`
+JSON commands emit one object with `ok` and `errors`. Exit codes: 0 done, 1 failed, 2 usage error,
+3 a required tool (claude, or the pinned bun) is missing. `install` adds `installed`
 and `uninstall` adds `uninstalled`, including IDs completed before a later failure. These calls
 are sequential, not an atomic transaction: completed changes are not automatically rolled back.
 Inspect the error and completed IDs, check `claude plugin list --json`, fix the cause, and retry
@@ -86,12 +125,29 @@ Both hosts run the mod with your permissions, like Claude.
 Codex:
 
 ```bash
-codex plugin marketplace add iuliandita/mods
-codex plugin add guard-rules@iuliandita-mods   # or secret-box, prompt-gate, skill-pick @iuliandita-mods
+codex plugin marketplace add iuliandita/mods@main
+codex plugin add guard-rules@iuliandita-mods   # or secret-box or notify, same suffix
 ```
 
-Codex skips a plugin hook until you trust it once with `/hooks` in the Codex terminal UI.
-Remove with `codex plugin remove guard-rules@iuliandita-mods`.
+Codex skips new or changed plugin hooks, including under `codex exec`. After every install or
+update, open `/hooks` in the Codex terminal UI and review and trust each changed hook again.
+Until then, `guard-rules` and `secret-box` fail open: commands run without their checks.
+Run `scripts/mods doctor --json` to inspect each installed collection hook's `status`
+(`trusted`, `modified`, `untrusted`) and `enabled` flag under `codex_hooks`. Doctor exits 1
+for an untrusted or disabled guard, or if the Codex inventory cannot be checked. A missing
+Claude CLI alone still exits 3. Other untrusted hooks are reported
+without failing doctor. The clone installer still installs Claude plugins only; for mods with
+a Codex adapter it also prints this re-trust reminder (`manual` in JSON).
+
+Doctor reads the user config and collection plugin cache under `CODEX_HOME` (default
+`~/.codex`). Codex stores approvals in `[hooks.state]` in `config.toml`, with `trusted_hash`
+and `trusted_content_hash`; legacy plugin baselines live under `.hook-trust/`. Doctor copies
+these inputs to a temporary directory and queries the installed Codex `hooks/list` API there.
+It starts no agent turn or hook and writes no live Codex configuration. Discovery errors,
+an unavailable API, or a ten-second inventory timeout fail the check; inspect `/hooks`.
+Doctor reports only plugins Codex has installed. Remove with
+`codex plugin remove guard-rules@iuliandita-mods`; that leaves the plugin's `[hooks.state]`
+entries in `config.toml`, which are harmless and can be deleted by hand.
 
 OpenCode 2.x has no marketplace: clone this repository and add the package to `opencode.json`
 (`~/.config/opencode/opencode.json` for all projects):
@@ -108,30 +164,89 @@ Terminal UI mods (`statusline`, `delegation-board`) are listed in `plugins` in
 ```
 
 Hook-adapter options for both hosts live in `~/.config/iuliandita-mods/<mod>.json` (see the
-mod's README), never in a repository. OpenCode terminal UI plugins do not read those files or
-Claude plugin options. Remove their `cli.json` entries and restart OpenCode to disable them;
+mod's README), never in a repository. OpenCode terminal UI plugins do not read Claude plugin
+options; `delegation-board` reads only `mode` from its file there, `statusline` reads none. Remove their `cli.json` entries and restart OpenCode to disable them;
 remove hook-plugin entries from `opencode.json` to uninstall those. Preserve the clone and
 user-level configuration when updating or rolling back a path-based install.
 
-`prompt-gate` and `skill-pick` default to `dry`, which still sends eligible prompts to a model:
-a nested Codex session uses plan tokens, and OpenCode uses its selected model provider. With a
-TypeSafe key, Jev may also receive them. On these two hosts, `jevPaths` restricts all of those
-calls; `mode: "off"` stops them. See the mod READMEs before enabling either.
-The catalog lists destinations across all supported hosts: `anthropic` for Claude,
-`third-party:openai` for Codex, and `third-party:host-provider` for OpenCode's selected provider.
-`third-party:typesafe` applies when Jev is enabled with a key.
+On OpenCode 2.2.1, `secret-box` scrubs messages and system content for primary, compaction,
+generate and title requests, including user `!` shell output sent to a model. Stored history
+and output files are not rewritten; see the mod's [limits](mods/secret-box/README.md#what-it-does-not-protect).
 
 After a Codex install the hook command is
 `node <plugin>/bin/guard-rules.mjs`; the same file in a clone (`mods/guard-rules/codex/bin/`) is
 the command line tool for OpenCode users too.
+
+## Retired mods
+
+`prompt-gate` and `skill-pick` are no longer in the catalog. Remove an existing install with
+`scripts/mods uninstall prompt-gate skill-pick --scope user --json` (use the scope you installed
+at). The command also prints the steps it cannot do itself: on Codex run
+`codex plugin remove <mod>@iuliandita-mods`, and on OpenCode remove the `plugins` entry in
+`opencode.json` that ends in `mods/<mod>/opencode`. Their option files in
+`~/.config/iuliandita-mods/` and stored files under `~/.local/share/iuliandita-mods/` can be
+deleted. These steps are printed (and listed under `manual` with `--json`) whatever happens on the
+Claude side. A retired mod that Claude Code reports as not installed, or a missing `claude` CLI,
+is skipped with a note (`skipped` with `--json`) and the command still succeeds; a real Claude
+failure exits non-zero and still carries the steps. `scripts/mods list` shows a retired mod only
+while it is installed.
+
+## For agents
+
+Prefer the `claude` CLI directly; no clone is needed. `scripts/mods install` does not use the
+GitHub marketplace by default (see [Clone CLI and scopes](#clone-cli-and-scopes)). `mods.json` at
+the repo root is the machine-readable catalog. Install only the mods the user asked for, and read
+a mod's README and its declared `egress` first.
+
+From a clone, `scripts/mods` speaks JSON (`--json` on every command):
+
+```sh
+scripts/mods list --json
+scripts/mods install <mod> [<mod> ...] [--scope user|project|local] [--local] \
+    [--source <owner/repo>]
+scripts/mods uninstall <mod> [<mod> ...] [--scope user|project|local]
+scripts/mods doctor --json
+scripts/mods validate [--no-claude]
+scripts/mods generate [--check] [--local]
+```
+
+`--json` and `--root <repo>` work before or after the subcommand. Option abbreviations such as
+`--js` are rejected. `--root` must be a directory with a `mods/` or `local/mods/` directory;
+otherwise the command exits 1 before reading or writing anything. `--source` installs from
+another marketplace source (an `owner/repo`, git URL or path) instead of this clone; it cannot
+be combined with `--local` (exit 1). Mod names are still checked against this clone's catalog,
+not the remote one, so the source must carry the same mods.
+
+What an agent can rely on:
+
+- With `--json`, every command prints exactly one JSON object with `ok` (boolean) and `errors`
+  (a list of strings: empty when `ok` is true, non-empty when false). Exit codes: 0 done, 1 failed, 2 usage
+  error (unknown command or flag), 3 a required tool (claude, or the pinned bun) is missing. Usage,
+  `--root`, I/O, and `generate` catalog errors carry only these two keys.
+- Each command adds its own keys: `list` adds `claude` and `mods`; `install` adds `installed`
+  and `uninstall` adds `uninstalled` (the plugin ids done so far, also on failure), plus `manual`
+  and `skipped` when retired mods are involved; `doctor`
+  adds `claude`, `mods`, `notes`, and `source`; `validate` adds `problems` (same strings as
+  `errors`); `generate` adds `written`, and `generate --check` adds `stale`.
+- `claude` is always `{"found": bool, "version": string|null}`. `doctor` exits 1 with `ok` false
+  when it is not found; `list` still succeeds and reports each `installed` as null. When claude
+  is found but the installed-plugin read fails, `list` exits 1 with `ok` false, a non-empty
+  `errors`, and `installed` null. `installed` means installed at any scope, unless `list --scope`
+  is given and claude reports a scope per plugin (a plugin without one counts at any scope).
+- `validate --no-claude` skips the checks that need the claude CLI.
+
+Mods run unsandboxed with the user's permissions. The `/plugin` slash command is unavailable in
+the Desktop Code tab, but a terminal install at user scope loads in Desktop sessions too.
 
 ## Contributor checks
 
 ```bash
 python3 -m pytest -q -m "not integration"
 bun test mods/*/host
+scripts/typecheck --hosts
 scripts/mods validate --no-claude
 scripts/mods generate --check
+python3 .github/stack/stack-check.py
 ```
 
 `generate` builds the Codex and OpenCode bundles with the Bun version in `.bun-version`

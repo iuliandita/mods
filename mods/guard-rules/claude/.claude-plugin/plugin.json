@@ -1,6 +1,6 @@
 {
   "name": "guard-rules",
-  "version": "0.1.1",
+  "version": "0.3.2",
   "description": "Blocks AI attribution in commits and PRs, direct commits to protected branches, commits under the wrong git identity, and mutating kubectl, helm and terraform calls on protected or unclassified environments.",
   "author": { "name": "iuliandita" },
   "userConfig": {
@@ -53,6 +53,13 @@
       "title": "Identity rule mode",
       "description": "off, dry (report only) or on. Does nothing until identity rules are set.",
       "options": ["off", "dry", "on"],
+      "default": "on"
+    },
+    "modeUnparsed": {
+      "type": "string",
+      "title": "Unparsed-command rule mode",
+      "description": "on keeps the active rules' modes, dry reports instead of denying unparsed commands, off disables only unparsed findings, and ask requests permission on Claude Code. Parsed checks still apply. Codex and OpenCode treat ask as on.",
+      "options": ["off", "dry", "on", "ask"],
       "default": "on"
     },
     "modeContext": {

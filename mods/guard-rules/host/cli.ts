@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 
 import { applyGuardCommand, parseGuardCommand } from '../claude/hooks/context'
 import { checkCommand, checkTool, type Check } from './check'
-import { killAll, loadClasses, loadConfig, nodeEnv, saveClasses } from './env'
+import { killAll, loadClasses, loadConfig, nodeEnv, saveClasses, warnAskOnce } from './env'
 
 // Codex names its patch tool apply_patch and also matches it as Edit and Write.
 const FILE_TOOLS = new Set(['apply_patch', 'Edit', 'Write'])
@@ -66,7 +66,9 @@ async function hook(io: Io): Promise<number> {
     return 2
   }
   const cwd = typeof toolInput.workdir === 'string' && toolInput.workdir !== '' ? resolve(input.cwd, toolInput.workdir) : input.cwd
-  const result = await withDeadline(checkCommand(toolInput.command, loadConfig(io.config), nodeEnv(cwd, () => loadClasses(io.store))), io.deadlineMs ?? DEADLINE_MS)
+  const cfg = loadConfig(io.config)
+  if (cfg.unparsed === 'ask') warnAskOnce(io.err, io.store)
+  const result = await withDeadline(checkCommand(toolInput.command, cfg, nodeEnv(cwd, () => loadClasses(io.store))), io.deadlineMs ?? DEADLINE_MS)
   emit(io, result)
   return 0
 }

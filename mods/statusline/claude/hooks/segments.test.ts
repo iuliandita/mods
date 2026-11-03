@@ -378,7 +378,7 @@ test('session totals: requests that ran before the mod loaded, after the last sn
 // A transcript under another project folder than the session's root names: a session resumed elsewhere.
 // stored: the user's settings.json pluginConfigs, as $.settings.read({ source: 'user' }) returns them; repoStored:
 // the same key in a repository's own settings, which only the merged read carries.
-type Ctl = { kube: 'ok' | 'fail'; settings?: 'fail'; fresh?: boolean; transcript?: string; remote?: string; stored?: Record<string, unknown>; repoStored?: Record<string, unknown> }
+type Ctl = { kube: 'ok' | 'fail'; settings?: 'fail'; fresh?: boolean; transcript?: string; remote?: string; branch?: string; prList?: string; stored?: Record<string, unknown>; repoStored?: Record<string, unknown> }
 const ELSEWHERE = '/u/.claude/projects/-elsewhere/sid.jsonl'
 const ok = (stdout: string, exitCode = 0, stderr = '') => ({ value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false } }) as never
 
@@ -421,10 +421,11 @@ function engine(on: On, ctl: Ctl = { kube: 'ok' }) {
     const argv = [...(e as { argv: string[] }).argv]
     runs.push(argv)
     if (argv[0] === 'kubectl') return ctl.kube === 'ok' ? ok('{"contexts":[{"name":"lab","context":{}}]}') : ok('', 1, 'boom')
-    if (argv[0] === 'git' && argv.includes('status')) return ok('# branch.oid 1234567\n# branch.head develop\n')
+    if (argv[0] === 'git' && argv.includes('status')) return ok(`# branch.oid 1234567\n# branch.head ${ctl.branch ?? 'develop'}\n`)
     if (argv[0] === 'tail' && argv.at(-1) === ELSEWHERE) return ok(ctl.transcript ?? '')
     if (argv[0] === 'git' && argv.includes('remote.origin.url') && ctl.remote) return ok(`${ctl.remote}\n`)
     if (argv[0] === 'gh' && argv.includes('graphql')) return ok('{"data":{"repository":{"pullRequests":{"totalCount":3},"issues":{"totalCount":12}}}}')
+    if (argv[0] === 'gh' && argv[1] === 'pr') return ctl.prList === 'fail' ? ok('', 1, 'offline') : ok(ctl.prList ?? '[]')
     if (argv[0] === 'gh') return ok('[]')
     return ok('', 1)
   })
@@ -561,6 +562,29 @@ test('Desktop shows the forge counts in a repository on GitHub, also under 120 c
   expect(runs.some((a) => a[0] === 'gh' && a.includes('graphql'))).toBe(true)
   expect(desktop[0]).toContain('⑂ 3 ⊙ 12')
   expect(terminal[0]).not.toContain('⑂')
+})
+
+test("a branch switch with a failing lookup never shows the previous branch's PR; the same branch keeps its last PR", async ($, on) => {
+  const { clock, ctl } = engine(on, { kube: 'ok', remote: 'https://github.com/owner/repo.git', branch: 'feat/a', prList: '[{"number":12,"isDraft":false,"reviewDecision":"APPROVED"}]' })
+  await started($, clock)
+  await clock.advance(1_000)
+  const row = async () => (await bothSurfaces($, 200)).terminal[0] ?? ''
+  expect(await row()).toContain('#12')
+
+  ctl.branch = 'feat/b'
+  ctl.prList = 'fail'
+  await clock.advance(31_000)
+  const switched = await row()
+  expect(switched).toContain('feat/b')
+  expect(switched).not.toContain('#12')
+
+  ctl.prList = '[{"number":13,"isDraft":false,"reviewDecision":"APPROVED"}]'
+  await clock.advance(151_000)
+  expect(await row()).toContain('#13')
+
+  ctl.prList = 'fail'
+  await clock.advance(151_000)
+  expect(await row()).toContain('#13')
 })
 
 test('plugin options reach the mod: nerd icons and one row', { options: { icons: 'nerd', rows: '1', forge: 'off' } }, async ($, on) => {

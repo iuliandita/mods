@@ -1,0 +1,6 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "fake token used as a scrubber fixture"
+paths = ['''^mods/secret-box/host/host\.test\.ts$''']

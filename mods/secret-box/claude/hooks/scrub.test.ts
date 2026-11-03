@@ -11,6 +11,21 @@ test('the longest known form wins and a replacement is never scanned again', () 
   expect(makeScrubber(new Map([['tiny', 'abc']]))).toBeNull()
 })
 
+for (const [label, values, text, expected] of [
+  ['overlap', [['first', 'abcdef'], ['second', 'defxyz']], 'x abcdefxyz y', 'x {{secret:first}} y'],
+  ['containment', [['first', 'abcdefghij'], ['second', 'cdefgh']], 'abcdefghij', '{{secret:first}}'],
+  ['adjacency', [['first', 'abcdef'], ['second', 'uvwxyz']], 'abcdefuvwxyz', '{{secret:first}}{{secret:second}}'],
+  ['overlap chain', [['first', 'abcdef'], ['second', 'defghi'], ['third', 'ghijkl']], 'abcdefghijkl', '{{secret:first}}'],
+  ['self overlap', [['first', 'ababab']], 'ababababab', '{{secret:first}}'],
+] as const) {
+  test(`${label} is fully covered without rescanning replacements`, () => {
+    expect(makeScrubber(values)?.(text)).toEqual({
+      text: expected,
+      names: label === 'adjacency' ? ['first', 'second'] : ['first'],
+    })
+  })
+}
+
 test('a value inside Basic-auth base64 (user:<value>) is scrubbed', () => {
   const scrub = makeScrubber(new Map([['tok', 'hunter2hunter2']]))
   expect(scrub?.(`Authorization: Basic ${base64('user:hunter2hunter2')}`)).toEqual({
