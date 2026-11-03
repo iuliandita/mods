@@ -191,6 +191,53 @@ is skipped with a note (`skipped` with `--json`) and the command still succeeds;
 failure exits non-zero and still carries the steps. `scripts/mods list` shows a retired mod only
 while it is installed.
 
+## For agents
+
+Prefer the `claude` CLI directly; no clone is needed. `scripts/mods install` does not use the
+GitHub marketplace by default (see [Clone CLI and scopes](#clone-cli-and-scopes)). `mods.json` at
+the repo root is the machine-readable catalog. Install only the mods the user asked for, and read
+a mod's README and its declared `egress` first.
+
+From a clone, `scripts/mods` speaks JSON (`--json` on every command):
+
+```sh
+scripts/mods list --json
+scripts/mods install <mod> [<mod> ...] [--scope user|project|local] [--local] \
+    [--source <owner/repo>]
+scripts/mods uninstall <mod> [<mod> ...] [--scope user|project|local]
+scripts/mods doctor --json
+scripts/mods validate [--no-claude]
+scripts/mods generate [--check] [--local]
+```
+
+`--json` and `--root <repo>` work before or after the subcommand. Option abbreviations such as
+`--js` are rejected. `--root` must be a directory with a `mods/` or `local/mods/` directory;
+otherwise the command exits 1 before reading or writing anything. `--source` installs from
+another marketplace source (an `owner/repo`, git URL or path) instead of this clone; it cannot
+be combined with `--local` (exit 1). Mod names are still checked against this clone's catalog,
+not the remote one, so the source must carry the same mods.
+
+What an agent can rely on:
+
+- With `--json`, every command prints exactly one JSON object with `ok` (boolean) and `errors`
+  (a list of strings: empty when `ok` is true, non-empty when false). Exit codes: 0 done, 1 failed, 2 usage
+  error (unknown command or flag), 3 a required tool (claude, or the pinned bun) is missing. Usage,
+  `--root`, I/O, and `generate` catalog errors carry only these two keys.
+- Each command adds its own keys: `list` adds `claude` and `mods`; `install` adds `installed`
+  and `uninstall` adds `uninstalled` (the plugin ids done so far, also on failure), plus `manual`
+  and `skipped` when retired mods are involved; `doctor`
+  adds `claude`, `mods`, `notes`, and `source`; `validate` adds `problems` (same strings as
+  `errors`); `generate` adds `written`, and `generate --check` adds `stale`.
+- `claude` is always `{"found": bool, "version": string|null}`. `doctor` exits 1 with `ok` false
+  when it is not found; `list` still succeeds and reports each `installed` as null. When claude
+  is found but the installed-plugin read fails, `list` exits 1 with `ok` false, a non-empty
+  `errors`, and `installed` null. `installed` means installed at any scope, unless `list --scope`
+  is given and claude reports a scope per plugin (a plugin without one counts at any scope).
+- `validate --no-claude` skips the checks that need the claude CLI.
+
+Mods run unsandboxed with the user's permissions. The `/plugin` slash command is unavailable in
+the Desktop Code tab, but a terminal install at user scope loads in Desktop sessions too.
+
 ## Contributor checks
 
 ```bash
