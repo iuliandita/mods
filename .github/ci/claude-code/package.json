@@ -4,6 +4,6 @@
   "version": "0.0.0",
   "description": "Pinned Claude Code CLI for the CI integration job",
   "dependencies": {
-    "@anthropic-ai/claude-code": "2.1.296"
+    "@anthropic-ai/claude-code": "2.1.311"
   }
 }
