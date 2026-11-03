@@ -64,7 +64,7 @@ The Claude Code lines match `mod.json`. See [installation and recovery](../../IN
 ## Install
 
 ```sh
-claude plugin marketplace add iuliandita/mods
+claude plugin marketplace add iuliandita/mods#main
 claude plugin install guard-rules@iuliandita-mods
 ```
 

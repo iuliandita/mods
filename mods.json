@@ -23,7 +23,7 @@
         "headless": "untested"
       },
       "verified_on": "2.1.301",
-      "install": "claude plugin marketplace add iuliandita/mods && claude plugin install delegation-board@iuliandita-mods",
+      "install": "claude plugin marketplace add iuliandita/mods#main && claude plugin install delegation-board@iuliandita-mods",
       "hosts": {
         "opencode": {
           "install": "clone this repository and add {\"package\": \"<clone>/mods/delegation-board/opencode\"} to \"plugins\" in ~/.config/opencode/cli.json"
@@ -53,10 +53,10 @@
         "headless": "untested"
       },
       "verified_on": "2.1.296",
-      "install": "claude plugin marketplace add iuliandita/mods && claude plugin install guard-rules@iuliandita-mods",
+      "install": "claude plugin marketplace add iuliandita/mods#main && claude plugin install guard-rules@iuliandita-mods",
       "hosts": {
         "codex": {
-          "install": "codex plugin marketplace add iuliandita/mods && codex plugin add guard-rules@iuliandita-mods"
+          "install": "codex plugin marketplace add iuliandita/mods@main && codex plugin add guard-rules@iuliandita-mods"
         },
         "opencode": {
           "install": "clone this repository and add {\"package\": \"<clone>/mods/guard-rules/opencode\"} to \"plugins\" in opencode.json"
@@ -91,10 +91,10 @@
         "headless": "untested"
       },
       "verified_on": null,
-      "install": "claude plugin marketplace add iuliandita/mods && claude plugin install notify@iuliandita-mods",
+      "install": "claude plugin marketplace add iuliandita/mods#main && claude plugin install notify@iuliandita-mods",
       "hosts": {
         "codex": {
-          "install": "codex plugin marketplace add iuliandita/mods && codex plugin add notify@iuliandita-mods"
+          "install": "codex plugin marketplace add iuliandita/mods@main && codex plugin add notify@iuliandita-mods"
         },
         "opencode": {
           "install": "clone this repository and add {\"package\": \"<clone>/mods/notify/opencode\"} to \"plugins\" in opencode.json"
@@ -133,10 +133,10 @@
         "headless": "untested"
       },
       "verified_on": "2.1.296",
-      "install": "claude plugin marketplace add iuliandita/mods && claude plugin install secret-box@iuliandita-mods",
+      "install": "claude plugin marketplace add iuliandita/mods#main && claude plugin install secret-box@iuliandita-mods",
       "hosts": {
         "codex": {
-          "install": "codex plugin marketplace add iuliandita/mods && codex plugin add secret-box@iuliandita-mods"
+          "install": "codex plugin marketplace add iuliandita/mods@main && codex plugin add secret-box@iuliandita-mods"
         },
         "opencode": {
           "install": "clone this repository and add {\"package\": \"<clone>/mods/secret-box/opencode\"} to \"plugins\" in opencode.json"
@@ -166,7 +166,7 @@
         "headless": "untested"
       },
       "verified_on": "2.1.301",
-      "install": "claude plugin marketplace add iuliandita/mods && claude plugin install statusline@iuliandita-mods",
+      "install": "claude plugin marketplace add iuliandita/mods#main && claude plugin install statusline@iuliandita-mods",
       "hosts": {
         "opencode": {
           "install": "clone this repository and add {\"package\": \"<clone>/mods/statusline/opencode\"} to \"plugins\" in ~/.config/opencode/cli.json"

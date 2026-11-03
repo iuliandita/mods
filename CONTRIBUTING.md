@@ -114,7 +114,6 @@ conventional-commit titles since the last tag: `feat` is minor, `fix` and `deps`
 
 1. On `develop`, bump the collection version and move the Unreleased changelog entries under
    the new version by PR. Collection tags do not set individual plugin versions.
-2. During the v0.x prerelease phase, tag `develop` as `v<version>` and push the tag.
-3. Starting with v1.0.0, open a PR from `develop` to `main` and merge it with a merge commit,
-   never a squash. Tag the merge on `main` as `v<version>` and push the tag. The release workflow
-   checks the tag and publishes notes from the changelog.
+2. Open a PR from `develop` to `main` and merge it with a merge commit, never a squash. Tag the
+   merge on `main` as `v<version>` and push the tag. The release workflow checks the tag is on
+   `main` and publishes notes from the changelog. The v0.x prereleases were tagged on `develop`.

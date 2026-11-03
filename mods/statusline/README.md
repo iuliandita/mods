@@ -12,7 +12,7 @@ for the checked segments and remaining limits.
 Install:
 
 ```sh
-claude plugin marketplace add iuliandita/mods
+claude plugin marketplace add iuliandita/mods#main
 claude plugin install statusline@iuliandita-mods
 ```
 

@@ -80,7 +80,7 @@ These facts match `mod.json`. See [installation and recovery](../../INSTALL.md) 
 ## Install
 
 ```sh
-claude plugin marketplace add iuliandita/mods
+claude plugin marketplace add iuliandita/mods#main
 claude plugin install secret-box@iuliandita-mods
 ```
 

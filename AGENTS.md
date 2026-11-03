@@ -2,7 +2,7 @@
 
 A collection of mods for Claude Code (plugins built on the hooks-module API), some also for Codex and
 OpenCode. Each mod is its own plugin, installable on its own. `develop` is the default and nightly
-branch (v0.x prerelease); `main` becomes stable at v1.0.0.
+branch; `main` is stable (v1.0.0 and later).
 
 If `AGENTS.local.md` exists beside this file, read it too. It holds local paths and preferences and never
 relaxes the rules here.
@@ -55,5 +55,5 @@ claude plugin test mods/<mod>/claude
 
 - `scripts/mods` is the machine-readable CLI: `--json` on every command, exit codes 0 done, 1 failed,
   2 usage, 3 required tool missing. `mods.json` is the catalog. Contract: [INSTALL.md](INSTALL.md#for-agents).
-- Install with `claude plugin marketplace add iuliandita/mods` then `claude plugin install <mod>@iuliandita-mods`.
+- Install with `claude plugin marketplace add iuliandita/mods#main` then `claude plugin install <mod>@iuliandita-mods`.
 - The pre-push set is the commented block under Commands; `.github/workflows/ci.yml` runs the same.

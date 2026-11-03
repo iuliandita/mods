@@ -4,13 +4,13 @@ Mods run unsandboxed with your permissions. Read the selected mod's README, requ
 `mod.json` surface status, and declared egress before installing. A local source loads the
 checkout's current code, so do development in a separate checkout or worktree.
 
-The v0.x prerelease installs from `develop`, the default branch. `main` becomes the stable
-release channel at v1.0.0.
+The install commands below pin `main`, the stable release channel. `develop` is the default branch and
+the nightly; drop the `#main` (Claude Code) or `@main` (Codex) suffix to follow it.
 
 ## Marketplace installation
 
 ```bash
-claude plugin marketplace add iuliandita/mods
+claude plugin marketplace add iuliandita/mods#main
 claude plugin install guard-rules@iuliandita-mods --scope user
 ```
 
@@ -75,7 +75,7 @@ Private mods use `scripts/mods install <name> --local`; they register `<clone>/l
 
 ## Updates and source mismatch
 
-Collection tags (starting with the `v0.1.0` prerelease) identify a repository snapshot. Each
+Collection tags (`v1.0.0` is the first stable one; `v0.1.0` to `v0.3.3` were prereleases) identify a repository snapshot. Each
 plugin keeps its own version; a collection tag does not set every plugin to that version.
 
 There is no `scripts/mods update` command. For a GitHub marketplace, refresh and update with
@@ -125,7 +125,7 @@ Both hosts run the mod with your permissions, like Claude.
 Codex:
 
 ```bash
-codex plugin marketplace add iuliandita/mods
+codex plugin marketplace add iuliandita/mods@main
 codex plugin add guard-rules@iuliandita-mods   # or secret-box or notify, same suffix
 ```
 
