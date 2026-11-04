@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-04
+
+Only `guard-rules` changed, from 1.0.0 to 1.1.0 in its Claude Code, Codex, and OpenCode manifests. The other plugins stay at 1.0.0.
+
+### Added
+
+- `guard-rules` denies a `pkill -f` call whose pattern matches the command that contains it, which killed the agent's own shell (exit 144). Exact, anchored and bracketed patterns pass. New option `modeSelfKill` (`on` by default, `dry` and `off` available) on Claude Code, Codex and OpenCode (#181).
+
 ## [1.0.1] - 2026-11-03
 
 Plugin versions now match the stable release: every plugin is at 1.0.0 in its Claude Code, Codex, and OpenCode manifests (`guard-rules`, `secret-box`, `notify`, `delegation-board`, `statusline`). No plugin code changed since v1.0.0.

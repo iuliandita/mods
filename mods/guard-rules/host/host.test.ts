@@ -205,6 +205,17 @@ test('context: a store that exists but cannot be read denies instead of reading 
   expect((await checkCommand('kubectl delete pod x --context dev-box', loadConfig(configFile), env)).deny).toBeUndefined()
 })
 
+test('selfkill: a pkill -f pattern that matches the shell is denied on the host path, and modeSelfKill turns it off', async () => {
+  rmSync(configFile, { force: true })
+  const env = nodeEnv(repo, () => ({}))
+  const command = "pkill -f 'vite --host 127.0.0.1'"
+  expect((await checkCommand(command, loadConfig(configFile), env)).deny).toContain('pkill -x')
+  expect((await checkCommand("pkill -f '^vite --host'", loadConfig(configFile), env)).deny).toBeUndefined()
+  writeConfig('{"modeSelfKill":"off"}')
+  expect((await checkCommand(command, loadConfig(configFile), env)).deny).toBeUndefined()
+  rmSync(configFile, { force: true })
+})
+
 test('self-protection: edit tools and shell commands aimed at the guard\'s own files are refused, other work passes', async () => {
   const patch = (path: string) => `*** Begin Patch\n*** Update File: ${path}\n@@\n-a\n+b\n*** End Patch`
   const dirs = [join(root, 'home', '.config', 'iuliandita-mods'), join(root, 'home', '.local', 'share', 'iuliandita-mods')]

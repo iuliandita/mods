@@ -2,6 +2,7 @@ import type { EngineInterface as Engine, Register } from 'claude-code'
 
 import { applyGuardCommand, type Classes } from './context'
 import { evaluate, formatDeny, parseConfig, type Config, type Env } from './rules'
+import { SELF_KILL_HINT } from './selfkill'
 import { extractCalls } from './shell'
 
 async function stored($: Engine): Promise<Classes> {
@@ -12,7 +13,7 @@ async function stored($: Engine): Promise<Classes> {
 
 async function judge($: Engine, command: string, cfg: Config) {
   const probe = extractCalls(command, '/', '/')
-  if (probe.ok && probe.calls.length === 0) return { enforced: [], dry: [] }
+  if (probe.ok && probe.calls.length === 0 && !SELF_KILL_HINT.test(command)) return { enforced: [], dry: [] }
   const run = async (dir: string, argv: string[], vars?: Record<string, string>) => {
     try {
       const r = await $.process.run(argv, { cwd: dir, timeoutMs: 10_000, ...(vars && Object.keys(vars).length ? { env: vars } : {}) })
