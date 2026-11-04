@@ -2908,12 +2908,41 @@ function parsePkill(argv, dyn) {
   return { full, exact, ignoreCase, pattern: dyn[k] ? undefined : word };
 }
 var MAX_PATTERN = 200;
-var MAX_TEXT = 20000;
+var MAX_TEXT = 8192;
 function complex(pattern, text) {
-  if (pattern.length > MAX_PATTERN || text.length > MAX_TEXT || /\\[1-9]/.test(pattern))
+  if (pattern.length > MAX_PATTERN || text.length > MAX_TEXT)
     return true;
-  const flat = pattern.replace(/\\./g, "").replace(/\[\^?\]?[^\]]*\]/g, "");
-  return (flat.match(/[*+]|\{\d*,\d*\}/g) ?? []).length > 2 || /[*+?{].*\)[*+{]/s.test(flat);
+  let quantifiers = 0;
+  for (let i = 0;i < pattern.length; i++) {
+    const c = pattern[i];
+    const next = pattern[i + 1];
+    if (c === "\\") {
+      if (next === undefined || /[0-9A-Za-z]/.test(next))
+        return true;
+      i++;
+    } else if (c === "[") {
+      if (next === "]" || next === "^" && pattern[i + 2] === "]")
+        return true;
+      i += next === "^" ? 1 : 0;
+      for (i++;i < pattern.length && pattern[i] !== "]"; i++)
+        if (pattern[i] === "\\" || pattern[i] === "[")
+          return true;
+      if (i >= pattern.length)
+        return true;
+    } else if (c === "(") {
+      if (next === "?")
+        return true;
+    } else if (c === ")") {
+      if (next !== undefined && "*+?{".includes(next))
+        return true;
+    } else if (c === "*" || c === "+" || c === "?") {
+      if (++quantifiers > 1)
+        return true;
+    } else if (c === "{") {
+      return true;
+    }
+  }
+  return false;
 }
 function check(pattern, ignoreCase, texts) {
   if (texts.some((t) => complex(pattern, t)))

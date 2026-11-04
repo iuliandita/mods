@@ -50,15 +50,39 @@ function parsePkill(argv: string[], dyn: boolean[]): { full: boolean; exact: boo
 }
 
 // The pattern comes from the command being judged, so it must not be able to stall the guard in a backtracking
-// engine: a long or long-text match, a back-reference, a nested quantifier or more than two unbounded quantifiers is
-// not run and counts as a hit instead (fail closed).
+// engine. Only a small subset is ever run: literals, escaped punctuation, `.`, anchors, `|`, plain groups, simple
+// classes and at most one quantifier, which keeps matching polynomial. Everything else, and anything long, is not
+// run and counts as a hit instead (fail closed).
 const MAX_PATTERN = 200
-const MAX_TEXT = 20_000
+const MAX_TEXT = 8192
 
 function complex(pattern: string, text: string): boolean {
-  if (pattern.length > MAX_PATTERN || text.length > MAX_TEXT || /\\[1-9]/.test(pattern)) return true
-  const flat = pattern.replace(/\\./g, '').replace(/\[\^?\]?[^\]]*\]/g, '')
-  return (flat.match(/[*+]|\{\d*,\d*\}/g) ?? []).length > 2 || /[*+?{].*\)[*+{]/s.test(flat)
+  if (pattern.length > MAX_PATTERN || text.length > MAX_TEXT) return true
+  let quantifiers = 0
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern[i]!
+    const next = pattern[i + 1]
+    if (c === '\\') {
+      // Escaped punctuation only: `\d`, `\b`, `\1` and the like differ between ERE and JavaScript.
+      if (next === undefined || /[0-9A-Za-z]/.test(next)) return true
+      i++
+    } else if (c === '[') {
+      // `[]` and `[^]` mean different things to ERE and JavaScript; nested `[`, backslashes and POSIX classes are not run.
+      if (next === ']' || (next === '^' && pattern[i + 2] === ']')) return true
+      i += next === '^' ? 1 : 0
+      for (i++; i < pattern.length && pattern[i] !== ']'; i++) if (pattern[i] === '\\' || pattern[i] === '[') return true
+      if (i >= pattern.length) return true
+    } else if (c === '(') {
+      if (next === '?') return true
+    } else if (c === ')') {
+      if (next !== undefined && '*+?{'.includes(next)) return true
+    } else if (c === '*' || c === '+' || c === '?') {
+      if (++quantifiers > 1) return true
+    } else if (c === '{') {
+      return true
+    }
+  }
+  return false
 }
 
 type Hit = 'match' | 'complex'

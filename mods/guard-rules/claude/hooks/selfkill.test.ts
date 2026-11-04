@@ -46,7 +46,18 @@ test('selfkill: exact, anchored, bracketed, dynamic and non-pkill forms pass', a
 })
 
 test('selfkill: a pattern that could backtrack badly is denied without being run', async () => {
-  const hostile = [`pkill -f '(a+)+$'`, `pkill -f '(.*)x\\1'`, `pkill -f 'a*a*a*b'`, `pkill -f '${'a'.repeat(300)}'`, `pkill -f '^x'; echo ${'y'.repeat(20_000)}`]
+  const hostile = [
+    `pkill -f '(a+)+$'`,
+    `pkill -f '(a|aa)+$'`,
+    `pkill -f '(.*)x\\1'`,
+    `pkill -f 'a*a*b'`,
+    `pkill -f 'x{2,}'`,
+    `pkill -f '(?=a)'`,
+    `pkill -f '[]a*]'`,
+    `pkill -f '\\bvite'`,
+    `pkill -f '${'a'.repeat(300)}'`,
+    `pkill -f '^x'; echo ${'y'.repeat(9000)}`,
+  ]
   for (const command of hostile) {
     const t0 = Date.now()
     const v = (await evaluate(command, parseConfig({}), env)).enforced
@@ -54,7 +65,7 @@ test('selfkill: a pattern that could backtrack badly is denied without being run
     expect(v[0]!.message).toContain('too complex')
     expect(Date.now() - t0).toBeLessThan(500)
   }
-  expect(await rules(`pkill -f '^(bun|node) run dev$'`)).toEqual([])
+  for (const command of [`pkill -f '^(bun|node) run dev$'`, `pkill -f '^vite.*host$'`]) expect(await rules(command), command).toEqual([])
 })
 
 test('selfkill: the deny names the safe forms, dry reports without denying, off is silent', async () => {

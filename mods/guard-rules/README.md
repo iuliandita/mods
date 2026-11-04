@@ -33,7 +33,9 @@ fix the command and retry.
   Bash call carries the whole command in its own command line, so `pkill -f 'vite --host'` matches that
   shell and kills it (the tool reports exit 144). Exact (`-x`), anchored (`^...$`) and bracketed (`[v]ite`)
   patterns pass, as do patterns built from a variable and `pgrep -f`, which only reports the shell.
-  `bash -c` scripts and `sudo`, `env` and `rtk` prefixes are looked through.
+  `bash -c` scripts and `sudo`, `env` and `rtk` prefixes are looked through. A pattern outside a simple
+  subset (more than one quantifier, a quantified group, a back-reference, `\d`-style escapes, or over 200
+  characters) is not run as a regex and is denied as too complex, so a crafted pattern cannot stall the guard.
 
 Commands wrapped by the secret-box mod (`secret-box exec [--scrub] -- '...'`) are unwrapped and checked like `bash -c`.
 
