@@ -1,13 +1,14 @@
 import { COMMIT_SUBS, createFollower, protectedBranchViolations } from './branch'
 import { contextViolations, followSwitch, isMutating, newContextState, stepContext, type Classes } from './context'
 import { annotates, identityViolations } from './identity'
+import { selfKillViolations } from './selfkill'
 import { extractCalls, resolvePath, tokenize, type Call, type GhCall, type GitCall, type Parsed } from './shell'
 import { taintConfig, type ConfigTaint } from './state'
 import { SHELL_NAMES, toolWords } from './words'
 
 export type Mode = 'off' | 'dry' | 'on'
 export type UnparsedMode = Mode | 'ask'
-export type RuleId = 'attribution' | 'protected-branch' | 'identity' | 'context' | 'unparsed' | 'config' | 'lookup'
+export type RuleId = 'attribution' | 'protected-branch' | 'identity' | 'context' | 'unparsed' | 'config' | 'lookup' | 'selfkill'
 export type Violation = { rule: RuleId; mode: Mode; message: string }
 export type IdentityRule = { prefix: string; email: string }
 
@@ -16,6 +17,7 @@ export type Config = {
   protectedBranch: Mode
   identity: Mode
   context: Mode
+  selfKill: Mode
   unparsed: UnparsedMode
   protectedBranches: string[]
   unprotectedRepos: string[]
@@ -122,6 +124,7 @@ export function parseConfig(options: Readonly<Record<string, unknown>>): Config 
     protectedBranch: parseMode(options.modeProtectedBranch, 'modeProtectedBranch', errors),
     identity: parseMode(options.modeIdentity, 'modeIdentity', errors),
     context: parseMode(options.modeContext, 'modeContext', errors),
+    selfKill: parseMode(options.modeSelfKill, 'modeSelfKill', errors),
     unparsed: String(options.modeUnparsed ?? '').trim().toLowerCase() === 'ask' ? 'ask' : parseMode(options.modeUnparsed, 'modeUnparsed', errors),
     protectedBranches: branches,
     unprotectedRepos: parseList(options.unprotectedRepos, ''),
@@ -232,6 +235,7 @@ export async function evaluate(command: string, cfg: Config, rawEnv: Env): Promi
   const guarded = parsed.calls.filter((c) => isGuarded(c, cfg))
 
   all.push(...unparsedViolations(command, parsed, guarded, cfg))
+  all.push(...selfKillViolations(command, cfg.selfKill))
   if (guarded.length && cfg.error) {
     all.push({ rule: 'config', mode: 'on', message: `config: guard-rules settings are invalid (${cfg.error}). Fix them in the plugin options.` })
   }

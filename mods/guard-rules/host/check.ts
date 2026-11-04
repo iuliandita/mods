@@ -1,4 +1,5 @@
 import { evaluate, formatDeny, type Config, type Env } from '../claude/hooks/rules'
+import { SELF_KILL_HINT } from '../claude/hooks/selfkill'
 import { extractCalls, resolvePath } from '../claude/hooks/shell'
 import { guardDirs } from './env'
 
@@ -60,7 +61,7 @@ export async function checkCommand(command: string, cfg: Config, env: Env): Prom
     if (SELF_CLASSIFY.test(flat)) return { deny: CLASSIFY_DENIED }
     if (OWN_DIRS.test(flat)) return { deny: OWN_FILES_DENIED }
     const probe = extractCalls(command, '/', '/')
-    if (probe.ok && probe.calls.length === 0) return {}
+    if (probe.ok && probe.calls.length === 0 && !SELF_KILL_HINT.test(command)) return {}
     const verdict = await evaluate(command, cfg, env)
     if (verdict.enforced.length) return { deny: hostText(formatDeny(verdict.enforced)) }
     if (verdict.dry.length) return { notice: hostText(`guard-rules (dry run): ${verdict.dry.map((v) => v.message).join(' | ')}`) }

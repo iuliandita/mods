@@ -1,6 +1,6 @@
 # guard-rules
 
-Stops four kinds of mistakes in Bash commands before they run, and tells the model why so it can
+Stops five kinds of mistakes in Bash commands before they run, and tells the model why so it can
 fix the command and retry.
 
 - **attribution**: no `Co-Authored-By:` or `Claude-Session:` trailers, "Generated with ... Claude"
@@ -29,6 +29,11 @@ fix the command and retry.
   Only known reads (`get`, `describe`, `diff`, `auth can-i`, `template`, `plan`, `init`,
   `workspace select`, ...) and real dry runs pass; any other verb or plugin counts as a change, as
   do `init -migrate-state`, `-force-copy` and `-reconfigure`, and `workspace select -or-create`.
+- **selfkill**: no `pkill -f` whose pattern matches the command that contains it. The shell that runs a
+  Bash call carries the whole command in its own command line, so `pkill -f 'vite --host'` matches that
+  shell and kills it (the tool reports exit 144). Exact (`-x`), anchored (`^...$`) and bracketed (`[v]ite`)
+  patterns pass, as do patterns built from a variable and `pgrep -f`, which only reports the shell.
+  `bash -c` scripts and `sudo`, `env` and `rtk` prefixes are looked through.
 
 Commands wrapped by the secret-box mod (`secret-box exec [--scrub] -- '...'`) are unwrapped and checked like `bash -c`.
 
@@ -84,6 +89,7 @@ settings, never in a repository.
 | `modeProtectedBranch` | `on` | same |
 | `modeIdentity` | `on` | same; does nothing until `identityRules` is set |
 | `modeContext` | `on` | same; covers `kubectl`, `helm`, `terraform` and `tofu` |
+| `modeSelfKill` | `on` | same; covers `pkill -f` patterns that match the shell running the command |
 | `modeUnparsed` | `on` | `on` keeps inherited modes, `dry` reports instead of denying unparsed commands, `off` disables only parser findings; `ask` requests permission for enforced parser findings on Claude Code. Codex and OpenCode treat `ask` as `on` |
 
 Invalid options deny git and GitHub writes until fixed, so a typo cannot silently turn a rule off.
@@ -156,6 +162,7 @@ Identity does nothing until `identityRules` is set. Change options in your user 
 | `modeIdentity` | `on`, `dry`, `off` | Controls identity checks once configured |
 | `identityRules` | JSON array, or empty | Sets path/email pairs; empty disables identity checks |
 | `modeContext` | `on`, `dry`, `off` | Controls mutations on protected or unknown infra environments |
+| `modeSelfKill` | `on`, `dry`, `off` | Controls `pkill -f` patterns that match the shell running the command |
 | `modeUnparsed` | `on`, `dry`, `off`, `ask` | Caps unparsed findings; `ask` uses Claude Code permission approval and falls back to `on` on other hosts |
 | `protectedContexts`, `relaxedContexts` | Comma-separated names or globs | Changes environment matching; protected matches win |
 | `/guard-context <name> protected\|relaxed` | One classification | Records a machine-local classification that overrides patterns |

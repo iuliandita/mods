@@ -1,7 +1,7 @@
 {
   "name": "guard-rules",
   "version": "1.0.0",
-  "description": "Blocks AI attribution in commits and PRs, direct commits to protected branches, commits under the wrong git identity, and mutating kubectl, helm and terraform calls on protected or unclassified environments.",
+  "description": "Blocks AI attribution in commits and PRs, direct commits to protected branches, commits under the wrong git identity, and mutating kubectl, helm and terraform calls on protected or unclassified environments, and pkill -f patterns that match the shell running the command.",
   "author": { "name": "iuliandita" },
   "userConfig": {
     "protectedBranches": {
@@ -66,6 +66,13 @@
       "type": "string",
       "title": "Context rule mode",
       "description": "off, dry (report only) or on. Covers changing kubectl, helm, terraform and tofu calls.",
+      "options": ["off", "dry", "on"],
+      "default": "on"
+    },
+    "modeSelfKill": {
+      "type": "string",
+      "title": "Self-kill rule mode",
+      "description": "off, dry (report only) or on. Covers pkill -f patterns that match the shell running the command.",
       "options": ["off", "dry", "on"],
       "default": "on"
     }
