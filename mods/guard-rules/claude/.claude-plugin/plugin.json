@@ -1,6 +1,6 @@
 {
   "name": "guard-rules",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Blocks AI attribution in commits and PRs, direct commits to protected branches, commits under the wrong git identity, and mutating kubectl, helm and terraform calls on protected or unclassified environments, and pkill -f patterns that match the shell running the command.",
   "author": { "name": "iuliandita" },
   "userConfig": {
