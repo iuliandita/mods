@@ -2907,12 +2907,22 @@ function parsePkill(argv, dyn) {
     return null;
   return { full, exact, ignoreCase, pattern: dyn[k] ? undefined : word };
 }
-function matches2(pattern, ignoreCase, texts) {
+var MAX_PATTERN = 200;
+var MAX_TEXT = 20000;
+function complex(pattern, text) {
+  if (pattern.length > MAX_PATTERN || text.length > MAX_TEXT || /\\[1-9]/.test(pattern))
+    return true;
+  const flat = pattern.replace(/\\./g, "").replace(/\[\^?\]?[^\]]*\]/g, "");
+  return (flat.match(/[*+]|\{\d*,\d*\}/g) ?? []).length > 2 || /[*+?{].*\)[*+{]/s.test(flat);
+}
+function check(pattern, ignoreCase, texts) {
+  if (texts.some((t) => complex(pattern, t)))
+    return "complex";
   let re = null;
   try {
     re = new RegExp(pattern, ignoreCase ? "i" : "");
   } catch {}
-  return texts.some((t) => re ? re.test(t) : t.includes(pattern));
+  return texts.some((t) => re ? re.test(t) : t.includes(pattern)) ? "match" : null;
 }
 function scan(script, whole, depth, out) {
   if (depth > MAX_DEPTH)
@@ -2934,20 +2944,21 @@ function scan(script, whole, depth, out) {
     const p = parsePkill(u.argv, u.dyn);
     if (!p || !p.full || p.exact || p.pattern === undefined)
       continue;
-    if (matches2(p.pattern, p.ignoreCase, [`sh -c ${whole}`, `sh -c ${script}`]))
-      out.add(p.pattern);
+    const hit = check(p.pattern, p.ignoreCase, [`sh -c ${whole}`, `sh -c ${script}`]);
+    if (hit)
+      out.set(p.pattern, hit);
   }
 }
 var SAFE_FORMS = "Match the process name with `pkill -x <name>`, anchor the pattern (`^bun run dev$`), write one letter as a class (`[v]ite`) so the command text no longer matches, or kill by PID (a pidfile or `pgrep -x`).";
 function selfKillViolations(command, mode) {
   if (mode === "off" || !SELF_KILL_HINT.test(command))
     return [];
-  const hits = new Set;
+  const hits = new Map;
   scan(command, command, 0, hits);
-  return [...hits].map((pattern) => ({
+  return [...hits].map(([pattern, hit]) => ({
     rule: "selfkill",
     mode,
-    message: `selfkill: \`pkill -f ${JSON.stringify(pattern)}\` also matches the shell running this command, so it would kill that shell (exit 144). ${SAFE_FORMS}`
+    message: hit === "match" ? `selfkill: \`pkill -f ${JSON.stringify(pattern)}\` also matches the shell running this command, so it would kill that shell (exit 144). ${SAFE_FORMS}` : `selfkill: the pattern of \`pkill -f ${JSON.stringify(pattern.length > 60 ? `${pattern.slice(0, 60)}...` : pattern)}\` is too complex to check against the shell running this command, which it may kill (exit 144). ${SAFE_FORMS}`
   }));
 }
 

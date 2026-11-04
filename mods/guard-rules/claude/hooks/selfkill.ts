@@ -49,17 +49,32 @@ function parsePkill(argv: string[], dyn: boolean[]): { full: boolean; exact: boo
   return { full, exact, ignoreCase, pattern: dyn[k] ? undefined : word }
 }
 
-function matches(pattern: string, ignoreCase: boolean, texts: string[]): boolean {
+// The pattern comes from the command being judged, so it must not be able to stall the guard in a backtracking
+// engine: a long or long-text match, a back-reference, a nested quantifier or more than two unbounded quantifiers is
+// not run and counts as a hit instead (fail closed).
+const MAX_PATTERN = 200
+const MAX_TEXT = 20_000
+
+function complex(pattern: string, text: string): boolean {
+  if (pattern.length > MAX_PATTERN || text.length > MAX_TEXT || /\\[1-9]/.test(pattern)) return true
+  const flat = pattern.replace(/\\./g, '').replace(/\[\^?\]?[^\]]*\]/g, '')
+  return (flat.match(/[*+]|\{\d*,\d*\}/g) ?? []).length > 2 || /[*+?{].*\)[*+{]/s.test(flat)
+}
+
+type Hit = 'match' | 'complex'
+
+function check(pattern: string, ignoreCase: boolean, texts: string[]): Hit | null {
+  if (texts.some((t) => complex(pattern, t))) return 'complex'
   let re: RegExp | null = null
   try {
     re = new RegExp(pattern, ignoreCase ? 'i' : '')
   } catch {
     // An ERE form JavaScript rejects (`[[:alpha:]]`, `\<`): fall back to the pattern as plain text.
   }
-  return texts.some((t) => (re ? re.test(t) : t.includes(pattern)))
+  return texts.some((t) => (re ? re.test(t) : t.includes(pattern))) ? 'match' : null
 }
 
-function scan(script: string, whole: string, depth: number, out: Set<string>): void {
+function scan(script: string, whole: string, depth: number, out: Map<string, Hit>): void {
   if (depth > MAX_DEPTH) return
   const parsed = tokenize(script)
   for (const cmd of parsed.cmds) {
@@ -75,7 +90,8 @@ function scan(script: string, whole: string, depth: number, out: Set<string>): v
     const p = parsePkill(u.argv, u.dyn)
     if (!p || !p.full || p.exact || p.pattern === undefined) continue
     // The shell's command line is the shell name, `-c`, then the command text.
-    if (matches(p.pattern, p.ignoreCase, [`sh -c ${whole}`, `sh -c ${script}`])) out.add(p.pattern)
+    const hit = check(p.pattern, p.ignoreCase, [`sh -c ${whole}`, `sh -c ${script}`])
+    if (hit) out.set(p.pattern, hit)
   }
 }
 
@@ -84,11 +100,14 @@ const SAFE_FORMS =
 
 export function selfKillViolations(command: string, mode: Mode): Violation[] {
   if (mode === 'off' || !SELF_KILL_HINT.test(command)) return []
-  const hits = new Set<string>()
+  const hits = new Map<string, Hit>()
   scan(command, command, 0, hits)
-  return [...hits].map((pattern) => ({
+  return [...hits].map(([pattern, hit]) => ({
     rule: 'selfkill',
     mode,
-    message: `selfkill: \`pkill -f ${JSON.stringify(pattern)}\` also matches the shell running this command, so it would kill that shell (exit 144). ${SAFE_FORMS}`,
+    message:
+      hit === 'match'
+        ? `selfkill: \`pkill -f ${JSON.stringify(pattern)}\` also matches the shell running this command, so it would kill that shell (exit 144). ${SAFE_FORMS}`
+        : `selfkill: the pattern of \`pkill -f ${JSON.stringify(pattern.length > 60 ? `${pattern.slice(0, 60)}...` : pattern)}\` is too complex to check against the shell running this command, which it may kill (exit 144). ${SAFE_FORMS}`,
   }))
 }

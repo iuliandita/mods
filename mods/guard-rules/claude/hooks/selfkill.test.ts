@@ -45,6 +45,18 @@ test('selfkill: exact, anchored, bracketed, dynamic and non-pkill forms pass', a
   for (const command of allowed) expect(await rules(command), command).toEqual([])
 })
 
+test('selfkill: a pattern that could backtrack badly is denied without being run', async () => {
+  const hostile = [`pkill -f '(a+)+$'`, `pkill -f '(.*)x\\1'`, `pkill -f 'a*a*a*b'`, `pkill -f '${'a'.repeat(300)}'`, `pkill -f '^x'; echo ${'y'.repeat(20_000)}`]
+  for (const command of hostile) {
+    const t0 = Date.now()
+    const v = (await evaluate(command, parseConfig({}), env)).enforced
+    expect(v.map((x) => x.rule), command.slice(0, 40)).toEqual(['selfkill'])
+    expect(v[0]!.message).toContain('too complex')
+    expect(Date.now() - t0).toBeLessThan(500)
+  }
+  expect(await rules(`pkill -f '^(bun|node) run dev$'`)).toEqual([])
+})
+
 test('selfkill: the deny names the safe forms, dry reports without denying, off is silent', async () => {
   const command = `pkill -f 'vite --host'`
   const v = (await evaluate(command, parseConfig({}), env)).enforced[0]!
