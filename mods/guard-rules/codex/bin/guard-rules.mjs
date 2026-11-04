@@ -2904,6 +2904,141 @@ function probeEnv(assigns) {
   return out;
 }
 
+// mods/guard-rules/claude/hooks/selfkill.ts
+var VALUE_SHORT = new Set(["g", "G", "P", "s", "t", "u", "U", "F"]);
+var VALUE_LONG = new Set(["--pgroup", "--group", "--parent", "--session", "--terminal", "--euid", "--uid", "--pidfile", "--signal", "--ns", "--nslist"]);
+var SELF_KILL_HINT = /\bpkill\b/;
+function parsePkill(argv, dyn) {
+  let full = false;
+  let exact = false;
+  let ignoreCase = false;
+  let k = 1;
+  for (;k < argv.length; k++) {
+    const w = argv[k];
+    if (w === "--") {
+      k++;
+      break;
+    }
+    if (!w.startsWith("-") || w === "-")
+      break;
+    if (w.startsWith("--")) {
+      const key = w.includes("=") ? w.slice(0, w.indexOf("=")) : w;
+      if (key === "--full")
+        full = true;
+      else if (key === "--exact")
+        exact = true;
+      else if (key === "--ignore-case")
+        ignoreCase = true;
+      else if (VALUE_LONG.has(key) && !w.includes("="))
+        k++;
+      continue;
+    }
+    if (/^-(?:\d+|[A-Z][A-Z0-9]{2,})$/.test(w))
+      continue;
+    for (let j = 1;j < w.length; j++) {
+      const c = w[j];
+      if (c === "f")
+        full = true;
+      else if (c === "x")
+        exact = true;
+      else if (c === "i")
+        ignoreCase = true;
+      else if (VALUE_SHORT.has(c)) {
+        if (j === w.length - 1)
+          k++;
+        break;
+      }
+    }
+  }
+  const word = argv[k];
+  if (word === undefined)
+    return null;
+  return { full, exact, ignoreCase, pattern: dyn[k] ? undefined : word };
+}
+var MAX_PATTERN = 200;
+var MAX_TEXT = 8192;
+function complex(pattern, text) {
+  if (pattern.length > MAX_PATTERN || text.length > MAX_TEXT)
+    return true;
+  let quantifiers = 0;
+  for (let i = 0;i < pattern.length; i++) {
+    const c = pattern[i];
+    const next = pattern[i + 1];
+    if (c === "\\") {
+      if (next === undefined || /[0-9A-Za-z]/.test(next))
+        return true;
+      i++;
+    } else if (c === "[") {
+      if (next === "]" || next === "^" && pattern[i + 2] === "]")
+        return true;
+      i += next === "^" ? 1 : 0;
+      for (i++;i < pattern.length && pattern[i] !== "]"; i++)
+        if (pattern[i] === "\\" || pattern[i] === "[")
+          return true;
+      if (i >= pattern.length)
+        return true;
+    } else if (c === "(") {
+      if (next === "?")
+        return true;
+    } else if (c === ")") {
+      if (next !== undefined && "*+?{".includes(next))
+        return true;
+    } else if (c === "*" || c === "+" || c === "?") {
+      if (++quantifiers > 1)
+        return true;
+    } else if (c === "{") {
+      return true;
+    }
+  }
+  return false;
+}
+function check(pattern, ignoreCase, texts) {
+  if (texts.some((t) => complex(pattern, t)))
+    return "complex";
+  let re = null;
+  try {
+    re = new RegExp(pattern, ignoreCase ? "i" : "");
+  } catch {}
+  return texts.some((t) => re ? re.test(t) : t.includes(pattern)) ? "match" : null;
+}
+function scan(script, whole, depth, out) {
+  if (depth > MAX_DEPTH)
+    return;
+  const parsed = tokenize(script);
+  for (const cmd of parsed.cmds) {
+    const u = unwrap(cmd);
+    if (!u.argv.length)
+      continue;
+    const head = basename(u.argv[0]);
+    if (SHELLS.has(head)) {
+      const s = shellScript(u.argv);
+      if (s.ok && s.script !== undefined)
+        scan(s.script, whole, depth + 1, out);
+      continue;
+    }
+    if (head !== "pkill")
+      continue;
+    const p = parsePkill(u.argv, u.dyn);
+    if (!p || !p.full || p.exact || p.pattern === undefined)
+      continue;
+    const hit = check(p.pattern, p.ignoreCase, [`sh -c ${whole}`, `sh -c ${script}`]);
+    if (hit)
+      out.set(p.pattern, hit);
+  }
+}
+var SAFE_FORMS = "Match the process name with `pkill -x <name>`, anchor the pattern (`^bun run dev$`), write one letter as a class (`[v]ite`) so the command text no longer matches, or kill by PID (a pidfile or `pgrep -x`).";
+function selfKillViolations(command, mode) {
+  if (mode === "off" || !SELF_KILL_HINT.test(command))
+    return [];
+  const hits = new Map;
+  scan(command, command, 0, hits);
+  return [...hits].map(([pattern, hit]) => ({
+    rule: "selfkill",
+    mode,
+    message: hit === "match" ? `selfkill: \`pkill -f ${JSON.stringify(pattern)}\` also matches the shell running this command, so it would kill that shell (exit 144). ${SAFE_FORMS}` : `selfkill: the pattern of \`pkill -f ${JSON.stringify(pattern.length > 60 ? `${pattern.slice(0, 60)}...` : pattern)}\` is too complex to check against the shell running this command, which it may kill (exit 144). ${SAFE_FORMS}`
+  }));
+}
+
 // mods/guard-rules/claude/hooks/rules.ts
 var GH_MESSAGE = {
   pr: new Set(["create", "edit", "comment", "review", "merge"]),
@@ -2969,6 +3104,7 @@ function parseConfig(options) {
     protectedBranch: parseMode(options.modeProtectedBranch, "modeProtectedBranch", errors),
     identity: parseMode(options.modeIdentity, "modeIdentity", errors),
     context: parseMode(options.modeContext, "modeContext", errors),
+    selfKill: parseMode(options.modeSelfKill, "modeSelfKill", errors),
     unparsed: String(options.modeUnparsed ?? "").trim().toLowerCase() === "ask" ? "ask" : parseMode(options.modeUnparsed, "modeUnparsed", errors),
     protectedBranches: branches,
     unprotectedRepos: parseList(options.unprotectedRepos, ""),
@@ -3081,6 +3217,7 @@ async function evaluate(command, cfg, rawEnv) {
   const parsed = extractCalls(command, env.cwd, env.home);
   const guarded = parsed.calls.filter((c) => isGuarded(c, cfg));
   all.push(...unparsedViolations(command, parsed, guarded, cfg));
+  all.push(...selfKillViolations(command, cfg.selfKill));
   if (guarded.length && cfg.error) {
     all.push({ rule: "config", mode: "on", message: `config: guard-rules settings are invalid (${cfg.error}). Fix them in the plugin options.` });
   }
@@ -3337,7 +3474,7 @@ async function checkCommand(command, cfg, env) {
     if (OWN_DIRS.test(flat))
       return { deny: OWN_FILES_DENIED };
     const probe = extractCalls(command, "/", "/");
-    if (probe.ok && probe.calls.length === 0)
+    if (probe.ok && probe.calls.length === 0 && !SELF_KILL_HINT.test(command))
       return {};
     const verdict = await evaluate(command, cfg, env);
     if (verdict.enforced.length)

@@ -13,7 +13,7 @@
     {
       "name": "guard-rules",
       "source": "./mods/guard-rules/claude",
-      "description": "Blocks AI attribution in commits and PRs, direct commits to protected branches, commits under the wrong git identity, and mutating kubectl, helm and terraform calls on protected or unclassified environments."
+      "description": "Blocks AI attribution in commits and PRs, direct commits to protected branches, commits under the wrong git identity, and mutating kubectl, helm and terraform calls on protected or unclassified environments, and pkill -f patterns that match the shell running the command."
     },
     {
       "name": "notify",
