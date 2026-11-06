@@ -3,7 +3,7 @@
 
 export type Mode = 'off' | 'on'
 export type Kind = 'finish' | 'input'
-export type Config = { mode: Mode; events: ReadonlySet<Kind>; sound: boolean }
+export type Config = { mode: Mode; events: ReadonlySet<Kind>; sound: boolean; state: boolean; t3: 'auto' | 'off' }
 export type Notice = { kind: Kind; title: string; body: string }
 export type Harness = 'Claude Code' | 'Codex' | 'OpenCode'
 // What an event maps to before the repo and branch are looked up.
@@ -24,6 +24,8 @@ export function parseConfig(raw: Record<string, unknown> | null | undefined): Co
     mode: o.mode === 'off' ? 'off' : 'on',
     events: new Set(listed.length > 0 ? listed : KINDS),
     sound: o.sound === 'on',
+    state: o.state !== 'off',
+    t3: o.t3 === 'off' ? 'off' : 'auto',
   }
 }
 
@@ -110,19 +112,37 @@ const NOTIFICATION_TYPES = new Map<string, string>([
 
 const make = (kind: Kind, harness: Harness, cwd: unknown, reason: string): Pending => ({ kind, harness, cwd, reason })
 
+// Only the last non-blank line of this turn's final message can disclose a fixed state label.
+export function finishReason(message: unknown, enabled = true): string {
+  if (!enabled || typeof message !== 'string') return REASON.finish
+  const line = message.split(/\r?\n/).findLast((s) => s.trim() !== '') ?? ''
+  const token = /^\[(done|needs you|waiting|partial)\]/.exec(line)?.[1]
+  switch (token) {
+    case 'done': return 'Done'
+    case 'needs you': return 'Needs you'
+    case 'waiting': return 'Running'
+    case 'partial': return 'Unfinished'
+    default: return REASON.finish
+  }
+}
+
+export type Env = Readonly<Record<string, string | undefined>>
+export const optedOut = (env: Env): boolean => env.IULIANDITA_MODS_NOTIFY === 'off'
+export const claudeChild = (env: Env): boolean => optedOut(env) || env.T3CODE_THREAD_ID?.startsWith('thread:') === true || env.CLAUDE_CODE_ENTRYPOINT === 'sdk-cli'
+
 // Claude Code: the Stop hook, and the Notification hook by its type. Other types (a finished login, say) and
 // the message text itself are not shown: a message can name a command.
-export function claudeNotice(event: 'Stop' | 'Notification', input: { cwd?: unknown; notification_type?: unknown; agent_id?: unknown }): Pending | null {
+export function claudeNotice(event: 'Stop' | 'Notification', input: { cwd?: unknown; notification_type?: unknown; agent_id?: unknown; last_assistant_message?: unknown }, state = true): Pending | null {
   if (input.agent_id) return null
-  if (event === 'Stop') return make('finish', 'Claude Code', input.cwd, REASON.finish)
+  if (event === 'Stop') return make('finish', 'Claude Code', input.cwd, finishReason(input.last_assistant_message, state))
   const body = NOTIFICATION_TYPES.get(String(input.notification_type))
   return body ? make('input', 'Claude Code', input.cwd, body) : null
 }
 
 // Codex: the Stop and PermissionRequest hooks (stdin), or the `notify` setting's agent-turn-complete payload.
-export function codexNotice(input: { hook_event_name?: unknown; type?: unknown; cwd?: unknown; agent_id?: unknown }): Pending | null {
+export function codexNotice(input: { hook_event_name?: unknown; type?: unknown; cwd?: unknown; agent_id?: unknown; last_assistant_message?: unknown; 'last-assistant-message'?: unknown }, state = true): Pending | null {
   if (input.agent_id) return null
-  if (input.hook_event_name === 'Stop' || input.type === 'agent-turn-complete') return make('finish', 'Codex', input.cwd, REASON.finish)
+  if (input.hook_event_name === 'Stop' || input.type === 'agent-turn-complete') return make('finish', 'Codex', input.cwd, finishReason(input.last_assistant_message ?? input['last-assistant-message'], state))
   if (input.hook_event_name === 'PermissionRequest') return make('input', 'Codex', input.cwd, REASON.permission)
   return null
 }
@@ -131,7 +151,7 @@ export function codexNotice(input: { hook_event_name?: unknown; type?: unknown; 
 export function opencodeNotice(type: string, cwd: unknown): Pending | null {
   if (type === 'session.execution.succeeded' || type === 'session.idle') return make('finish', 'OpenCode', cwd, REASON.finish)
   if (type === 'permission.asked') return make('input', 'OpenCode', cwd, REASON.permission)
-  if (type === 'form.created') return make('input', 'OpenCode', cwd, REASON.question)
+  if (type === 'form.created' || type === 'question.asked') return make('input', 'OpenCode', cwd, REASON.question)
   return null
 }
 

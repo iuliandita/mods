@@ -1,6 +1,6 @@
 {
   "name": "notify",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Desktop notification when the agent finishes or waits on a permission prompt or other input, titled with the repo and harness, the branch in the text, and an optional sound. Uses notify-send on Linux and osascript on macOS; makes no network or model calls.",
   "author": { "name": "iuliandita" },
   "userConfig": {
@@ -23,6 +23,20 @@
       "description": "off (default) or on: ask the notifier to play its sound. On Linux this depends on the notification server.",
       "options": ["off", "on"],
       "default": "off"
+    },
+    "t3": {
+      "type": "string",
+      "title": "T3 child lookup",
+      "description": "auto (default) checks the local T3 database read-only when available; off disables the lookup.",
+      "options": ["auto", "off"],
+      "default": "auto"
+    },
+    "state": {
+      "type": "string",
+      "title": "Finish state",
+      "description": "on (default) shows a fixed label from the final status marker; off always says Finished.",
+      "options": ["on", "off"],
+      "default": "on"
     }
   }
 }

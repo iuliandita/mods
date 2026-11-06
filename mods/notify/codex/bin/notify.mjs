@@ -8,7 +8,9 @@ function parseConfig(raw) {
   return {
     mode: o.mode === "off" ? "off" : "on",
     events: new Set(listed.length > 0 ? listed : KINDS),
-    sound: o.sound === "on"
+    sound: o.sound === "on",
+    state: o.state !== "off",
+    t3: o.t3 === "off" ? "off" : "auto"
   };
 }
 function clean(s, max) {
@@ -78,11 +80,30 @@ var NOTIFICATION_TYPES = new Map([
   ["elicitation_dialog", REASON.question]
 ]);
 var make = (kind, harness, cwd, reason) => ({ kind, harness, cwd, reason });
-function codexNotice(input) {
+function finishReason(message, enabled = true) {
+  if (!enabled || typeof message !== "string")
+    return REASON.finish;
+  const line = message.split(/\r?\n/).findLast((s) => s.trim() !== "") ?? "";
+  const token = /^\[(done|needs you|waiting|partial)\]/.exec(line)?.[1];
+  switch (token) {
+    case "done":
+      return "Done";
+    case "needs you":
+      return "Needs you";
+    case "waiting":
+      return "Running";
+    case "partial":
+      return "Unfinished";
+    default:
+      return REASON.finish;
+  }
+}
+var optedOut = (env) => env.IULIANDITA_MODS_NOTIFY === "off";
+function codexNotice(input, state = true) {
   if (input.agent_id)
     return null;
   if (input.hook_event_name === "Stop" || input.type === "agent-turn-complete")
-    return make("finish", "Codex", input.cwd, REASON.finish);
+    return make("finish", "Codex", input.cwd, finishReason(input.last_assistant_message ?? input["last-assistant-message"], state));
   if (input.hook_event_name === "PermissionRequest")
     return make("input", "Codex", input.cwd, REASON.permission);
   return null;
@@ -194,6 +215,75 @@ var home2 = () => {
   }
 };
 
+// mods/notify/host/session.ts
+import { closeSync as closeSync2, constants, existsSync as existsSync2, fstatSync, openSync as openSync2, readSync as readSync2 } from "node:fs";
+import { join as join2 } from "node:path";
+function codexChild(path) {
+  if (typeof path !== "string")
+    return false;
+  let fd;
+  try {
+    fd = openSync2(path, constants.O_RDONLY | constants.O_NONBLOCK);
+    if (!fstatSync(fd).isFile())
+      return false;
+    const chunk = Buffer.alloc(4096);
+    let text = "";
+    for (let size = 0;size < 65536; size += chunk.length) {
+      const length = readSync2(fd, chunk, 0, chunk.length, null);
+      text += chunk.toString("utf8", 0, length);
+      const end = text.indexOf(`
+`);
+      if (end < 0 && length === chunk.length)
+        continue;
+      const record = JSON.parse(end < 0 ? text : text.slice(0, end));
+      if (record?.type !== "session_meta")
+        return false;
+      const meta = record.payload;
+      return meta?.source === "exec" || meta?.originator === "codex_exec" || meta?.thread_source === "subagent" || typeof meta?.source?.subagent?.thread_spawn?.parent_thread_id === "string";
+    }
+  } catch {} finally {
+    if (fd !== undefined)
+      closeSync2(fd);
+  }
+  return false;
+}
+function t3Path(env, userHome) {
+  const base = env.T3CODE_HOME || (userHome ? join2(userHome, ".t3") : null);
+  return base ? join2(base, "userdata", "statev2.sqlite") : null;
+}
+async function t3Child(session, cfg, env = process.env, userHome = home2()) {
+  if (cfg.t3 === "off" || typeof session !== "string" || session === "")
+    return false;
+  const path = t3Path(env, userHome);
+  if (!path || !existsSync2(path))
+    return false;
+  let db;
+  try {
+    const bun = Boolean(process.versions.bun);
+    const module = bun ? "bun:sqlite" : "node:sqlite";
+    const driver = await import(module);
+    const Constructor = bun ? driver.Database : driver.DatabaseSync ?? driver.Database;
+    db = new Constructor(path, bun ? { readonly: true, create: false } : { readOnly: true });
+    db.exec("PRAGMA busy_timeout = 20; PRAGMA query_only = ON");
+    const row = db.prepare(`
+      SELECT 1 AS child
+      FROM orchestration_v2_projection_provider_threads AS p
+      LEFT JOIN orchestration_v2_projection_threads AS t ON t.thread_id = p.thread_id
+      WHERE json_extract(p.payload_json, '$.nativeThreadRef.nativeId') = ?
+        AND (instr(p.thread_id, 'thread:delegated-task:') = 1
+          OR json_extract(t.payload_json, '$.lineage.parentThreadId') IS NOT NULL)
+      LIMIT 1
+    `).get(session);
+    return row !== null && typeof row === "object" && "child" in row;
+  } catch {
+    return false;
+  } finally {
+    try {
+      db?.close();
+    } catch {}
+  }
+}
+
 // mods/notify/host/cli.ts
 var USAGE = 'notify: error: unknown command: expected hook or notify; run "notify hook" from a Codex hook or "notify notify <json>" from the notify setting';
 function parse(text) {
@@ -210,14 +300,21 @@ async function main(argv, io) {
     io.err(USAGE);
     return 2;
   }
+  const env = io.env ?? process.env;
+  if (optedOut(env))
+    return 0;
   const { config, warning } = readConfig(io.options);
   if (config.mode === "off")
     return 0;
   if (warning)
     io.err(warning);
   const input = parse(command === "hook" ? await io.stdin() : rest.at(-1) ?? "");
-  const pending = input ? codexNotice(input) : null;
+  const pending = input ? codexNotice(input, config.state) : null;
   if (!wanted(config, pending))
+    return 0;
+  if (codexChild(input?.transcript_path))
+    return 0;
+  if (await t3Child(input?.session_id ?? input?.["thread-id"], config, env, io.home === undefined ? home2() : io.home))
     return 0;
   const notice = await withContext(pending, io.home === undefined ? home2() : io.home, io.fs ?? nodeFs);
   const result = await deliver(io.run, io.platform, notice, config.sound);

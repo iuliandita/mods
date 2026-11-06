@@ -1,13 +1,15 @@
 import type { On } from 'claude-code'
+import type { Env } from './notify'
 import { expect, test } from 'claude-code/testing'
 
 const done = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }) as never
 
 // The engine beneath the mod: `uname -s` and the notifier, recorded. `notifier` is how the command ends.
-function world(on: On, notifier: 'ok' | 'missing' | 'fail' = 'ok', uname = 'Linux\n', block?: string) {
+function world(on: On, notifier: 'ok' | 'missing' | 'fail' = 'ok', uname = 'Linux\n', block?: string, env: Env = {}) {
   const seen = { runs: [] as string[][], toasts: [] as string[] }
   on('classic.Stop', () => (block === undefined ? {} : { block }))
   on('classic.Notification', () => ({}))
+  on('env.get', (_$, e) => ({ value: env[e.name] }) as never)
   on('process.run', (_$, e) => {
     const argv = [...(e as { argv: string[] }).argv]
     seen.runs.push(argv)
@@ -89,10 +91,51 @@ test('a Stop that another hook blocks is not a finish', async ($, on) => {
 })
 
 test('the title and body use the repo folder and branch read through the engine', async ($, on) => {
-  const seen = world(on)
-  on('env.get', () => ({ value: '/h' }) as never)
+  const seen = world(on, 'ok', 'Linux\n', undefined, { HOME: '/h' })
   on('fs.stat', (_$, e) => ((e as { path: string }).path === '/h/code/mods/.git' ? ({ value: { kind: 'dir' } } as never) : ({ deny: 'ENOENT' } as never)))
   on('fs.read', (_$, e) => ((e as { path: string }).path === '/h/code/mods/.git/HEAD' ? ({ value: 'ref: refs/heads/develop\n' } as never) : ({ deny: 'ENOENT' } as never)))
   await $.classic.Stop({ cwd: '/h/code/mods/mods/notify', stop_hook_active: false })
   expect(sent(seen)).toEqual([['env', '-u', 'LD_LIBRARY_PATH', '-u', 'LD_PRELOAD', 'notify-send', '--app-name=mods', '--', 'mods (Claude Code)', 'Finished on develop']])
+})
+
+test('child env signals and the process opt-out suppress Stop and Notification', async ($, on) => {
+  const env: Record<string, string | undefined> = {}
+  const seen = world(on, 'ok', 'Linux\n', undefined, env)
+  for (const values of [
+    { T3CODE_THREAD_ID: 'thread:delegated-task:child' }, { CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' },
+    { IULIANDITA_MODS_NOTIFY: 'off' },
+  ]) {
+    for (const key of Object.keys(env)) delete env[key]
+    Object.assign(env, values)
+    await $.classic.Stop({ cwd: '/w/r', stop_hook_active: false })
+    await $.classic.Notification({ cwd: '/w/r', message: 'private', notification_type: 'elicitation_dialog' })
+  }
+  expect(sent(seen)).toEqual([])
+  for (const key of Object.keys(env)) delete env[key]
+  Object.assign(env, { T3CODE_THREAD_ID: 'bare-uuid', CLAUDE_CODE_ENTRYPOINT: 't3-code', CLAUDE_CODE_CHILD_SESSION: '1' })
+  await $.classic.Stop({ cwd: '/w/r', stop_hook_active: false, last_assistant_message: 'private\n[needs you] hidden' })
+  expect(sent(seen).map((a) => a.at(-1))).toEqual(['Needs you'])
+})
+
+test('state off keeps the finish reason fixed', { options: { state: 'off' } }, async ($, on) => {
+  const seen = world(on)
+  await $.classic.Stop({ cwd: '/w/r', stop_hook_active: false, last_assistant_message: '[done]' })
+  expect(sent(seen).map((a) => a.at(-1))).toEqual(['Finished'])
+})
+
+test('native questions notify once across redraws, Notification and Stop; answering permits a finish', async ($, on) => {
+  const seen = world(on)
+  on('session.cwd', () => ({ value: '/work/my-repo' }))
+  on('ui.render', () => ({ type: 'engine', ref: 0 }))
+  on('classic.PostToolUse', () => ({}))
+  const question = { plugin: 'notify', component: 'AskUserQuestion' as const, surface: 'terminal' as const, requestId: 'question', props: { tool: 'AskUserQuestion', questions: [] } }
+  const first = await $.ui.mount(question)
+  await first.redraw()
+  await $.classic.Notification({ cwd: '/work/my-repo', message: 'private', notification_type: 'elicitation_dialog' })
+  await $.classic.Stop({ cwd: '/work/my-repo', stop_hook_active: false })
+  expect(sent(seen).map((a) => a.at(-1))).toEqual(['Needs your input'])
+  await $.classic.PostToolUse({ cwd: '/work/my-repo', tool_name: 'AskUserQuestion', tool_input: {}, tool_response: {}, tool_use_id: 'question' })
+  await $.classic.Stop({ cwd: '/work/my-repo', stop_hook_active: false, last_assistant_message: '[done]' })
+  expect(sent(seen).map((a) => a.at(-1))).toEqual(['Needs your input', 'Done'])
+  await first.unmount()
 })

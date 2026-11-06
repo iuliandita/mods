@@ -1,5 +1,6 @@
-import { codexNotice, deliver, wanted, withContext, type Fs, type Runner } from '../claude/hooks/notify'
+import { codexNotice, deliver, optedOut, wanted, withContext, type Env, type Fs, type Runner } from '../claude/hooks/notify'
 import { home, nodeFs, readConfig } from './run'
+import { codexChild, t3Child } from './session'
 
 export type Io = {
   stdin: () => Promise<string>
@@ -9,6 +10,7 @@ export type Io = {
   options?: string
   fs?: Fs
   home?: string | null
+  env?: Env
 }
 
 const USAGE = 'notify: error: unknown command: expected hook or notify; run "notify hook" from a Codex hook or "notify notify <json>" from the notify setting'
@@ -31,12 +33,16 @@ export async function main(argv: string[], io: Io): Promise<number> {
     io.err(USAGE)
     return 2
   }
+  const env = io.env ?? process.env
+  if (optedOut(env)) return 0
   const { config, warning } = readConfig(io.options)
   if (config.mode === 'off') return 0
   if (warning) io.err(warning)
   const input = parse(command === 'hook' ? await io.stdin() : (rest.at(-1) ?? ''))
-  const pending = input ? codexNotice(input) : null
+  const pending = input ? codexNotice(input, config.state) : null
   if (!wanted(config, pending)) return 0
+  if (codexChild(input?.transcript_path)) return 0
+  if (await t3Child(input?.session_id ?? input?.['thread-id'], config, env, io.home === undefined ? home() : io.home)) return 0
   const notice = await withContext(pending, io.home === undefined ? home() : io.home, io.fs ?? nodeFs)
   const result = await deliver(io.run, io.platform, notice, config.sound)
   if (!result.ok) io.err(result.warning)
