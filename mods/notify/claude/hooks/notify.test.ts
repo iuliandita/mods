@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { claudeNotice, clean, codexNotice, deliver, notifierArgv, opencodeNotice, parseConfig, platformFromUname, resolvePlace, wanted, withContext, type Fs, type Notice } from './notify'
+import { claudeChild, claudeNotice, clean, codexNotice, deliver, finishReason, notifierArgv, opencodeNotice, parseConfig, platformFromUname, resolvePlace, wanted, withContext, type Env, type Fs, type Notice } from './notify'
 
 const notice = (over: Partial<Notice> = {}): Notice => ({ kind: 'finish', title: 'my-repo', body: 'Finished', ...over })
 
@@ -9,12 +9,38 @@ test('options: defaults, each option, and a value that cannot be read counts as 
   expect([d.mode, [...d.events], d.sound]).toEqual(['on', ['finish', 'input'], false])
   expect(parseConfig({ mode: 'off' }).mode).toBe('off')
   expect(parseConfig({ mode: 'sideways' }).mode).toBe('on')
+  expect([d.state, d.t3]).toEqual([true, 'auto'])
+  expect([parseConfig({ state: 'off' }).state, parseConfig({ t3: 'off' }).t3]).toEqual([false, 'off'])
   expect([...parseConfig({ events: 'input' }).events]).toEqual(['input'])
   expect([...parseConfig({ events: ' Finish , nope ' }).events]).toEqual(['finish'])
   expect([...parseConfig({ events: ['input', 'finish'] }).events]).toEqual(['input', 'finish'])
   for (const events of ['', 'nope', 3, null]) expect([...parseConfig({ events }).events]).toEqual(['finish', 'input'])
   expect(parseConfig({ sound: 'on' }).sound).toBe(true)
   for (const sound of ['off', 'true', true, 1, '']) expect(parseConfig({ sound }).sound).toBe(false)
+})
+
+test('finish markers: exact last non-blank line only, fixed labels, and state off', () => {
+  for (const [message, expected] of [
+    ['text\n[done]\n \n', 'Done'], ['[needs you] private reason', 'Needs you'],
+    ['[waiting] job', 'Running'], ['[partial] remaining work', 'Unfinished'],
+    ['[Done]', 'Finished'], ['[done]\ntext', 'Finished'], [' [done]', 'Finished'],
+    ['[done elsewhere]', 'Finished'], ['', 'Finished'], [undefined, 'Finished'],
+  ]) {
+    expect(finishReason(message)).toBe(expected)
+    expect(claudeNotice('Stop', { last_assistant_message: message })?.reason).toBe(expected)
+    expect(codexNotice({ hook_event_name: 'Stop', last_assistant_message: message })?.reason).toBe(expected)
+    expect(finishReason(message, false)).toBe('Finished')
+  }
+})
+
+test('Claude child and opt-out signals skip, while unrelated session flags do not', () => {
+  for (const [env, expected] of [
+    [{ IULIANDITA_MODS_NOTIFY: 'off' }, true], [{ T3CODE_THREAD_ID: 'thread:delegated-task:child' }, true],
+    [{ T3CODE_THREAD_ID: 'thread:other' }, true], [{ CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' }, true],
+    [{ T3CODE_THREAD_ID: 'bare-uuid', CLAUDE_CODE_ENTRYPOINT: 't3-code' }, false],
+    [{ CLAUDE_CODE_CHILD_SESSION: '1', CLAUDECODE: '1', CLAUDE_CODE_SESSION_ATTENDED: '0' }, false],
+    [{ CLAUDE_CODE_ENTRYPOINT: 'cli' }, false], [{}, false],
+  ] as [Env, boolean][]) expect(claudeChild(env)).toBe(expected)
 })
 
 test('Claude Code events: Stop is finish, the three Notification types are input, anything else is silent', () => {

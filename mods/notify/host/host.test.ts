@@ -1,12 +1,16 @@
+import { Database } from 'bun:sqlite'
 import { afterAll, beforeAll, expect, test } from 'bun:test'
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
-import type { Runner } from '../claude/hooks/notify'
+import { finishReason, type Runner } from '../claude/hooks/notify'
 import { main, type Io } from './cli'
 import { setup } from './opencode'
 import { codexRunner, nodeRunner } from './run'
+import { codexChild, t3Child, t3Path } from './session'
 
 let root: string
 let options: string
@@ -26,7 +30,7 @@ function world(over: Partial<Io> & { runner?: 'ok' | 'missing' | 'fail' } = {}) 
     if (over.runner === 'missing') throw new Error('spawn notify-send ENOENT')
     return { exitCode: over.runner === 'fail' ? 1 : 0 }
   }
-  const io = (stdin: string): Io => ({ stdin: async () => stdin, err: (s) => void seen.err.push(s), run, platform: 'linux', options, ...over })
+  const io = (stdin: string): Io => ({ stdin: async () => stdin, err: (s) => void seen.err.push(s), run, platform: 'linux', options, env: {}, home: null, ...over })
   return { seen, io }
 }
 
@@ -164,7 +168,7 @@ test('the node runner resolves an exit code and rejects only when the program is
   await expect(nodeRunner(['notify-no-such-program-here'])).rejects.toThrow()
 })
 
-type Ev = { type: string; data?: Record<string, unknown> }
+type Ev = { type: string; created?: number; data?: Record<string, unknown> }
 
 // An event stream the test feeds by hand, ended by the abort signal.
 function stream() {
@@ -190,11 +194,216 @@ function stream() {
 
 const settle = () => new Promise((r) => setTimeout(r, 20))
 
+function t3Fixture(name: string) {
+  const base = join(root, name)
+  mkdirSync(join(base, 'userdata'), { recursive: true })
+  const path = join(base, 'userdata', 'statev2.sqlite')
+  const db = new Database(path)
+  db.exec(`CREATE TABLE orchestration_v2_projection_provider_threads (thread_id TEXT, payload_json TEXT);
+    CREATE TABLE orchestration_v2_projection_threads (thread_id TEXT PRIMARY KEY, payload_json TEXT);`)
+  for (const [nativeId, thread, lineage] of [
+    ['child', 'thread:delegated-task:one', {}],
+    ['lineage', 'bare-child', { parentThreadId: 'main' }],
+    ['main', 'bare-main', {}],
+  ] as const) {
+    db.prepare('INSERT INTO orchestration_v2_projection_provider_threads VALUES (?, ?)').run(thread, JSON.stringify({ nativeThreadRef: { nativeId } }))
+    db.prepare('INSERT INTO orchestration_v2_projection_threads VALUES (?, ?)').run(thread, JSON.stringify({ lineage }))
+  }
+  db.close()
+  return { base, path, env: { T3CODE_HOME: base } }
+}
+
+test('built OpenCode bundle uses Node SQLite read-only and fails open without its driver', () => {
+  withOptions({})
+  const fixture = t3Fixture('node-t3')
+  const before = readFileSync(fixture.path)
+  const script = `
+    const { setup } = await import(process.argv[1]);
+    const runs = [];
+    let end;
+    const drained = new Promise(resolve => { end = resolve });
+    const begin = performance.now();
+    const cleanup = await setup({
+      location: { directory: '/work/repo' },
+      event: { async *subscribe() {
+        for (const sessionID of ['child', 'lineage', 'main']) yield { type: 'session.idle', data: { sessionID } };
+        end();
+      } }
+    }, { options: process.argv[3], home: null, env: { T3CODE_HOME: process.argv[2] }, platform: 'linux',
+      run: async argv => { runs.push(argv.at(-1)); return { exitCode: 0 } } });
+    await drained;
+    cleanup();
+    console.log(JSON.stringify({ runs, elapsed: performance.now() - begin }));
+  `
+  for (const unavailable of [false, true]) {
+    const out = execFileSync('node', [...(unavailable ? ['--no-experimental-sqlite'] : []), '--input-type=module', '-e', script,
+      pathToFileURL(join(import.meta.dir, '../opencode/server.js')).href, fixture.base, options], { encoding: 'utf8', timeout: 2_000 })
+    const result = JSON.parse(out)
+    expect(result.runs).toEqual(unavailable ? ['Finished', 'Finished', 'Finished'] : ['Finished'])
+    expect(result.elapsed).toBeLessThan(750)
+  }
+  expect(readFileSync(fixture.path)).toEqual(before)
+})
+
+test('codex: child signals skip both entry paths; absent and broken evidence fails open', async () => {
+  withOptions({})
+  const fixture = t3Fixture('codex-t3')
+  const before = readFileSync(fixture.path)
+  const transcript = join(root, 'rollout.jsonl')
+  const cases = [
+    { meta: { source: 'exec' }, skip: true },
+    { meta: { originator: 'codex_exec' }, skip: true },
+    { meta: { thread_source: 'subagent' }, skip: true },
+    { meta: { source: { subagent: { thread_spawn: { parent_thread_id: 'parent' } } } }, skip: true },
+    { meta: { source: 'vscode', originator: 'T3 Code' }, skip: false },
+    { text: '{ broken\n', skip: false },
+    { text: 'x'.repeat(70_000), skip: false },
+    { text: '\n' + JSON.stringify({ type: 'session_meta', payload: { source: 'exec' } }), skip: false },
+  ]
+  for (const row of cases) {
+    writeFileSync(transcript, row.text ?? JSON.stringify({ type: 'session_meta', payload: row.meta }) + '\n' + 'x'.repeat(70_000))
+    expect(codexChild(transcript)).toBe(row.skip)
+    for (const command of ['hook', 'notify']) {
+      const { seen, io } = world()
+      const payload = JSON.stringify({ hook_event_name: 'Stop', type: 'agent-turn-complete', transcript_path: transcript })
+      await main(command === 'hook' ? ['hook'] : ['notify', payload], io(payload))
+      expect(seen.runs.length).toBe(row.skip ? 0 : 1)
+    }
+  }
+  for (const [session, t3, expected] of [
+    ['child', 'auto', 0], ['lineage', 'auto', 0], ['main', 'auto', 1], ['unknown', 'auto', 1], ['child', 'off', 1],
+  ]) {
+    withOptions({ t3 })
+    const { seen, io } = world({ env: fixture.env })
+    await main(['hook'], io(JSON.stringify({ hook_event_name: 'Stop', session_id: session })))
+    expect(seen.runs).toHaveLength(expected as number)
+    seen.runs.length = 0
+    await main(['notify', JSON.stringify({ type: 'agent-turn-complete', 'thread-id': session })], io(''))
+    expect(seen.runs).toHaveLength(expected as number)
+  }
+  expect(readFileSync(fixture.path)).toEqual(before)
+  expect(t3Path({}, '/h')).toBe('/h/.t3/userdata/statev2.sqlite')
+  expect(t3Path(fixture.env, '/h')).toBe(fixture.path)
+  for (const path of ['missing', 'broken', 'schema']) {
+    const base = join(root, path)
+    mkdirSync(join(base, 'userdata'), { recursive: true })
+    if (path === 'broken') writeFileSync(join(base, 'userdata/statev2.sqlite'), 'broken')
+    if (path === 'schema') new Database(join(base, 'userdata/statev2.sqlite')).close()
+    expect(await t3Child('child', { t3: 'auto' }, { T3CODE_HOME: base }, null)).toBe(false)
+  }
+  const locked = new Database(fixture.path)
+  locked.exec('BEGIN EXCLUSIVE')
+  const begin = performance.now()
+  expect(await t3Child('child', { t3: 'auto' }, fixture.env, null)).toBe(false)
+  expect(performance.now() - begin).toBeLessThan(200)
+  locked.exec('ROLLBACK')
+  locked.close()
+  expect(codexChild(join(root, 'absent'))).toBe(false)
+  expect(codexChild(root)).toBe(false)
+})
+
+test('codex: only fixed current-message labels reach the notifier; state off and process opt-out work', async () => {
+  for (const [message, label] of [
+    ['private text\n[done]\n\n', 'Done'], ['[needs you] private detail', 'Needs you'],
+    ['[waiting] job', 'Running'], ['[partial] failure', 'Unfinished'],
+    ['[done]\nprivate text', 'Finished'], ['[Done]', 'Finished'], [undefined, 'Finished'],
+  ] as const) {
+    expect(finishReason(message)).toBe(label)
+    for (const [command, key] of [['hook', 'last_assistant_message'], ['notify', 'last-assistant-message']]) {
+      for (const state of ['on', 'off']) {
+        withOptions({ state })
+        const { seen, io } = world()
+        const payload = JSON.stringify({ hook_event_name: 'Stop', type: 'agent-turn-complete', [key as string]: message })
+        await main(command === 'hook' ? ['hook'] : ['notify', payload], io(payload))
+        expect(seen.runs[0]?.at(-1)).toBe(state === 'off' ? 'Finished' : label)
+        expect(JSON.stringify(seen.runs)).not.toContain('private')
+      }
+    }
+  }
+  withOptions({})
+  const { seen, io } = world({ env: { IULIANDITA_MODS_NOTIFY: 'off' } })
+  await main(['hook'], io(hook('Stop')))
+  await main(['notify', JSON.stringify({ type: 'agent-turn-complete' })], io(''))
+  expect(seen.runs).toEqual([])
+})
+
+test('opencode: created, late-loaded, env and T3 children skip; missing evidence notifies', async () => {
+  withOptions({})
+  const fixture = t3Fixture('opencode-t3')
+  for (const row of [
+    { info: { parentID: 'main' }, skip: true }, { info: { title: 'T3 Code helper' }, skip: true },
+    { info: {}, skip: false }, { broken: true, skip: false }, { slow: true, skip: false },
+    { env: { OPENCODE_SESSION_ID: 'parent' }, skip: true }, { env: { OPENCODE_SESSION_ID: '' }, skip: true },
+    { env: { IULIANDITA_MODS_NOTIFY: 'off' }, skip: true },
+    { env: fixture.env, session: 'child', skip: true }, { env: fixture.env, session: 'lineage', skip: true },
+    { env: fixture.env, session: 'main', skip: false }, { env: fixture.env, session: 'unknown', skip: false },
+    { created: { title: 'T3 Code helper' }, skip: true }, { created: { parentID: 'main' }, skip: true },
+  ]) {
+    const { ctx, push } = stream()
+    const runs: string[][] = []
+    const cleanup = await setup({ ...ctx, session: { get: async () => {
+      if (row.broken) throw new Error('unavailable')
+      if (row.slow) return new Promise(() => {})
+      return row.info ?? {}
+    } } }, { options, home: null, env: row.env ?? {}, platform: 'linux', run: async (argv) => (runs.push(argv), { exitCode: 0 }) })
+    if (row.created) push({ type: 'session.created', data: { sessionID: 'main', ...row.created } })
+    push({ type: 'session.idle', data: { sessionID: row.session ?? 'main' } })
+    await new Promise((r) => setTimeout(r, row.slow ? 200 : 30))
+    expect(runs.length).toBe(row.skip ? 0 : 1)
+    cleanup()
+  }
+})
+
+test('opencode: current-turn state, unavailable context, state off, and question waits do not duplicate finish', async () => {
+  for (const row of [
+    { time: 100, label: 'Needs you' }, { time: 99, label: 'Finished' },
+    { time: 100, state: 'off', label: 'Finished' }, { time: 100, noStart: true, label: 'Finished' },
+    { broken: true, label: 'Finished' }, { slow: true, label: 'Finished' },
+    { malformed: true, label: 'Finished' }, { time: 100, failed: true, label: 'Finished' },
+  ]) {
+    withOptions({ state: row.state ?? 'on' })
+    const { ctx, push } = stream()
+    const runs: string[][] = []
+    const cleanup = await setup({ ...ctx, session: { context: async () => {
+      if (row.broken) throw new Error('unavailable')
+      if (row.slow) return new Promise(() => {})
+      if (row.malformed) return {} as never
+      return [{ type: 'assistant', time: { created: row.time ?? 0 }, content: [{ type: 'text', text: '[needs you] private' }] }]
+    } } }, { options, env: {}, home: null, platform: 'linux', run: async (argv) => (runs.push(argv), { exitCode: 0 }) })
+    if (!row.noStart) push({ type: 'session.execution.started', created: 100, data: { sessionID: 'main' } })
+    if (row.failed) {
+      push({ type: 'session.execution.failed', data: { sessionID: 'main' } })
+      push({ type: 'session.execution.started', created: 200, data: { sessionID: 'main' } })
+    }
+    push({ type: 'session.execution.succeeded', data: { sessionID: 'main' } })
+    push({ type: 'session.idle', data: { sessionID: 'main' } })
+    await new Promise((r) => setTimeout(r, row.slow ? 200 : 30))
+    expect(runs.map((a) => a.at(-1))).toEqual([row.label])
+    cleanup()
+  }
+  withOptions({})
+  for (const type of ['form.created', 'question.asked']) {
+    const { ctx, push } = stream()
+    const runs: string[][] = []
+    const cleanup = await setup(ctx, { options, env: {}, home: null, platform: 'linux', run: async (argv) => (runs.push(argv), { exitCode: 0 }) })
+    push({ type, data: { sessionID: 'main', form: { sessionID: 'main' } } })
+    push({ type, data: { sessionID: 'main', form: { sessionID: 'main' } } })
+    push({ type: 'session.idle', data: { sessionID: 'main' } })
+    await settle()
+    expect(runs.map((a) => a.at(-1))).toEqual(['Needs your input'])
+    push({ type: 'form.replied', data: { sessionID: 'main' } })
+    push({ type: 'session.execution.succeeded', data: { sessionID: 'main' } })
+    await settle()
+    expect(runs.map((a) => a.at(-1))).toEqual(['Needs your input', 'Finished'])
+    cleanup()
+  }
+})
+
 test('opencode: success, permission and form events notify; legacy idle does not duplicate success', async () => {
   withOptions({})
   const { ctx, push, isAborted } = stream()
   const runs: string[][] = []
-  const cleanup = await setup(ctx, { options, platform: 'linux', run: async (argv) => (runs.push(argv), { exitCode: 0 }) })
+  const cleanup = await setup(ctx, { options, env: {}, home: null, platform: 'linux', run: async (argv) => (runs.push(argv), { exitCode: 0 }) })
   push({ type: 'session.created', data: { sessionID: 'main' } })
   push({ type: 'session.created', data: { sessionID: 'child', parentID: 'main' } })
   push({ type: 'session.execution.succeeded', data: { sessionID: 'child' } })
@@ -218,7 +427,7 @@ test('opencode: options are read per event and a failing notifier warns once', a
   const { ctx, push } = stream()
   const runs: string[][] = []
   const warnings: string[] = []
-  const cleanup = await setup(ctx, { options, platform: 'linux', warn: (s) => void warnings.push(s), run: async (argv) => (runs.push(argv), Promise.reject(new Error('ENOENT'))) })
+  const cleanup = await setup(ctx, { options, env: {}, home: null, platform: 'linux', warn: (s) => void warnings.push(s), run: async (argv) => (runs.push(argv), Promise.reject(new Error('ENOENT'))) })
   push({ type: 'session.idle', data: { sessionID: 'main' } })
   await settle()
   expect(runs).toEqual([])
@@ -242,7 +451,7 @@ test.each([
   withOptions({})
   const { ctx, push } = stream()
   const runs: string[][] = []
-  const cleanup = await setup(ctx, { options, platform: 'linux', run: async (argv) => (runs.push(argv), { exitCode: 0 }) })
+  const cleanup = await setup(ctx, { options, env: {}, home: null, platform: 'linux', run: async (argv) => (runs.push(argv), { exitCode: 0 }) })
   for (let turn = 0; turn < 2; turn++) {
     for (const sessionID of ['one', 'two']) push({ type: 'session.execution.started', data: { sessionID } })
     for (const type of events) {

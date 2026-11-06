@@ -8,7 +8,9 @@ function parseConfig(raw) {
   return {
     mode: o.mode === "off" ? "off" : "on",
     events: new Set(listed.length > 0 ? listed : KINDS),
-    sound: o.sound === "on"
+    sound: o.sound === "on",
+    state: o.state !== "off",
+    t3: o.t3 === "off" ? "off" : "auto"
   };
 }
 function clean(s, max) {
@@ -78,12 +80,31 @@ var NOTIFICATION_TYPES = new Map([
   ["elicitation_dialog", REASON.question]
 ]);
 var make = (kind, harness, cwd, reason) => ({ kind, harness, cwd, reason });
+function finishReason(message, enabled = true) {
+  if (!enabled || typeof message !== "string")
+    return REASON.finish;
+  const line = message.split(/\r?\n/).findLast((s) => s.trim() !== "") ?? "";
+  const token = /^\[(done|needs you|waiting|partial)\]/.exec(line)?.[1];
+  switch (token) {
+    case "done":
+      return "Done";
+    case "needs you":
+      return "Needs you";
+    case "waiting":
+      return "Running";
+    case "partial":
+      return "Unfinished";
+    default:
+      return REASON.finish;
+  }
+}
+var optedOut = (env) => env.IULIANDITA_MODS_NOTIFY === "off";
 function opencodeNotice(type, cwd) {
   if (type === "session.execution.succeeded" || type === "session.idle")
     return make("finish", "OpenCode", cwd, REASON.finish);
   if (type === "permission.asked")
     return make("input", "OpenCode", cwd, REASON.permission);
-  if (type === "form.created")
+  if (type === "form.created" || type === "question.asked")
     return make("input", "OpenCode", cwd, REASON.question);
   return null;
 }
@@ -194,13 +215,77 @@ var home2 = () => {
   }
 };
 
+// mods/notify/host/session.ts
+import { closeSync as closeSync2, constants, existsSync as existsSync2, fstatSync, openSync as openSync2, readSync as readSync2 } from "node:fs";
+import { join as join2 } from "node:path";
+function t3Path(env, userHome) {
+  const base = env.T3CODE_HOME || (userHome ? join2(userHome, ".t3") : null);
+  return base ? join2(base, "userdata", "statev2.sqlite") : null;
+}
+async function t3Child(session, cfg, env = process.env, userHome = home2()) {
+  if (cfg.t3 === "off" || typeof session !== "string" || session === "")
+    return false;
+  const path = t3Path(env, userHome);
+  if (!path || !existsSync2(path))
+    return false;
+  let db;
+  try {
+    const bun = Boolean(process.versions.bun);
+    const module = bun ? "bun:sqlite" : "node:sqlite";
+    const driver = await import(module);
+    const Constructor = bun ? driver.Database : driver.DatabaseSync ?? driver.Database;
+    db = new Constructor(path, bun ? { readonly: true, create: false } : { readOnly: true });
+    db.exec("PRAGMA busy_timeout = 20; PRAGMA query_only = ON");
+    const row = db.prepare(`
+      SELECT 1 AS child
+      FROM orchestration_v2_projection_provider_threads AS p
+      LEFT JOIN orchestration_v2_projection_threads AS t ON t.thread_id = p.thread_id
+      WHERE json_extract(p.payload_json, '$.nativeThreadRef.nativeId') = ?
+        AND (instr(p.thread_id, 'thread:delegated-task:') = 1
+          OR json_extract(t.payload_json, '$.lineage.parentThreadId') IS NOT NULL)
+      LIMIT 1
+    `).get(session);
+    return row !== null && typeof row === "object" && "child" in row;
+  } catch {
+    return false;
+  } finally {
+    try {
+      db?.close();
+    } catch {}
+  }
+}
+
 // mods/notify/host/opencode.ts
+var childInfo = (info) => Boolean(info.parentID) || typeof info.title === "string" && info.title.startsWith("T3 Code ");
+async function quick(read) {
+  const abort = new AbortController;
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(() => read(abort.signal)).catch(() => {
+        return;
+      }),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(undefined), 150);
+      })
+    ]);
+  } finally {
+    clearTimeout(timer);
+    abort.abort();
+  }
+}
 async function setup(ctx, deps = {}) {
+  const env = deps.env ?? process.env;
+  if (optedOut(env) || env.OPENCODE_SESSION_ID !== undefined)
+    return () => {};
   const run = deps.run ?? nodeRunner;
   const platform = deps.platform ?? process.platform;
   const warn = deps.warn ?? ((s) => console.error(s));
   const children = new Set;
   const finished = new Set;
+  const known = new Set;
+  const questions = new Set;
+  const started = new Map;
   const stop = new AbortController;
   const said = new Set;
   const say = (line) => {
@@ -210,35 +295,73 @@ async function setup(ctx, deps = {}) {
     }
   };
   const handle = async (e) => {
-    if (e.type === "session.created" && e.data?.parentID && e.data.sessionID) {
-      children.add(e.data.sessionID);
+    if (e.type === "session.created" && e.data?.sessionID) {
+      known.add(e.data.sessionID);
+      if (childInfo(e.data))
+        children.add(e.data.sessionID);
       return;
     }
     const session = e.data?.sessionID ?? e.data?.form?.sessionID;
     if (session && e.type === "session.deleted") {
       children.delete(session);
       finished.delete(session);
+      known.delete(session);
+      questions.delete(session);
+      started.delete(session);
       return;
     }
     if (session && (e.type === "session.execution.started" || e.type === "session.status" && e.data?.status?.type === "busy")) {
       finished.delete(session);
+      if (e.type === "session.execution.started" || !started.has(session))
+        started.set(session, e.created ?? Date.now());
+      questions.delete(session);
       return;
     }
-    if (session && children.has(session))
+    if (session && (e.type === "session.execution.failed" || e.type === "session.execution.interrupted")) {
+      started.delete(session);
+      questions.delete(session);
       return;
+    }
+    if (session && ["form.replied", "form.cancelled", "question.replied", "question.rejected"].includes(e.type)) {
+      questions.delete(session);
+      return;
+    }
     const pending = opencodeNotice(e.type, ctx.location.directory);
     if (!pending)
       return;
-    if (pending.kind === "finish") {
-      if (!session || finished.has(session))
-        return;
-      finished.add(session);
-    }
     const { config, warning } = readConfig(deps.options);
     if (warning)
       say(warning);
     if (!wanted(config, pending))
       return;
+    if (session && !known.has(session) && ctx.session?.get) {
+      const info = await quick((signal) => ctx.session.get({ sessionID: session }, { signal }));
+      if (info) {
+        known.add(session);
+        if (childInfo(info))
+          children.add(session);
+      }
+    }
+    if (session && (children.has(session) || await t3Child(session, config, env, deps.home === undefined ? home2() : deps.home)))
+      return;
+    if (session && questions.has(session))
+      return;
+    if (pending.kind === "finish") {
+      if (!session || finished.has(session))
+        return;
+      finished.add(session);
+      const since = started.get(session);
+      if (config.state && since !== undefined && ctx.session?.context) {
+        const messages = await quick((signal) => ctx.session.context({ sessionID: session }, { signal }));
+        const last = Array.isArray(messages) ? messages.findLast((m) => m?.type === "assistant" || m?.type === "user") : undefined;
+        if (last?.type === "assistant" && typeof last.time?.created === "number" && last.time.created >= since && Array.isArray(last.content)) {
+          pending.reason = finishReason(last.content.filter((part) => part?.type === "text" && typeof part.text === "string").map((part) => part.text).join(""));
+        }
+      }
+      started.delete(session);
+    } else if (session && (e.type === "form.created" || e.type === "question.asked")) {
+      questions.add(session);
+    }
     const notice = await withContext(pending, deps.home === undefined ? home2() : deps.home, deps.fs ?? nodeFs);
     const result = await deliver(run, platform, notice, config.sound);
     if (!result.ok)

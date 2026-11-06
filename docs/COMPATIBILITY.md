@@ -19,7 +19,7 @@ Codex CLI 0.162.1, OpenCode 2.0.29.
 | `secret-box` | **works** (terminal verified) | **works**, partly: placeholders and the command's own output, see below | **works** |
 | `delegation-board` | **works** (terminal verified) | **not possible**: hooks cannot draw anything | **works**: a panel of child sessions, opened with `/board` |
 | `statusline` | **works** (terminal verified) | **not possible**: the status line only takes built-in items | **works**, reduced: one line, no rate-limit bars |
-| `notify` | **untested**: hook tests with a mocked engine only | **untested**: finish and permission events, see below | **untested**: idle, permission and form events, see below |
+| `notify` | **untested**: hook tests with a mocked engine only | **untested**: finish and permission events, see below | **untested**: completion, permission and question events, see below |
 
 ## Claude terminal verification
 
@@ -209,27 +209,36 @@ Why the differences:
 
 | | Claude Code | Codex | OpenCode |
 | --- | --- | --- | --- |
-| Agent finished | `classic.Stop` hook | Synchronous `Stop` hook (one-second cap), including `codex exec`, or the `notify` setting (`agent-turn-complete`, completion only) | `session.execution.succeeded` on 2.2.1; `session.idle` on older versions, deduplicated per execution |
+| Agent finished | `classic.Stop` hook | Synchronous `Stop` hook (one-second cap), or the `notify` setting (`agent-turn-complete`, completion only) | `session.execution.succeeded` on 2.2.1; `session.idle` on older versions, deduplicated per execution |
 | Permission needed | `classic.Notification`, type `permission_prompt` | Background `PermissionRequest` hook | `permission.asked` |
-| Waiting for input | `classic.Notification`, types `idle_prompt` and `elicitation_dialog` | **not available** | `form.created` |
-| Subagents | not notified | events with `agent_id` are skipped; `SubagentStop` is not hooked | not notified when seen created with a parent; sessions that existed before the plugin loaded are not told apart |
+| Waiting for input | `AskUserQuestion` render hook; `classic.Notification`, types `idle_prompt` and `elicitation_dialog` | **not available** | `form.created` on 2.2.1; legacy `question.asked` |
+| Child sessions | skips `agent_id`, T3 child thread ids and SDK CLI entrypoints | skips exec and subagent rollout metadata, `agent_id`, and detectable T3 children | skips parent sessions, T3 helper titles, nested runs and detectable T3 children; asks the host about existing sessions |
 | Options | plugin options | `~/.config/iuliandita-mods/notify.json` | the same file, read per event |
 | Notifier | `notify-send` (Linux), `osascript` (macOS) | the same | the same |
 | Missing notifier | one warning toast per session | one stderr line per hook run | one log line per distinct warning |
 
 Nothing here was run on a real host. The Claude events are checked against the installed API types
-and tests with a mocked engine; the Codex events against the hook schemas shipped in Codex CLI 0.165.0
+and tests with a mocked engine; the Codex events against the hook schemas shipped in Codex CLI 0.166.0
 (`stop.command.input`, `permission-request.command.input`) and the `agent-turn-complete` payload of
 the `notify` setting; the OpenCode events against the published `@opencode/schema` 2.2.1 types
 (a dependency of `@opencode/ai` 2.2.1). `permission.asked` still carries `data.sessionID`, and
 `form.created` carries `data.form.sessionID`. Success and legacy idle events share one finish
 notice per execution, reset by `session.execution.started` or the older busy-status event.
-Codex's `Stop` hook is synchronous with a one-second hook timeout so `codex exec` waits for it.
+Codex's `Stop` hook is synchronous with a one-second hook timeout; detectable `codex exec` sessions are skipped.
 `PermissionRequest` keeps `async: true` so delivery does not delay approval prompts. Both commands
 end in `exit 0`. Both Codex entry paths give the notifier a 250 ms process timeout; a slow notifier
 may show nothing, and Codex cancels unfinished background permission hooks when the session ends. The legacy
 `notify` setting waits up to that timeout. Notifications show the
-repo folder name, the harness, the branch name and a fixed reason only, never message text or commands.
+repo folder name, the harness, the branch name and a fixed reason only. With `state=on`, the current
+turn's final status marker selects `Done`, `Needs you`, `Running`, or `Unfinished`; unavailable
+or unrecognized markers give `Finished`. Other message text and commands are never disclosed.
+OpenCode requires an observed execution start and a current assistant message from its bounded
+session-context query; loading mid-turn keeps `Finished`. Question waits suppress duplicate finishes.
+
+All hosts honor `IULIANDITA_MODS_NOTIFY=off`. Codex and OpenCode's `t3=auto` reads the local
+T3 database read-only through the runtime's built-in SQLite driver, with no egress; `t3=off`
+disables it. Missing drivers, unknown schemas, busy databases and missing mappings fail open.
+See [notify's options and limits](../mods/notify/README.md#limits) for paths and runtime details.
 
 ## How a mod gets a host
 

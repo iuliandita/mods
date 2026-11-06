@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-06
+
+Only `notify` changed, from 1.0.0 to 1.0.1 in its Claude Code, Codex, and OpenCode manifests. Codex users: trust the `notify` hook again in `/hooks` after the update.
+
+### Fixed
+
+- `notify` skips detectable child and headless sessions, supports a process opt-out, and shows a fixed finish label from the current turn's final status marker. Local T3 child checks are read-only and optional; question cards notify once while waiting (#185). The plugin is now 1.0.1 on every host.
+
 ## [1.1.0] - 2026-11-04
 
 Only `guard-rules` changed, from 1.0.0 to 1.1.0 in its Claude Code, Codex, and OpenCode manifests. The other plugins stay at 1.0.0.
