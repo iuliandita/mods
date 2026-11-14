@@ -1,10 +1,12 @@
-import { expect, test } from 'bun:test'
+import { expect, mock, test } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import * as os from 'node:os'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { Data, SessionInfo } from '../../../host-lib/tui'
-import { OFF_TEXT, rows, setup, table } from './tui'
+import { loadOptions } from '../../../host-lib/options'
+import { isOff, OFF_TEXT, rows, setup, table } from './tui'
 
 const info = (id: string, over: Partial<SessionInfo> = {}): SessionInfo => ({
   id,
@@ -150,4 +152,36 @@ test('mode off in the user options file draws a notice and does not read the ses
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('an account with no home lookup is an options error, so the board stays on', () => {
+  const real = { ...os }
+  mock.module('node:os', () => ({
+    ...real,
+    userInfo: () => {
+      throw new Error('ENOENT: no such file or directory, uv_os_get_passwd')
+    },
+  }))
+  try {
+    expect(loadOptions('delegation-board')).toEqual({ options: {}, error: 'the options file could not be located: the account has no home directory entry' })
+    expect(isOff()).toBe(false)
+  } finally {
+    mock.module('node:os', () => real)
+  }
+  expect(loadOptions('delegation-board').error).toBeUndefined()
+})
+
+test('a first draw that throws gives the host an empty node', async () => {
+  const claims: { render: (i: { name: string; sessionID: string }) => { content: string } }[] = []
+  const d = data([info('a')])
+  d.session.family = () => {
+    throw new Error('boom')
+  }
+  const cleanup = await setup(
+    { renderer: {}, data: d, keymap: { layer: () => {} }, ui: { panel: { open: () => true, close: () => {}, current: () => undefined }, slot: (c) => (claims.push(c as never), () => {}) } },
+    (content) => ({ content }),
+    join(tmpdir(), 'delegation-board-absent.json'),
+  )
+  expect(claims[0]!.render({ name: 'iuliandita.delegation-board', sessionID: 'root' }).content).toBe('')
+  cleanup()
 })
