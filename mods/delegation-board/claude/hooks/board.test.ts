@@ -2,9 +2,8 @@ import type { AgentInfo, AgentSpawnInput, CommandRunInput, On } from 'claude-cod
 import { expect, mock, test, type Engine } from 'claude-code/testing'
 
 import type { Row } from './board'
-import { addSpawn, claimEffort, clean, compact, fit, footer, fmtElapsed, fmtTokens, header, mergeStatus, newRow, noteEffort, parseConfig, parsePrices, sortRows, statusText, type Effort } from './board'
+import { addSpawn, claimEffort, clean, clearFinished, compact, fit, footer, fmtElapsed, fmtTokens, header, mergeStatus, newRow, noteEffort, parseConfig, parsePrices, sortRows, statusText, type Effort } from './board'
 
-const AGENTS = { plugin: 'delegation-board', key: 'agents' } as const
 const PROMPT = 'PRIVATE-PROMPT-TEXT'
 
 const usage = (input: number, output: number, cacheRead = 0, cacheWrite = 0) => ({ input_tokens: input, output_tokens: output, cache_read_input_tokens: cacheRead, cache_creation_input_tokens: cacheWrite, model: 'claude-sonnet-x' })
@@ -30,7 +29,6 @@ const commandInput = (args: string): CommandRunInput => ({
 
 type Ctl = { status: AgentInfo['status']; list: 'all' | 'none' | 'throw'; delay: number }
 
-// The kit's $.agent.spawn carries no tool_use_id, so the effort claim is covered on the helpers below.
 function world(on: On, ctl: Ctl = { status: 'running', list: 'all', delay: 0 }) {
   const clock = mock.clock(on, { now: 10_000 })
   const calls = { list: 0, spawn: 0, open: 0 }
@@ -52,12 +50,14 @@ function world(on: On, ctl: Ctl = { status: 'running', list: 'all', delay: 0 }) 
 }
 
 // The kit's `$` has no state noun, so rows are read back from what the pane draws.
-const drawn = async ($: Engine, surface: 'terminal' | 'desktop' = 'terminal', bodyRows?: number) => {
+const pane = async ($: Engine, surface: 'terminal' | 'desktop' = 'terminal', bodyRows?: number) => {
   const ui = await $.ui.mount({ plugin: 'delegation-board', surface, component: 'Pane', requestId: 'delegation-board', props: (bodyRows ? { scroll: { offset: 0, bodyRows } } : {}) as never, viewport: { columns: 100, rows: 20 } })
-  const texts = (await ui.findAll({ type: 'Text' })).map((t) => t.text)
+  const found = await ui.findAll({ type: 'Text' })
   await ui.unmount()
-  return texts
+  return found
 }
+
+const drawn = async ($: Engine, surface: 'terminal' | 'desktop' = 'terminal', bodyRows?: number) => (await pane($, surface, bodyRows)).map((t) => t.text)
 
 test('a spawn, its turns and a poll become one row; a turn of an unlisted agent becomes an unknown row', async ($, on) => {
   const { clock, calls, ctl } = world(on)
@@ -97,6 +97,7 @@ test('status merge keeps waiting and the first finished poll; sorting and the 40
   expect(mergeStatus(merged, [{ id: 'a', status: 'bogus' }], 90)[0]?.state).toBe('waiting')
 
   expect(sortRows([done('old', 10), at('w', 5, 'waiting'), done('new', 20), at('r', 4)]).map((r) => r.id)).toEqual(['r', 'w', 'new', 'old'])
+  expect(clearFinished([at('r', 4), done('old', 10), { ...at('gone', 1, 'unknown'), endedAt: 30 }, at('fork', 2, 'unknown')]).map((r) => r.id)).toEqual(['r', 'fork'])
 
   let rows: Row[] = []
   for (let i = 0; i < 45; i++) rows = addSpawn(rows, at(`x${i}`, i))
@@ -160,7 +161,57 @@ test('observers hand the engine its own value back when recording fails', { plug
   expect(await $.turn.complete(turn('a1'))).toEqual({ text: '' })
   await clock.advance(3000)
   expect(calls.list).toBe(0)
-  expect(await $.tool.call({ tool: 'Agent', effort: 'high', prompt: PROMPT, description: 'x', subagent_type: 'Explore' } as never)).toMatchObject({ text: 'ok' })
+  expect(await $.tool.call({ tool: 'Agent', effort: 'high', prompt: PROMPT, description: 'x', subagent_type: 'Explore' })).toMatchObject({ text: 'ok' })
+})
+
+test('the effort of an Agent call shows on the row its spawn makes', async ($, on) => {
+  world(on)
+  on('tool.call', () => ({ result: 'ok', text: 'ok' }) as never)
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'tu1', effort: 'high', prompt: PROMPT, description: 'x', subagent_type: 'Explore' })
+  await $.agent.spawn({ ...spawnInput('x'), tool_use_id: 'tu1' })
+  expect((await drawn($))[1]).toBe('pending    Explore  claude-sonnet-x  high  0s  0/0  x')
+})
+
+test('pane rows are cut at the pane edge', async ($, on) => {
+  world(on)
+  await $.agent.spawn(spawnInput('one'))
+  await $.agent.spawn(spawnInput('two'))
+  const rows = (await pane($)).slice(1, -1)
+  expect(rows.map((t) => t.props.wrap)).toEqual(['truncate-end', 'truncate-end'])
+})
+
+test('a turn of an unlisted agent alone starts no poll', async ($, on) => {
+  const { clock, calls } = world(on)
+  await $.turn.complete(turn('fork-1', usage(7, 3)))
+  await clock.advance(3000)
+  expect(calls.list).toBe(0)
+  expect((await drawn($))[1]).toMatch(/^unknown /)
+})
+
+// A plugin above the board's state writes that never lets the first write of a running row through: a poll that never
+// returns. The spawn's own write carries the row as pending, so it passes.
+const hold = {
+  name: 'hold',
+  register(on: On) {
+    let isDone = false
+    on('state.set', { plugin: 'delegation-board', key: 'agents' }, async ($, e, next) => {
+      if (!isDone && JSON.stringify(e.value).includes('"running"')) {
+        isDone = true
+        await new Promise<void>(() => {})
+      }
+      return next(e)
+    })
+  },
+}
+
+test('a poll that never returns does not block the polls of the timer that replaces it', { plugins: [hold] }, async ($, on) => {
+  const { clock, calls } = world(on)
+  await $.agent.spawn(spawnInput('first'))
+  await clock.advance(5000)
+  expect(calls.list).toBe(1)
+  await $.agent.spawn(spawnInput('second'))
+  await clock.advance(2000)
+  expect(calls.list).toBeGreaterThan(1)
 })
 
 test('the pane draws the header and a row, and /board status prints the text', async ($, on) => {

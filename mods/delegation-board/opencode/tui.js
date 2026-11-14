@@ -93,6 +93,7 @@ function bind(tick, node, draw) {
 var PANEL = "iuliandita.delegation-board";
 var MAX_ROWS = 40;
 var TITLE_MAX = 60;
+var AGENT_MAX = 12;
 function state(s, running) {
   if (running)
     return "running";
@@ -125,17 +126,18 @@ function rows(data, sessionID, now) {
     const created = toMs(s.time?.created);
     const stopped = toMs(s.time?.idle) ?? toMs(s.time?.updated);
     const end = running ? now : stopped;
-    out.push({
+    const row = {
       id,
       state: state(s, running),
-      agent: clean(s.agent ?? "agent", 12),
+      agent: clean(s.agent ?? "agent", AGENT_MAX),
       title: clean(s.title ?? "", TITLE_MAX),
       cost: s.cost ?? 0,
-      tokens: (s.tokens?.input ?? 0) + (s.tokens?.output ?? 0) + (s.tokens?.cache?.read ?? 0),
+      tokens: (s.tokens?.input ?? 0) + (s.tokens?.output ?? 0) + (s.tokens?.cache?.read ?? 0) + (s.tokens?.cache?.write ?? 0),
       ms: created === undefined || end === undefined ? 0 : end - created
-    });
+    };
+    out.push({ row, created: created ?? 0 });
   }
-  return out;
+  return out.sort((a, b) => a.created - b.created).map((x) => x.row);
 }
 var MARK = { running: "●", idle: "○", done: "✓", failed: "✗", stopped: "■" };
 function table(all) {
@@ -145,7 +147,7 @@ function table(all) {
   const running = all.filter((r) => r.state === "running").length;
   const hidden = all.length - list.length;
   const head = `delegation-board: ${all.length} subagent${all.length === 1 ? "" : "s"}, ${running} running, ${money(all.reduce((a, r) => a + r.cost, 0))}${hidden ? ` (${hidden} older not shown)` : ""}`;
-  const body = list.map((r) => `${MARK[r.state]} ${r.state.padEnd(7)} ${r.agent.padEnd(12)} ${duration(r.ms).padStart(6)} ${tokens(r.tokens).padStart(6)} ${money(r.cost).padStart(7)}  ${r.title}`);
+  const body = list.map((r) => `${MARK[r.state]} ${r.state.padEnd(7)} ${r.agent}${" ".repeat(Math.max(0, AGENT_MAX - [...r.agent].length))} ${duration(r.ms).padStart(6)} ${tokens(r.tokens).padStart(6)} ${money(r.cost).padStart(7)}  ${r.title}`);
   return [head, ...body].join(`
 `);
 }

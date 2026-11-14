@@ -90,7 +90,11 @@ async function poll($: Engine, s: Ctx): Promise<void> {
 // One timer while a row needs polling; one that stopped ticking is replaced.
 async function start($: Engine, s: Ctx): Promise<void> {
   const now = await nowMs($)
-  if (s.timer && (now - s.lastTick <= STALE_MS || !needsPoll(s.rows))) return
+  if (!needsPoll(s.rows)) return
+  const isStale = now - s.lastTick > STALE_MS
+  if (s.timer && !isStale) return
+  // A poll still marked as running after that long hung; the new timer's polls must not wait for it.
+  if (isStale) s.isPolling = false
   s.timer?.cancel()
   s.lastTick = now
   s.timer = $.clock.every(1000, () => void poll($, s).catch(() => {}))
@@ -205,7 +209,7 @@ export const register: Register = (on, options) => {
 
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
     try {
-      noteEffort(s.efforts, e.tool_use_id, (e as { effort?: unknown }).effort, await nowMs($))
+      noteEffort(s.efforts, e.tool_use_id, e.effort, await nowMs($))
     } catch {
       // fail open
     }
@@ -254,7 +258,9 @@ export const register: Register = (on, options) => {
       <Box flexDirection="column">
         {rows.length === 0 ? <Text dimColor>{EMPTY}</Text> : <Text>{header(rows)}</Text>}
         {lines(rows, cfg.prices, now, room).map((l) => (
-          <Text dimColor={l.isDone}>{l.text}</Text>
+          <Text dimColor={l.isDone} wrap="truncate-end">
+            {l.text}
+          </Text>
         ))}
         {rows.length === 0 ? null : <Text>{footer(rows, cfg.prices)}</Text>}
       </Box>

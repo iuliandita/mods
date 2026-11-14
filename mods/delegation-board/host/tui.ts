@@ -4,6 +4,7 @@ import { bind, clean, defaultMakeText, duration, money, ticker, toMs, tokens, ty
 const PANEL = 'iuliandita.delegation-board'
 const MAX_ROWS = 40
 const TITLE_MAX = 60
+const AGENT_MAX = 12
 
 type Ctx = {
   renderer: unknown
@@ -35,8 +36,9 @@ function below(data: Data, id: string, root: string): boolean {
   return false
 }
 
+// Oldest first, whatever order the host lists the family in: the table leaves out the oldest.
 export function rows(data: Data, sessionID: string, now: number): Row[] {
-  const out: Row[] = []
+  const out: { row: Row; created: number }[] = []
   for (const id of data.session.family(sessionID)) {
     if (id === sessionID || !below(data, id, sessionID)) continue
     const s = data.session.get(id)
@@ -45,17 +47,18 @@ export function rows(data: Data, sessionID: string, now: number): Row[] {
     const created = toMs(s.time?.created)
     const stopped = toMs(s.time?.idle) ?? toMs(s.time?.updated)
     const end = running ? now : stopped
-    out.push({
+    const row: Row = {
       id,
       state: state(s, running),
-      agent: clean(s.agent ?? 'agent', 12),
+      agent: clean(s.agent ?? 'agent', AGENT_MAX),
       title: clean(s.title ?? '', TITLE_MAX),
       cost: s.cost ?? 0,
-      tokens: (s.tokens?.input ?? 0) + (s.tokens?.output ?? 0) + (s.tokens?.cache?.read ?? 0),
+      tokens: (s.tokens?.input ?? 0) + (s.tokens?.output ?? 0) + (s.tokens?.cache?.read ?? 0) + (s.tokens?.cache?.write ?? 0),
       ms: created === undefined || end === undefined ? 0 : end - created,
-    })
+    }
+    out.push({ row, created: created ?? 0 })
   }
-  return out
+  return out.sort((a, b) => a.created - b.created).map((x) => x.row)
 }
 
 const MARK: Record<Row['state'], string> = { running: '●', idle: '○', done: '✓', failed: '✗', stopped: '■' }
@@ -66,7 +69,7 @@ export function table(all: readonly Row[]): string {
   const running = all.filter((r) => r.state === 'running').length
   const hidden = all.length - list.length
   const head = `delegation-board: ${all.length} subagent${all.length === 1 ? '' : 's'}, ${running} running, ${money(all.reduce((a, r) => a + r.cost, 0))}${hidden ? ` (${hidden} older not shown)` : ''}`
-  const body = list.map((r) => `${MARK[r.state]} ${r.state.padEnd(7)} ${r.agent.padEnd(12)} ${duration(r.ms).padStart(6)} ${tokens(r.tokens).padStart(6)} ${money(r.cost).padStart(7)}  ${r.title}`)
+  const body = list.map((r) => `${MARK[r.state]} ${r.state.padEnd(7)} ${r.agent}${' '.repeat(Math.max(0, AGENT_MAX - [...r.agent].length))} ${duration(r.ms).padStart(6)} ${tokens(r.tokens).padStart(6)} ${money(r.cost).padStart(7)}  ${r.title}`)
   return [head, ...body].join('\n')
 }
 
