@@ -417,7 +417,7 @@ const ELSEWHERE = '/u/.claude/projects/-elsewhere/sid.jsonl'
 const ok = (stdout: string, exitCode = 0, stderr = '', isStdoutTruncated = false) => ({ value: { exitCode, stdout, stderr, isStdoutTruncated, isStderrTruncated: false } }) as never
 
 // The engine beneath the mod: session figures, a git repo on develop, a kubeconfig with context lab, a session
-// style from /config, and a stand-in band of its own so stacking shows.
+// style from /config, and a stand-in band of its own, for what next(e) returns.
 function engine(on: On, ctl: Ctl = { kube: 'ok' }) {
   const clock = mock.clock(on, { now: NOW })
   const runs: string[][] = []
@@ -492,12 +492,13 @@ async function started($: Engine, clock: ReturnType<typeof mock.clock>) {
   await clock.advance(10)
 }
 
-test('mode on draws two rows and no blank row, under a rule on the terminal only; other bands stack above', async ($, on) => {
+test('mode on draws two rows and no blank row, under a rule on the terminal only; what next(e) returns is still drawn', async ($, on) => {
   const { clock } = engine(on)
   await started($, clock)
   for (const surface of ['terminal', 'desktop'] as const) {
     const { text, rows: all } = await mount($, surface)
-    expect(text.startsWith('engine')).toBe(true)
+    // Once, on either side of the rows: the engine decides where another plugin's band goes.
+    expect(text.split('engine')).toHaveLength(2)
     // Desktop draws its own edge above the band: no rule from the mod there.
     expect(all).toHaveLength(surface === 'terminal' ? 3 : 2)
     if (surface === 'terminal') expect(all[0]).toBe('─'.repeat(120))

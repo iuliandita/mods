@@ -665,8 +665,9 @@ export const register: Register = (on, options) => {
     const st = styleFor(s, e.surface)
     const rows = buildRows(st, view(s, now), cols, s.cfg.rows)
     if (!rows.length) return next(e)
-    // Other mods' bands stack above this one; the status line sits next to the prompt, under its rule on the
-    // terminal. Desktop draws its own edge above the band, so no rule there.
+    // The engine orders bands from different plugins: the mod does not control where its rows sit relative to
+    // them (on Claude Code 2.1.319 and earlier, other bands stacked above). The rule goes above the rows on the
+    // terminal; Desktop draws its own edge above the band, so no rule there.
     const below = await next(e)
     const { Box, Text } = $.ui.resolve(e)
     const text = (sp: Span, i: number) => (
