@@ -24,8 +24,8 @@ See [what it does not protect](#what-it-does-not-protect) for the limits on each
   If that check fails, checked text is withheld; a sent message is refused. Saved files remain
   best-effort and may stay unchanged. Hooks never request a plaintext export of stored values.
 
-Hooks only, no UI. Portability to other Claude surfaces is expected, but only terminal behavior
-is verified; Desktop, VS Code and headless behavior remain untested.
+Hooks only, no UI. The terminal, Desktop, VS Code and headless are all untested as surfaces: the
+Claude Code tests run against a mocked engine.
 Egress: none (no network, no model calls). The helper selects libsecret through `secret-tool`
 on Linux and Keychain through `/usr/bin/security` on macOS. Windows is unsupported.
 
@@ -69,8 +69,7 @@ This is not a security boundary. These limits apply in mode `on`; `off` and `dry
 
 ## Compatibility status
 
-- Claude Code: verified on 2.1.296 in the terminal.
-- Desktop, VS Code and headless: untested.
+- Claude Code terminal, Desktop, VS Code and headless: untested; no tracked record covers a real run.
 - Mode: `on` by default; available modes are `off`, `dry` and `on`.
 - Egress: none. Requirements: `python3`, `bash`, and either `secret-tool` on Linux or `security` on macOS.
 

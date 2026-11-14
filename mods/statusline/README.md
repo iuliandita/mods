@@ -1,6 +1,7 @@
 # statusline
 
-A two-row status line drawn in the band above the prompt, in the terminal and in Claude Desktop.
+A two-row status line drawn in the band above the prompt in the terminal. The Claude Desktop band
+is implemented and untested.
 It is a port of the author's own `statusLine` script into a mod: the same segments, symbols,
 palettes and width-dropping order, drawn by the engine instead of by a command. That script is not
 part of this repository; "the original script" below means it. In a git repository with a GitHub

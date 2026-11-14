@@ -26,7 +26,7 @@ case (`GIT`, found on a case-insensitive file system) is unparsed.
   `popd [-n] [+N|-N]`. A plain assignment, or `declare` without `-x`, reaches later calls only when the name was
   exported earlier in the command; otherwise both the new and the old value are possible.
 - Wrappers: `env` (including `-S`, `-u`, `-i`, `-C`; `-P`/`--path` is unparsed), `command`, `exec`, `sudo`, `doas`, `nice`, `ionice`,
-  `time`, `timeout`, `stdbuf`, `chronic`, `setsid`, `rtk`, with their value-taking options.
+  `time`, `timeout`, `stdbuf`, `chronic`, `setsid`, `rtk` (a command-prefix wrapper), with their value-taking options.
 - Inline scripts with a literal script: `bash -c`/`sh -c` (and zsh, dash, ksh), `eval`, `secret-box exec [--scrub] --`.
 - `$(...)`, backticks and process substitutions `<(...)`/`>(...)` are parsed as their own calls (nesting up to 4),
   and so are the substitutions in the body of an unquoted heredoc. A quoted heredoc runs no substitutions;

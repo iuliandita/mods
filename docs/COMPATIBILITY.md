@@ -9,14 +9,27 @@ Labels: **works** (the behavior described below was run on the real host), **unt
 **not possible** (the checked host API cannot provide it). Verification of one behavior does
 not verify every rule, mode or surface. Claude surface declarations remain in each `mod.json`.
 
-Versions checked: Claude Code 2.1.296 (`guard-rules`, `secret-box`) and 2.1.301
-(`delegation-board`, `statusline`), plus 2.1.312 for headless `guard-rules` parser permissions,
-Codex CLI 0.162.1, OpenCode 2.0.29.
+Run on a real host:
+
+- Claude Code 2.1.301: `delegation-board` 0.1.0 and `statusline` 0.2.7 in the terminal.
+- Claude Code 2.1.312: the headless `guard-rules` parser-permission decisions.
+- Codex CLI 0.162.1: `guard-rules` and `secret-box`.
+- OpenCode 2.0.29: `guard-rules`, `secret-box`, `statusline` and `delegation-board`.
+
+Checked against published types or schemas only, with no run in an authenticated session:
+
+- Codex CLI 0.166.0 hook schemas: the `notify` events.
+- OpenCode 2.2.1 (`@opencode/plugin`, `@opencode/schema` and `@opencode/ai` types): the
+  `secret-box` request hooks and the `notify` events.
+
+No tracked record covers a Claude Code terminal run of `guard-rules` or `secret-box`, or a
+real-host run of `notify`; their `mod.json` surfaces say `untested`. Each section below says what
+was run.
 
 | Mod | Claude Code | Codex | OpenCode |
 | --- | --- | --- | --- |
-| `guard-rules` | **works** (terminal verified) | **works** | **works** |
-| `secret-box` | **works** (terminal verified) | **works**, partly: placeholders and the command's own output, see below | **works** |
+| `guard-rules` | **works**: headless parser-permission decisions only; terminal **untested** | **works** | **works** |
+| `secret-box` | **untested**: tests with a mocked engine only | **works**, partly: placeholders and the command's own output, see below | **works**: placeholder commands on 2.0.29; the 2.2.1 request scrubbing is **untested** |
 | `delegation-board` | **works** (terminal verified) | **not possible**: hooks cannot draw anything | **works**: a panel of child sessions, opened with `/board` |
 | `statusline` | **works** (terminal verified) | **not possible**: the status line only takes built-in items | **works**, reduced: one line, no rate-limit bars |
 | `notify` | **untested**: hook tests with a mocked engine only | **untested**: finish and permission events, see below | **untested**: completion, permission and question events, see below |
@@ -31,7 +44,8 @@ On 2026-10-16, authenticated terminal sessions on Claude Code 2.1.301 checked:
 - `statusline` 0.2.7: the band drew alongside the board, with live model, context, rate-limit,
   cache, cost and elapsed-time figures after real turns.
 
-These were terminal smoke checks, not checks of every mode or segment. They did not verify
+These were terminal smoke checks of the plugin versions named, not checks of every mode or
+segment or of later versions. They did not verify
 board failure/wait states, optional pricing or statusline resume. Desktop, VS Code and headless remain
 unverified. Automated hook tests cover more branches with mocked engine interfaces; passing them
 alone does not change a surface's status. CI's fixed CLI version is independent of each mod's
@@ -43,7 +57,7 @@ recorded runtime verification version.
 | --- | --- | --- | --- |
 | Blocks a call | `tool.call` hook returns `deny` | `PreToolUse` hook returns `permissionDecision: deny` | `execute.before` hook throws |
 | Checked tool | `Bash` | `Bash` (shell and unified exec) | `shell` (and `bash`) |
-| Rules | attribution, protected branch, identity, context | the same | the same |
+| Rules | attribution, protected branch, identity, context, selfkill | the same | the same |
 | Options | plugin options | `~/.config/iuliandita-mods/guard-rules.json` | the same file |
 | Classify an environment | `/guard-context` | `node .../guard-rules.mjs context` in your terminal | the same bundle |
 | Dry mode | toast | `systemMessage` (not checked how Codex shows it) | written to the host log |
@@ -52,9 +66,10 @@ recorded runtime verification version.
 | Not checked | | text typed into a running terminal session (`write_stdin`); file tools other than `apply_patch`, `Edit`, `Write` | |
 | Own files fenced off | n/a | `apply_patch`, `Edit`, `Write`, shell text | every non-shell tool, shell text |
 
-What was run on the real hosts: a commit on `main` is blocked and the model sees the reason, and
-the same commit goes through once the repository is listed in `unprotectedRepos`. The other rules
-share the same code and its unit tests; they were not each run on Codex or OpenCode.
+What was run on Codex and OpenCode: a commit on `main` is blocked and the model sees the reason,
+and the same commit goes through once the repository is listed in `unprotectedRepos`. The other
+rules share the same code and its unit tests; they were not each run on Codex or OpenCode. No
+Claude Code terminal run is recorded.
 
 On Claude Code 2.1.312, an isolated `claude -p` driver checked `on`, `dry`, `off` and `ask` without
 a model request: `on` denied, `dry` and `off` ran the harmless command, and `ask` returned a classic
@@ -136,7 +151,8 @@ time immediately before writing and skips changed files. The engine API exposes 
 no-follow write or rename: same-metadata replacements and swaps after the check can still race
 the write. These checks have engine-mock coverage, not new real-host verification.
 
-What was run on the real hosts, with a throwaway file-backed store: on Codex 0.162.1 a placeholder
+No Claude Code run is recorded. What was run on Codex and OpenCode, with a throwaway file-backed
+store: on Codex 0.162.1 a placeholder
 command ran through the helper and printed the placeholder, not the value, and the sandbox still
 blocked a write in a read-only session after the hook answered `allow`; in the interactive UI an
 escalated command asked for approval with and without a placeholder, so `allow` does not skip it.
@@ -253,7 +269,9 @@ The Claude plugin's hooks directory stays the source of the shared logic, so a f
 ## Sources
 
 - Codex hooks: <https://learn.chatgpt.com/docs/hooks> and the hook schemas in
-  `codex-rs/hooks/schema/generated` of <https://github.com/openai/codex>.
+  `codex-rs/hooks/schema/generated` of <https://github.com/openai/codex> (those shipped in
+  Codex CLI 0.166.0 for the `notify` events).
 - Codex plugins: <https://learn.chatgpt.com/docs/plugins.md>.
-- OpenCode plugins: <https://opencode.ai/docs/plugins/> and the `@opencode/plugin` 2.0.29
-  type definitions.
+- OpenCode plugins: <https://opencode.ai/docs/plugins/>, the `@opencode/plugin` 2.0.29 type
+  definitions for the real-host runs, and the published `@opencode/plugin`, `@opencode/schema`
+  and `@opencode/ai` 2.2.1 types for the request hooks and the `notify` events.

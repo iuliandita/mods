@@ -170,13 +170,16 @@ options; `delegation-board` reads only `mode` from its file there, `statusline` 
 remove hook-plugin entries from `opencode.json` to uninstall those. Preserve the clone and
 user-level configuration when updating or rolling back a path-based install.
 
-On OpenCode 2.2.1, `secret-box` scrubs messages and system content for primary, compaction,
-generate and title requests, including user `!` shell output sent to a model. Stored history
+For OpenCode 2.2.1, `secret-box` scrubs messages and system content for primary, compaction,
+generate and title requests, including user `!` shell output sent to a model. This was checked
+against the published 2.2.1 types and adapter tests, not in an authenticated session. Stored history
 and output files are not rewritten; see the mod's [limits](mods/secret-box/README.md#what-it-does-not-protect).
 
-After a Codex install the hook command is
-`node <plugin>/bin/guard-rules.mjs`; the same file in a clone (`mods/guard-rules/codex/bin/`) is
-the command line tool for OpenCode users too.
+After a Codex install the hook runs `node "$PLUGIN_ROOT/bin/guard-rules.mjs" hook` inside a
+wrapper that turns any exit status other than 0 or 2 into exit 2, because Codex lets a hook that
+exits 1 through. The full command is in `mods/guard-rules/codex/hooks/hooks.json`; copy it from
+there, never the bare `node` call. The same `guard-rules.mjs` in a clone
+(`mods/guard-rules/codex/bin/`) is the command line tool for OpenCode users too.
 
 ## Retired mods
 
@@ -257,14 +260,8 @@ the Desktop Code tab, but a terminal install at user scope loads in Desktop sess
 
 ## Contributor checks
 
-```bash
-python3 -m pytest -q -m "not integration"
-bun test mods/*/host
-scripts/typecheck --hosts
-scripts/mods validate --no-claude
-scripts/mods generate --check
-python3 .github/stack/stack-check.py
-```
+The pre-push check list is in [CONTRIBUTING.md](CONTRIBUTING.md#checks-and-documentation); it
+matches `.github/workflows/ci.yml`.
 
 `generate` builds the Codex and OpenCode bundles with the Bun version in `.bun-version`
 and refuses another version, so the committed files are reproducible.
