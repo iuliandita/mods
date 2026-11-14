@@ -15,9 +15,12 @@ jobs:
   publish:
     name: publish
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # covers the 20-minute wait for CI in require-green-ci.sh
+    timeout-minutes: 30
     permissions:
       contents: write
+      # read the CI workflow runs of the tagged commit
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -38,6 +41,12 @@ jobs:
             echo "::error::$TAG ($GITHUB_SHA) is not on $branch"
             exit 1
           fi
+
+      - name: Require a green CI run for the tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: bash .github/scripts/require-green-ci.sh "$GITHUB_SHA"
 
       - name: Extract release notes from CHANGELOG.md
         env:
