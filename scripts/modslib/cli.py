@@ -7,7 +7,7 @@ from pathlib import Path
 
 from modslib import claude
 from modslib.catalog import CatalogError
-from modslib.checks import validate
+from modslib.checks import validate_report
 from modslib.generate import generate
 from modslib.install import doctor, exit_code, install_mods, list_mods, uninstall_mods
 
@@ -150,7 +150,8 @@ def _text_for(payload: dict) -> str:
             lines.append(f"codex {hook['mod']} {hook['event']}: {hook['status']}" + (" (disabled)" if not hook['enabled'] else ""))
         return "\n".join(lines)
     if payload.get("errors"):
-        return ""
+        done = payload.get("installed") or payload.get("uninstalled")
+        return f"completed before the failure: {', '.join(done)}" if done else ""
     if "installed" in payload or "uninstalled" in payload:
         return "\n".join(payload.get("installed") or payload.get("uninstalled") or []) or "nothing to do"
     if "mods" in payload:
@@ -180,21 +181,21 @@ def _bad_root(root: Path) -> str | None:
 def _run(args: argparse.Namespace) -> int:
     root = args.root.resolve()
     if args.cmd == "generate":
-        changed = [str(p.relative_to(root)) for p in generate(root, check=args.check, include_local=args.local)]
+        skipped: list[str] = []
+        changed = [str(p.relative_to(root)) for p in generate(root, check=args.check, include_local=args.local, skipped=skipped)]
         if args.check:
             _emit(args, {"ok": not changed,
                          "errors": [f"generated file is stale: {c}; run scripts/mods generate" for c in changed],
-                         "stale": changed},
+                         "stale": changed, **({"skipped": skipped} if skipped else {})},
                   "up to date" if not changed else "")
             return 1 if changed else 0
         _emit(args, {"ok": True, "errors": [], "written": changed},
               "wrote: " + (", ".join(changed) or "nothing"))
         return 0
     if args.cmd == "validate":
-        problems = validate(root, run_claude=not args.no_claude)
-        _emit(args, {"ok": not problems, "errors": problems, "problems": problems},
-              "ok" if not problems else "")
-        return 1 if problems else 0
+        code, payload = validate_report(root, run_claude=not args.no_claude)
+        _emit(args, payload, "ok" if payload["ok"] else "")
+        return code
     if args.cmd == "list":
         code, payload = list_mods(root, scope=args.scope)
     elif args.cmd == "install":

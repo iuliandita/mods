@@ -27,6 +27,8 @@ def test_missing_binary_raises(no_claude: None) -> None:
     ("func", "stdout"),
     [
         (claude.marketplace_entries, "not json"),
+        (claude.marketplace_entries, ""),
+        (claude.installed, "\n"),
         (claude.marketplace_entries, json.dumps([{"name": ["x"]}])),
         (claude.installed, json.dumps([{"id": 1}])),
         (claude.installed, json.dumps({"id": "demo@m"})),

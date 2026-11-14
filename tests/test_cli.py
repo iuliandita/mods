@@ -8,6 +8,7 @@ import pytest
 from conftest import calls, write_mod
 from modslib.cli import main
 from modslib.generate import generate
+from test_hosts import add_hosts
 
 
 def run(capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, str, str]:
@@ -218,3 +219,56 @@ def test_uninstall_prints_the_manual_steps_when_claude_is_missing(
     code, _, err = run(capsys, "--root", str(tmp_path), "uninstall", "prompt-gate")
     assert code == 0 and "note: prompt-gate: claude CLI not found" in err
     assert "manual: prompt-gate: codex" in err
+
+
+@pytest.mark.parametrize("argv", [["generate", "--check"], ["validate", "--no-claude"]])
+def test_a_skipped_bundle_check_is_reported_and_still_exits_0(
+    argv: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    add_hosts(write_mod(tmp_path, "alpha", hosts=["codex"]), "codex")
+    (tmp_path / ".bun-version").write_text("1.4.3\n")
+    generate(tmp_path, bundles=False)
+    monkeypatch.setattr("modslib.generate.shutil.which", lambda name: None)
+    monkeypatch.delenv("MODS_REQUIRE_BUN", raising=False)
+    code, out, _ = run(capsys, "--json", "--root", str(tmp_path), *argv)
+    payload = json.loads(out)
+    assert code == 0 and payload["ok"] is True and payload["errors"] == []
+    assert len(payload["skipped"]) == 1 and "host bundle check skipped" in payload["skipped"][0]
+    code, out, err = run(capsys, "--root", str(tmp_path), *argv)
+    assert code == 0 and out.strip() in ("up to date", "ok")
+    assert err.startswith("note: host bundle check skipped")
+
+
+def test_validate_json_keeps_the_problems_key_when_claude_is_missing(
+    no_claude: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_mod(tmp_path, "alpha")
+    generate(tmp_path)
+    code, out, _ = run(capsys, "--json", "--root", str(tmp_path), "validate")
+    payload = json.loads(out)
+    assert code == 3 and set(payload) == {"ok", "errors", "problems"}
+    assert len(payload["problems"]) == 1 and "claude CLI not found" in payload["problems"][0]
+    (tmp_path / "mods.json").write_text("{}\n")
+    code, out, _ = run(capsys, "--json", "--root", str(tmp_path), "validate")
+    payload = json.loads(out)
+    assert code == 1 and len(payload["problems"]) == 2 and "stale" in payload["problems"][0]
+
+
+@pytest.mark.parametrize("command", ["install", "uninstall"])
+def test_human_partial_failure_names_what_completed(
+    command: str, fake_claude: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    write_mod(tmp_path, "alpha")
+    write_mod(tmp_path, "beta")
+    generate(tmp_path)
+
+    def fake(plugin_id: str, scope: str) -> dict:
+        if plugin_id.startswith("beta"):
+            return {"outcome": "failed", "message": "locked"}
+        return {"outcome": "ok", "message": "ok"}
+
+    monkeypatch.setattr(f"modslib.claude.{command}", fake)
+    code, out, err = run(capsys, "--root", str(tmp_path), command, "alpha", "beta")
+    assert code == 1 and out == "completed before the failure: alpha@iuliandita-mods\n"
+    assert err == "error: beta: locked\n"

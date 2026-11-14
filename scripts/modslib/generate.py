@@ -222,8 +222,11 @@ def extra_copies(root: Path, *, include_local: bool) -> list[Path]:
 
 # Host bundles need the pinned bun. Writing them always does; checking them does only when
 # MODS_REQUIRE_BUN=1 (CI), so a machine without that bun can still install and validate, and
-# `bundles=False` leaves them out entirely.
-def generate(root: Path, *, check: bool = False, include_local: bool = False, bundles: bool = True) -> list[Path]:
+# `bundles=False` leaves them out entirely. A check that skips them says so in `skipped`.
+def generate(
+    root: Path, *, check: bool = False, include_local: bool = False, bundles: bool = True,
+    skipped: list[str] | None = None,
+) -> list[Path]:
     required = not check or os.environ.get("MODS_REQUIRE_BUN") == "1"
     with_bundles = bundles and any(m.hosts for m in load_all(root, include_local=include_local))
     if with_bundles:
@@ -231,6 +234,8 @@ def generate(root: Path, *, check: bool = False, include_local: bool = False, bu
         if problem and required:
             raise (ToolMissing if problem[1] else CatalogError)(problem[0])
         with_bundles = problem is None
+        if problem and skipped is not None:
+            skipped.append(f"host bundle check skipped: {problem[0]}; set MODS_REQUIRE_BUN=1 to make this a failure")
     changed: list[Path] = []
     extras = extra_copies(root, include_local=include_local)
     foreign = [p for p in extras if not p.read_text().startswith(HEADER_PREFIX)]

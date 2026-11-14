@@ -50,11 +50,11 @@ def _not_installed(result: dict) -> bool:
     return result.get("failureCode") == "not_installed" or "not installed" in message
 
 
-def _claude_status() -> dict:
+def _claude_status() -> tuple[dict, claude.ClaudeError | None]:
     try:
-        return {"found": True, "version": claude.version()}
-    except claude.ClaudeError:
-        return {"found": False, "version": None}
+        return {"found": True, "version": claude.version()}, None
+    except claude.ClaudeError as exc:
+        return {"found": False, "version": None}, exc
 
 
 def install_mods(
@@ -146,7 +146,7 @@ def uninstall_mods(root: Path, names: list[str], *, scope: str) -> tuple[int, di
 
 
 def list_mods(root: Path, *, scope: str | None = None) -> tuple[int, dict]:
-    found = _claude_status()
+    found, _ = _claude_status()
     try:
         mods = load_all(root, include_local=True)
     except CatalogError as exc:
@@ -193,8 +193,8 @@ def list_mods(root: Path, *, scope: str | None = None) -> tuple[int, dict]:
 
 
 def doctor(root: Path) -> tuple[int, dict]:
-    found = _claude_status()
-    errors = [] if found["found"] else ["claude CLI not found: it is missing or did not run; install Claude Code and retry"]
+    found, failure = _claude_status()
+    errors = [str(failure)] if failure else []
     try:
         mods = load_all(root, include_local=True)
     except CatalogError as exc:
@@ -208,15 +208,15 @@ def doctor(root: Path) -> tuple[int, dict]:
         for m in mods
     ]
     codex_hooks: list[dict] = []
-    trust_failed = False
+    guards = {m.name for m in mods if m.kind == "guard" and "codex" in m.hosts and not m.is_local}
     try:
-        codex_hooks, trust_errors = hook_trust(root)
+        codex_hooks, trust_errors = hook_trust(root, guards)
         errors += trust_errors
-        trust_failed = bool(trust_errors)
     except CatalogError as exc:
         errors.append(str(exc))
-        trust_failed = True
-    return (0 if not errors else (3 if not found["found"] and not trust_failed else 1)), {
+    # 3 only when the missing claude CLI is the sole error
+    missing = isinstance(failure, claude.ClaudeMissing) and len(errors) == 1
+    return (0 if not errors else (3 if missing else 1)), {
         "ok": not errors,
         "errors": errors,
         "claude": found,
