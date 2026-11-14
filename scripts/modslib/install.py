@@ -8,7 +8,7 @@ from modslib import claude
 from modslib.codex import RETRUST, hook_trust
 from modslib.catalog import CatalogError, Mod, ToolMissing, load_all, load_mods
 from modslib.generate import (
-    GITHUB_SOURCE,
+    CLAUDE_STABLE_SOURCE,
     LOCAL_MARKETPLACE_NAME,
     MARKETPLACE_NAME,
     generate,
@@ -79,11 +79,15 @@ def install_mods(
             return _fail("generated files are stale: they differ from the sources; run scripts/mods generate")
         if include_local:
             generate(root, include_local=True, bundles=False)
+        markets = {
+            _marketplace(m): str(root / "local") if m.is_local else (source or str(root))
+            for m in (mods[name] for name in names)
+        }
+        for market, where in markets.items():
+            claude.ensure_marketplace(market, where)
         for name in names:
             mod = mods[name]
             market = _marketplace(mod)
-            where = str(root / "local") if mod.is_local else (source or str(root))
-            claude.ensure_marketplace(market, where)
             result = claude.install(f"{name}@{market}", scope)
             if result.get("outcome") != "ok":
                 return _fail(f"{name}: {result.get('message', 'install failed')}", done=done, manual=manual)
@@ -219,5 +223,5 @@ def doctor(root: Path) -> tuple[int, dict]:
         "mods": rows,
         "codex_hooks": codex_hooks,
         "notes": list(NOTES),
-        "source": GITHUB_SOURCE,
+        "source": CLAUDE_STABLE_SOURCE,
     }

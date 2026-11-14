@@ -29,6 +29,31 @@ def test_install_adds_marketplace_then_each_mod(fake_claude: Path, tmp_path: Pat
     assert "plugin install alpha@iuliandita-mods --scope user --json" in log
 
 
+def test_install_with_a_source_adds_the_marketplace_once(fake_claude: Path, tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    code, payload = install_mods(
+        root, ["alpha", "beta"], scope="user", include_local=False, source="owner/repo#main"
+    )
+    assert code == 0 and payload["installed"] == ["alpha@iuliandita-mods", "beta@iuliandita-mods"]
+    log = calls(fake_claude)
+    assert [c for c in log if c.startswith("plugin marketplace add")] == [
+        "plugin marketplace add owner/repo#main"
+    ]
+    assert log.index("plugin marketplace add owner/repo#main") < log.index(
+        "plugin install alpha@iuliandita-mods --scope user --json"
+    )
+
+
+def test_doctor_and_the_catalog_report_the_pinned_stable_source(tmp_path: Path, monkeypatch) -> None:
+    root = _repo(tmp_path)
+    monkeypatch.setattr("modslib.install.claude.version", lambda: "1.0.0")
+    _, payload = doctor(root)
+    assert payload["source"] == "iuliandita/mods#main"
+    catalog = json.loads((root / "mods.json").read_text())
+    assert catalog["source"] == "iuliandita/mods"
+    assert catalog["stable_source"] == "iuliandita/mods#main"
+
+
 def test_unknown_name_lists_known_ones(fake_claude: Path, tmp_path: Path) -> None:
     root = _repo(tmp_path)
     code, payload = install_mods(root, ["nope"], scope="user", include_local=False, source=None)
