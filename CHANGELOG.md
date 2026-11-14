@@ -2,6 +2,37 @@
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-11-14
+
+Fixes from a full review of the repository, including an independent review. Every plugin has a patch release in its Claude Code, Codex, and OpenCode manifests: `guard-rules` 1.1.1, `notify` 1.0.2, `secret-box` 1.0.1, `statusline` 1.0.1, `delegation-board` 1.0.1.
+
+Codex users: the hook content of every plugin changed, so trust the hooks again in `/hooks` after the update. `scripts/mods doctor` reports hooks that are still untrusted.
+
+### Changed
+
+- `guard-rules` and `secret-box` no longer claim a verified Claude Code terminal run: no tracked record covers one, so their terminal surface in `mods.json` goes from `verified` to `untested` and `verified_on` is unset. `statusline` and `delegation-board` describe their Claude Desktop band as implemented and untested. `docs/COMPATIBILITY.md` separates what was run on a real host from what was checked against published types (#205).
+- `guard-rules` and `secret-box` deny messages no longer suggest turning a rule or the mod off (#197, #198).
+- `scripts/mods` follows its documented exit codes (1 failed, 2 usage, 3 required tool missing), and `validate` and `generate --check` report a host bundle check they could not run in a `skipped` key instead of passing silently. `doctor` reports the install `source` with its ref (`iuliandita/mods#main`) and `mods.json` gains `stable_source` (#180, #202).
+- The plugin version gate compares against the highest `vX.Y.Z` tag in the repository, not the latest tag reachable from the branch (#196).
+- `statusline` no longer promises that other mods' bands stack above it: from Claude Code 2.1.325 the engine orders the bands (#213).
+- The worktree badge in `statusline` needs git 2.31 or newer.
+
+### Fixed
+
+- `guard-rules` parses command shapes that got past the lexer: backslash escapes, `${...}` expansions, directory changes earlier in a command, `--branches` pushes and git aliases. Command names spelled `=git` or in another case are treated as unparsed. 49 corpus rows cover the cases (#197).
+- `secret-box exec --scrub` filters every value it injected, including ones resolved from another placeholder; if the values cannot be read to build the filter, `exec` exits 5 and nothing runs. More placeholder forms are recognized (#198).
+- `notify` notifies in top-level T3 Code threads again (only delegated tasks count as child sessions), stops after a notifier timeout, and escapes markup in the notification body on Linux (#199).
+- `statusline` follows the repository when the session changes directory, keeps its caches per repository, and reads stored options (#200).
+- `delegation-board` truncates pane rows to the pane width and clears settled rows (#201).
+- On Codex and OpenCode, a failed options read, a throwing first draw or a lookup child that ignores SIGTERM no longer breaks the host's render or keeps a caller waiting past its timeout (#203).
+- `scripts/mods install` and `doctor` compare the ref when checking an existing marketplace source, so a clone following `develop` is no longer taken for the stable install (#180).
+
+### CI and tooling
+
+- The release workflow waits up to 20 minutes for a successful CI run on the tagged commit and fails without one. Dev requirements are a hashed lock installed with `--require-hashes`, the typecheck tools install from a lockfile, and pushes to `develop` and `main` no longer cancel each other's runs (#204).
+- Removed the unused `shared` and `inject` keys from the generator; a `mod.json` that still carries one fails as an unknown field (#176).
+- Dependency updates: GitHub Actions, pytest 9.2.0, markdownlint-cli2 0.24.0, the pinned Claude Code CLI 2.1.319.
+
 ## [1.1.1] - 2026-11-06
 
 Only `notify` changed, from 1.0.0 to 1.0.1 in its Claude Code, Codex, and OpenCode manifests. Codex users: trust the `notify` hook again in `/hooks` after the update.
@@ -252,7 +283,10 @@ First collection prerelease. Individual plugin versions remain independent of th
   timer afterwards; `delegation-board` resets on `/clear` and prints a text table when its pane
   is not placed (Claude Desktop).
 
-[Unreleased]: https://github.com/iuliandita/mods/compare/v1.0.1...develop
+[Unreleased]: https://github.com/iuliandita/mods/compare/v1.1.2...develop
+[1.1.2]: https://github.com/iuliandita/mods/compare/v1.1.1...v1.1.2
+[1.1.1]: https://github.com/iuliandita/mods/compare/v1.1.0...v1.1.1
+[1.1.0]: https://github.com/iuliandita/mods/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/iuliandita/mods/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/iuliandita/mods/compare/v0.3.3...v1.0.0
 [0.3.3]: https://github.com/iuliandita/mods/compare/v0.3.2...v0.3.3
