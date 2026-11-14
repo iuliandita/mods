@@ -1,4 +1,4 @@
-import { bind, clean, defaultMakeText, duration, money, ticker, toMs, tokens, type Data, type MakeText } from '../../../host-lib/tui'
+import { bind, clean, defaultMakeText, duration, firstDraw, money, ticker, toMs, tokens, type Data, type MakeText } from '../../../host-lib/tui'
 
 type Ctx = {
   renderer: unknown
@@ -27,7 +27,7 @@ export function line(ctx: Ctx, sessionID: string, now: number): string {
     const ctxTokens = (s.tokens?.input ?? 0) + (s.tokens?.cache?.read ?? 0)
     if (ctxTokens > 0) parts.push(`ctx ${tokens(ctxTokens)}`)
     parts.push(money(s.cost ?? 0))
-    const created = toMs(s.time.created)
+    const created = toMs(s.time?.created)
     if (created !== undefined) parts.push(duration(now - created))
   }
   if (ctx.data.session.status(sessionID) === 'running') parts.push('●')
@@ -42,7 +42,7 @@ export async function setup(ctx: Ctx, makeText?: MakeText): Promise<() => void> 
     append: 'session.composer.top',
     render: (input) => {
       const draw = (): string => line(ctx, input.sessionID, Date.now())
-      const node = make(draw())
+      const node = make(firstDraw(draw))
       void ctx.data.session.sync(input.sessionID).catch(() => {})
       bind(tick, node, draw)
       return node

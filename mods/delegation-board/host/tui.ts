@@ -1,5 +1,5 @@
 import { loadOptions } from '../../../host-lib/options'
-import { bind, clean, defaultMakeText, duration, money, ticker, toMs, tokens, type Data, type MakeText, type SessionInfo } from '../../../host-lib/tui'
+import { bind, clean, defaultMakeText, duration, firstDraw, money, ticker, toMs, tokens, type Data, type MakeText, type SessionInfo } from '../../../host-lib/tui'
 
 const PANEL = 'iuliandita.delegation-board'
 const MAX_ROWS = 40
@@ -105,7 +105,7 @@ export async function setup(ctx: Ctx, makeText?: MakeText, optionsFile?: string)
       // Read each time the panel opens, so editing the file needs no restart.
       if (isOff(optionsFile)) return make(OFF_TEXT)
       const draw = (): string => table(rows(ctx.data, input.sessionID, Date.now()))
-      const node = make(draw())
+      const node = make(firstDraw(draw))
       void ctx.data.session.sync(input.sessionID).catch(() => {})
       bind(tick, node, draw)
       return node

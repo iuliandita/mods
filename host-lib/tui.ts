@@ -69,16 +69,24 @@ export const clean = (s: string, max: number): string =>
   [...[...s].map((ch) => (isControl(ch.codePointAt(0) ?? 0) ? ' ' : ch)).join('').replace(/ +/g, ' ').trim()].slice(0, max).join('')
 
 const MAX_JOBS = 32
+const MAX_FAILURES = 3
 
-// Redraws nodes on a timer. A job returns false when its node is gone, and is then dropped; one that throws is logged
-// once and dropped; past MAX_JOBS the oldest goes. The returned stop function ends the timer.
+// Redraws nodes on a timer. A job returns false when its node is gone, and is then dropped; one that throws
+// MAX_FAILURES times in a row is logged once and dropped; past MAX_JOBS the oldest goes. The returned stop function
+// ends the timer.
 export function ticker(everyMs: number): { add(redraw: () => boolean | void): () => void; stop(): void } {
-  const jobs = new Set<() => boolean | void>()
+  const jobs = new Map<() => boolean | void, number>()
   const timer = setInterval(() => {
-    for (const job of [...jobs]) {
+    for (const [job, failures] of [...jobs]) {
       try {
         if (job() === false) jobs.delete(job)
+        else if (failures > 0 && jobs.has(job)) jobs.set(job, 0)
       } catch (e) {
+        if (!jobs.has(job)) continue
+        if (failures + 1 < MAX_FAILURES) {
+          jobs.set(job, failures + 1)
+          continue
+        }
         console.error(`terminal plugin: a redraw failed and was stopped (${e instanceof Error ? e.message : String(e)})`)
         jobs.delete(job)
       }
@@ -87,11 +95,21 @@ export function ticker(everyMs: number): { add(redraw: () => boolean | void): ()
   timer.unref?.()
   return {
     add: (job) => {
-      jobs.add(job)
-      if (jobs.size > MAX_JOBS) jobs.delete(jobs.values().next().value as () => boolean | void)
+      jobs.set(job, 0)
+      if (jobs.size > MAX_JOBS) jobs.delete(jobs.keys().next().value as () => boolean | void)
       return () => void jobs.delete(job)
     },
     stop: () => clearInterval(timer),
+  }
+}
+
+// The text for a new node. It is drawn inside the host's render, so a draw that throws gives an empty node, which
+// the ticker then redraws.
+export function firstDraw(draw: () => string): string {
+  try {
+    return draw()
+  } catch {
+    return ''
   }
 }
 
