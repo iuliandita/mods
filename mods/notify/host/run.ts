@@ -1,12 +1,12 @@
 import { execFile } from 'node:child_process'
-import { closeSync, existsSync, openSync, readSync } from 'node:fs'
+import { closeSync, constants, existsSync, fstatSync, openSync, readSync } from 'node:fs'
 import { homedir } from 'node:os'
 
 import { loadOptions } from '../../../host-lib/options'
 import { parseConfig, type Config, type Fs, type Runner } from '../claude/hooks/notify'
 
 // Starts the notifier without a shell and waits for it. A program that is not there rejects (ENOENT); one that
-// runs and fails resolves with its exit code.
+// runs and fails resolves with its exit code, and one stopped at the timeout with `timedOut`.
 const runner = (timeout: number, killSignal: NodeJS.Signals = 'SIGTERM'): Runner => (argv) =>
   new Promise((resolve, reject) => {
     execFile(argv[0] as string, argv.slice(1), { timeout, killSignal, windowsHide: true }, (error) => {
@@ -14,7 +14,7 @@ const runner = (timeout: number, killSignal: NodeJS.Signals = 'SIGTERM'): Runner
       const code = (error as NodeJS.ErrnoException).code
       if (typeof code === 'number') return resolve({ exitCode: code })
       if (code === 'ENOENT') return reject(error)
-      resolve({ exitCode: 1 })
+      resolve(error.killed ? { exitCode: 1, timedOut: true } : { exitCode: 1 })
     })
   })
 
@@ -33,12 +33,14 @@ export function readConfig(path?: string): { config: Config; warning?: string } 
 }
 
 // Plain bounded reads for the repo and branch lookup: a HEAD file is tiny, so 4 KiB is plenty. Anything that
-// cannot be read (a folder, a missing file, no permission) is null.
+// cannot be read (a folder, a named pipe, a missing file, no permission) is null. The open does not block: the
+// path comes from the repository.
 export const nodeFs: Fs = {
   async read(path) {
     let fd: number | null = null
     try {
-      fd = openSync(path, 'r')
+      fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK)
+      if (!fstatSync(fd).isFile()) return null
       const buf = Buffer.alloc(4096)
       return buf.toString('utf8', 0, readSync(fd, buf, 0, buf.length, 0))
     } catch {

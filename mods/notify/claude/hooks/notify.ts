@@ -52,11 +52,14 @@ function normalize(path: string): string {
   return '/' + out.join('/')
 }
 
+// Characters git refuses in a ref name; a HEAD file written by hand can still hold them.
+const NOT_REF = /[\p{Cc}\p{Cf}\s~^:?*[\\]/gu
+
 // The branch from the text of a HEAD file: a branch name, the first 7 characters of a detached commit, or null.
 export function branchFromHead(text: string | null): string | null {
   const head = (text ?? '').trim()
   const ref = /^ref:\s*refs\/heads\/(.+)$/.exec(head)
-  if (ref) return clean(ref[1] as string, 60) || null
+  if (ref) return clean((ref[1] as string).replace(NOT_REF, ''), 60) || null
   return /^[0-9a-f]{40}([0-9a-f]{24})?$/i.test(head) ? head.slice(0, 7) : null
 }
 
@@ -128,7 +131,7 @@ export function finishReason(message: unknown, enabled = true): string {
 
 export type Env = Readonly<Record<string, string | undefined>>
 export const optedOut = (env: Env): boolean => env.IULIANDITA_MODS_NOTIFY === 'off'
-export const claudeChild = (env: Env): boolean => optedOut(env) || env.T3CODE_THREAD_ID?.startsWith('thread:') === true || env.CLAUDE_CODE_ENTRYPOINT === 'sdk-cli'
+export const claudeChild = (env: Env): boolean => optedOut(env) || env.T3CODE_THREAD_ID?.startsWith('thread:delegated-task:') === true || env.CLAUDE_CODE_ENTRYPOINT === 'sdk-cli'
 
 // Claude Code: the Stop hook, and the Notification hook by its type. Other types (a finished login, say) and
 // the message text itself are not shown: a message can name a command.
@@ -157,12 +160,15 @@ export function opencodeNotice(type: string, cwd: unknown): Pending | null {
 
 export const wanted = <T extends { kind: Kind }>(cfg: Config, n: T | null): n is T => n !== null && cfg.mode === 'on' && cfg.events.has(n.kind)
 
+// notify-send bodies are markup on most servers, and the branch in them is text a repository chooses.
+const escapeMarkup = (s: string): string => s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+
 const quoteAppleScript = (s: string): string => `"${s.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`
 
 // The command for a platform (`process.platform` names), or null when there is none. The text goes in as
 // arguments or quoted string literals, never through a shell.
 export function notifierArgv(platform: string, n: Notice, sound: boolean): string[] | null {
-  if (platform === 'linux') return ['env', '-u', 'LD_LIBRARY_PATH', '-u', 'LD_PRELOAD', 'notify-send', '--app-name=mods', ...(sound ? ['--hint=string:sound-name:message-new-instant'] : []), '--', clean(n.title, 60), n.body]
+  if (platform === 'linux') return ['env', '-u', 'LD_LIBRARY_PATH', '-u', 'LD_PRELOAD', 'notify-send', '--app-name=mods', ...(sound ? ['--hint=string:sound-name:message-new-instant'] : []), '--', clean(n.title, 60), escapeMarkup(n.body)]
   if (platform === 'darwin') {
     const script = `display notification ${quoteAppleScript(n.body)} with title ${quoteAppleScript(clean(n.title, 60))}${sound ? ' sound name "Glass"' : ''}`
     return ['osascript', '-e', script]
@@ -170,10 +176,11 @@ export function notifierArgv(platform: string, n: Notice, sound: boolean): strin
   return null
 }
 
-// A runner starts a command and resolves with its exit code; it rejects when the program cannot be started.
-export type Runner = (argv: string[]) => Promise<{ exitCode: number }>
+// A runner starts a command and resolves with its exit code, or with `timedOut` when it was stopped at its time
+// limit; it rejects when the program cannot be started.
+export type Runner = (argv: string[]) => Promise<{ exitCode: number; timedOut?: boolean }>
 
-export type Delivery = { ok: true } | { ok: false; warning: string }
+export type Delivery = { ok: true } | { ok: false; warning: string; timedOut?: true }
 
 const NOT_FOUND = /ENOENT|not found|no such file/i
 
@@ -185,7 +192,8 @@ export async function deliver(run: Runner, platform: string, n: Notice, sound: b
   const bin = platform === 'linux' ? 'notify-send' : argv[0] as string
   const notFound = `notify: warning: ${bin} not found: no notification was shown; install it or set mode to off`
   try {
-    const { exitCode } = await run(argv)
+    const { exitCode, timedOut } = await run(argv)
+    if (timedOut) return { ok: false, timedOut: true, warning: `notify: warning: ${bin} timed out: no notification was shown; check the desktop notification service` }
     if (platform === 'linux' && exitCode === 127) return { ok: false, warning: notFound }
     return exitCode === 0 ? { ok: true } : { ok: false, warning: `notify: warning: ${bin} failed: it exited ${exitCode}; check the desktop notification service` }
   } catch (e) {

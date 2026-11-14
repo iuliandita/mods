@@ -3,8 +3,9 @@ import type { EngineInterface as Engine, Register } from 'claude-code'
 import { claudeChild, deliver, parseConfig, platformFromUname, wanted, withContext, claudeNotice, type Config, type Fs, type Pending } from './notify'
 
 const TIMEOUT_MS = 5_000
+const TIMEOUT_SLACK_MS = 250
 
-type State = { platform: string | null; warned: boolean; question: string | null }
+type State = { platform: string | null; warned: boolean; question: string | null; stalled: boolean }
 
 async function skipped($: Engine): Promise<boolean> {
   return claudeChild({
@@ -55,9 +56,32 @@ async function homeOf($: Engine): Promise<string | null> {
   }
 }
 
+async function nowMs($: Engine): Promise<number> {
+  try {
+    return await $.clock.now()
+  } catch {
+    return Date.now()
+  }
+}
+
+// The engine rejects the same way for a command that cannot start and for one it stopped at the timeout; only
+// the second takes the whole timeout.
+async function run($: Engine, argv: string[]): Promise<{ exitCode: number; timedOut?: boolean }> {
+  const began = await nowMs($)
+  try {
+    return await $.process.run(argv, { timeoutMs: TIMEOUT_MS })
+  } catch (e) {
+    if (await nowMs($) - began >= TIMEOUT_MS - TIMEOUT_SLACK_MS) return { exitCode: 1, timedOut: true }
+    throw e
+  }
+}
+
 async function show($: Engine, s: State, cfg: Config, pending: Pending): Promise<void> {
+  // A notifier that hung once would hold every later hook for the full timeout.
+  if (s.stalled) return
   const notice = await withContext(pending, await homeOf($), engineFs($))
-  const result = await deliver((argv) => $.process.run(argv, { timeoutMs: TIMEOUT_MS }), await platformOf($, s), notice, cfg.sound)
+  const result = await deliver((argv) => run($, argv), await platformOf($, s), notice, cfg.sound)
+  if (!result.ok && result.timedOut) s.stalled = true
   if (result.ok || s.warned) return
   s.warned = true
   try {
@@ -71,7 +95,7 @@ export const register: Register = (on, options) => {
   const cfg = parseConfig(options)
   // off: no hook, no process.
   if (cfg.mode === 'off') return
-  const s: State = { platform: null, warned: false, question: null }
+  const s: State = { platform: null, warned: false, question: null, stalled: false }
 
   on('classic.Stop', async ($, e, next) => {
     const result = await next(e)

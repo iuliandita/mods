@@ -29,11 +29,12 @@ function normalize(path) {
   }
   return "/" + out.join("/");
 }
+var NOT_REF = /[\p{Cc}\p{Cf}\s~^:?*[\\]/gu;
 function branchFromHead(text) {
   const head = (text ?? "").trim();
   const ref = /^ref:\s*refs\/heads\/(.+)$/.exec(head);
   if (ref)
-    return clean(ref[1], 60) || null;
+    return clean(ref[1].replace(NOT_REF, ""), 60) || null;
   return /^[0-9a-f]{40}([0-9a-f]{24})?$/i.test(head) ? head.slice(0, 7) : null;
 }
 async function branchOf(fs, dir) {
@@ -109,10 +110,11 @@ function codexNotice(input, state = true) {
   return null;
 }
 var wanted = (cfg, n) => n !== null && cfg.mode === "on" && cfg.events.has(n.kind);
+var escapeMarkup = (s) => s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 var quoteAppleScript = (s) => `"${s.replaceAll("\\", "\\\\").replaceAll('"', "\\\"")}"`;
 function notifierArgv(platform, n, sound) {
   if (platform === "linux")
-    return ["env", "-u", "LD_LIBRARY_PATH", "-u", "LD_PRELOAD", "notify-send", "--app-name=mods", ...sound ? ["--hint=string:sound-name:message-new-instant"] : [], "--", clean(n.title, 60), n.body];
+    return ["env", "-u", "LD_LIBRARY_PATH", "-u", "LD_PRELOAD", "notify-send", "--app-name=mods", ...sound ? ["--hint=string:sound-name:message-new-instant"] : [], "--", clean(n.title, 60), escapeMarkup(n.body)];
   if (platform === "darwin") {
     const script = `display notification ${quoteAppleScript(n.body)} with title ${quoteAppleScript(clean(n.title, 60))}${sound ? ' sound name "Glass"' : ""}`;
     return ["osascript", "-e", script];
@@ -127,7 +129,9 @@ async function deliver(run, platform, n, sound) {
   const bin = platform === "linux" ? "notify-send" : argv[0];
   const notFound = `notify: warning: ${bin} not found: no notification was shown; install it or set mode to off`;
   try {
-    const { exitCode } = await run(argv);
+    const { exitCode, timedOut } = await run(argv);
+    if (timedOut)
+      return { ok: false, timedOut: true, warning: `notify: warning: ${bin} timed out: no notification was shown; check the desktop notification service` };
     if (platform === "linux" && exitCode === 127)
       return { ok: false, warning: notFound };
     return exitCode === 0 ? { ok: true } : { ok: false, warning: `notify: warning: ${bin} failed: it exited ${exitCode}; check the desktop notification service` };
@@ -138,7 +142,7 @@ async function deliver(run, platform, n, sound) {
 
 // mods/notify/host/run.ts
 import { execFile } from "node:child_process";
-import { closeSync, existsSync, openSync, readSync } from "node:fs";
+import { closeSync, constants, existsSync, fstatSync, openSync, readSync } from "node:fs";
 import { homedir } from "node:os";
 
 // host-lib/options.ts
@@ -177,7 +181,7 @@ var runner = (timeout, killSignal = "SIGTERM") => (argv) => new Promise((resolve
       return resolve({ exitCode: code });
     if (code === "ENOENT")
       return reject(error);
-    resolve({ exitCode: 1 });
+    resolve(error.killed ? { exitCode: 1, timedOut: true } : { exitCode: 1 });
   });
 });
 var nodeRunner = runner(5000);
@@ -193,7 +197,9 @@ var nodeFs = {
   async read(path) {
     let fd = null;
     try {
-      fd = openSync(path, "r");
+      fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+      if (!fstatSync(fd).isFile())
+        return null;
       const buf = Buffer.alloc(4096);
       return buf.toString("utf8", 0, readSync(fd, buf, 0, buf.length, 0));
     } catch {
@@ -216,15 +222,15 @@ var home2 = () => {
 };
 
 // mods/notify/host/session.ts
-import { closeSync as closeSync2, constants, existsSync as existsSync2, fstatSync, openSync as openSync2, readSync as readSync2 } from "node:fs";
+import { closeSync as closeSync2, constants as constants2, existsSync as existsSync2, fstatSync as fstatSync2, openSync as openSync2, readSync as readSync2 } from "node:fs";
 import { join as join2 } from "node:path";
 function codexChild(path) {
   if (typeof path !== "string")
     return false;
   let fd;
   try {
-    fd = openSync2(path, constants.O_RDONLY | constants.O_NONBLOCK);
-    if (!fstatSync(fd).isFile())
+    fd = openSync2(path, constants2.O_RDONLY | constants2.O_NONBLOCK);
+    if (!fstatSync2(fd).isFile())
       return false;
     const chunk = Buffer.alloc(4096);
     let text = "";

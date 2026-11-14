@@ -102,7 +102,7 @@ test('codex Stop is synchronous, PermissionRequest stays background, and both en
     expect(performance.now() - begin).toBeLessThan(1_500)
     expect(readFileSync(started, 'utf8')).toBe('started')
     expect(seen.err).toHaveLength(1)
-    expect(seen.err[0]).toContain('notify-send failed')
+    expect(seen.err[0]).toContain('notify-send timed out')
   }
 })
 
@@ -166,6 +166,29 @@ test('the node runner resolves an exit code and rejects only when the program is
   expect(await nodeRunner(['true'])).toEqual({ exitCode: 0 })
   expect(await nodeRunner(['false'])).toEqual({ exitCode: 1 })
   await expect(nodeRunner(['notify-no-such-program-here'])).rejects.toThrow()
+  expect(await codexRunner(['sleep', '5'])).toEqual({ exitCode: 1, timedOut: true })
+})
+
+test('the branch reader gives null for a named pipe instead of waiting on it', () => {
+  const fifo = join(root, 'head-fifo')
+  execFileSync('mkfifo', [fifo])
+  const script = `import { nodeFs } from ${JSON.stringify(join(import.meta.dir, 'run.ts'))}; console.log(JSON.stringify(await nodeFs.read(process.argv.at(-1))))`
+  expect(execFileSync(process.execPath, ['-e', script, fifo], { timeout: 3_000, encoding: 'utf8' }).trim()).toBe('null')
+})
+
+test('opencode: after a notifier timeout, later events start no notifier', async () => {
+  withOptions({})
+  const { ctx, push } = stream()
+  const runs: string[][] = []
+  const warnings: string[] = []
+  const cleanup = await setup(ctx, { options, env: {}, home: null, platform: 'linux', warn: (s) => void warnings.push(s), run: async (argv) => (runs.push(argv), { exitCode: 1, timedOut: true }) })
+  push({ type: 'permission.asked', data: { sessionID: 'main' } })
+  push({ type: 'permission.asked', data: { sessionID: 'main' } })
+  push({ type: 'session.idle', data: { sessionID: 'main' } })
+  await settle()
+  expect(runs).toHaveLength(1)
+  expect(warnings).toEqual(['notify: warning: notify-send timed out: no notification was shown; check the desktop notification service'])
+  cleanup()
 })
 
 type Ev = { type: string; created?: number; data?: Record<string, unknown> }
