@@ -16,8 +16,15 @@ export const optionsPath = (mod: string): string => join(configDir(), `${mod}.js
 export type Loaded = { options: Record<string, unknown>; error?: string }
 
 // A mod's options: the same names and string values as its Claude userConfig. A missing file is the defaults; a
-// file that cannot be read as a JSON object is an error the caller must treat as a failure of the mod.
-export function loadOptions(mod: string, path = optionsPath(mod)): Loaded {
+// file that cannot be located or read as a JSON object is an error the caller must treat as a failure of the mod.
+export function loadOptions(mod: string, file?: string): Loaded {
+  let path: string
+  try {
+    // The password database has no entry for some accounts, such as a container run under an arbitrary uid.
+    path = file ?? optionsPath(mod)
+  } catch {
+    return { options: {}, error: 'the options file could not be located: the account has no home directory entry' }
+  }
   let text: string
   try {
     text = readFileSync(path, 'utf8')

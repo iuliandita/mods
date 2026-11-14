@@ -786,3 +786,21 @@ test('a secret placeholder in a push refspec or a git -C value is unparsed', asy
   }
   expect((await evaluate('git push origin HEAD:feature/x', cfg(), fakeEnv())).enforced).toEqual([])
 })
+
+test('identity: a GIT_CONFIG_COUNT the guard cannot read is an unparsed finding, capped by modeUnparsed', async () => {
+  const command = 'GIT_CONFIG_COUNT=99 git commit -m x'
+  const on = await evaluate(command, cfg({ identityRules: IDENTITIES }), fakeEnv())
+  expect(on.enforced.map((x) => x.rule)).toEqual(['unparsed'])
+  const dry = await evaluate(command, cfg({ identityRules: IDENTITIES, modeUnparsed: 'dry' }), fakeEnv())
+  expect([dry.enforced, dry.dry.map((x) => x.rule)]).toEqual([[], ['unparsed']])
+  const off = await evaluate(command, cfg({ identityRules: IDENTITIES, modeUnparsed: 'off' }), fakeEnv())
+  expect([off.enforced, off.dry]).toEqual([[], []])
+})
+
+test('deny reasons name what to fix, never the switch that turns a rule off', async () => {
+  const lookups = (await evaluate('git push && kubectl apply -f a', cfg(), broken())).enforced.filter((x) => x.rule === 'lookup')
+  expect(lookups).toHaveLength(2)
+  const invalid = (await evaluate('git commit -m x', cfg({ protectedBranches: ',' }), fakeEnv())).enforced.filter((x) => x.rule === 'config')
+  expect(invalid).toHaveLength(1)
+  for (const v of [...lookups, ...invalid]) expect(v.message).not.toMatch(/to off|disable the plugin/i)
+})

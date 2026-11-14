@@ -1,10 +1,12 @@
-import { expect, test } from 'bun:test'
+import { expect, mock, test } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import * as os from 'node:os'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { Data, SessionInfo } from '../../../host-lib/tui'
-import { OFF_TEXT, rows, setup, table } from './tui'
+import { loadOptions } from '../../../host-lib/options'
+import { isOff, OFF_TEXT, rows, setup, table } from './tui'
 
 const info = (id: string, over: Partial<SessionInfo> = {}): SessionInfo => ({
   id,
@@ -36,6 +38,26 @@ test('rows are the child sessions with a state from their outcome and status', (
   expect(r.map((x) => x.state)).toEqual(['done', 'failed', 'idle', 'stopped', 'running'])
   expect(r[4]?.ms).toBe(120_000)
   expect(r[0]?.ms).toBe(120_000)
+})
+
+test('tokens count cache writes as well as cache reads', () => {
+  const [r] = rows(data([info('a', { tokens: { input: 1000, output: 200, reasoning: 0, cache: { read: 3000, write: 500 } } })]), 'root', 0)
+  expect(r?.tokens).toBe(4700)
+})
+
+test('rows are oldest first whatever order the host lists them in, so the rows left out are the oldest', () => {
+  const newestFirst = Array.from({ length: 45 }, (_, i) => info(`c${i}`, { title: `t${i}`, time: { created: (45 - i) * 1000, idle: 99_000 } }))
+  const r = rows(data(newestFirst), 'root', 0)
+  expect(r.map((x) => x.id).slice(0, 2)).toEqual(['c44', 'c43'])
+  const lines = table(r).split('\n')
+  expect(lines[0]).toContain('5 older not shown')
+  expect(lines[1]).toMatch(/ t39$/)
+  expect(lines.at(-1)).toMatch(/ t0$/)
+})
+
+test('the agent column is padded by code points', () => {
+  const [plain, astral] = table(rows(data([info('a', { agent: 'abc' }), info('b', { agent: '\u{1d41a}bc' })]), 'root', 0)).split('\n').slice(1)
+  expect([...(astral ?? '')]).toHaveLength([...(plain ?? '')].length)
 })
 
 test('inside a child session only its own descendants are listed, never the root or siblings', () => {
@@ -130,4 +152,36 @@ test('mode off in the user options file draws a notice and does not read the ses
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('an account with no home lookup is an options error, so the board stays on', () => {
+  const real = { ...os }
+  mock.module('node:os', () => ({
+    ...real,
+    userInfo: () => {
+      throw new Error('ENOENT: no such file or directory, uv_os_get_passwd')
+    },
+  }))
+  try {
+    expect(loadOptions('delegation-board')).toEqual({ options: {}, error: 'the options file could not be located: the account has no home directory entry' })
+    expect(isOff()).toBe(false)
+  } finally {
+    mock.module('node:os', () => real)
+  }
+  expect(loadOptions('delegation-board').error).toBeUndefined()
+})
+
+test('a first draw that throws gives the host an empty node', async () => {
+  const claims: { render: (i: { name: string; sessionID: string }) => { content: string } }[] = []
+  const d = data([info('a')])
+  d.session.family = () => {
+    throw new Error('boom')
+  }
+  const cleanup = await setup(
+    { renderer: {}, data: d, keymap: { layer: () => {} }, ui: { panel: { open: () => true, close: () => {}, current: () => undefined }, slot: (c) => (claims.push(c as never), () => {}) } },
+    (content) => ({ content }),
+    join(tmpdir(), 'delegation-board-absent.json'),
+  )
+  expect(claims[0]!.render({ name: 'iuliandita.delegation-board', sessionID: 'root' }).content).toBe('')
+  cleanup()
 })

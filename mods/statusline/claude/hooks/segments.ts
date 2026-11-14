@@ -97,9 +97,9 @@ export function roundEven(x: number): number {
 const fixed0 = (x: number): string => String(roundEven(x))
 const signed0 = (x: number): string => `${x < 0 || Object.is(x, -0) ? '-' : '+'}${roundEven(Math.abs(x))}`
 
-const CONTROL = /[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩]/g
+// Control and format characters (bidi overrides, zero-width, tag characters) and the line and paragraph separators.
+const CONTROL = /[\p{Cc}\p{Cf}\u2028\u2029]/gu
 export const clean = (v: unknown): string => String(v ?? '').replace(CONTROL, '')
-export const clip = (s: string, n: number): string => ([...s].length <= n ? s : [...s].slice(0, n - 1).join('') + '…')
 
 export function humanize(seconds: number): string {
   const s = Math.floor(Math.max(0, seconds))
@@ -116,16 +116,37 @@ export function fmtTokens(n: number): string {
   return String(Math.trunc(n))
 }
 
+// East Asian Wide and Fullwidth ranges, first and last code point of each, in order.
+const WIDE: readonly (readonly [number, number])[] = [
+  [0x1100, 0x115f], [0x2329, 0x232a], [0x2e80, 0x303e], [0x3041, 0x33ff], [0x3400, 0x4dbf], [0x4e00, 0xa4cf], [0xa960, 0xa97c],
+  [0xac00, 0xd7a3], [0xf900, 0xfaff], [0xfe10, 0xfe19], [0xfe30, 0xfe6b], [0xff01, 0xff60], [0xffe0, 0xffe6], [0x16fe0, 0x16fe4],
+  [0x16ff0, 0x16ff1], [0x17000, 0x18cd5], [0x18d00, 0x18d08], [0x1aff0, 0x1affe], [0x1b000, 0x1b2fb], [0x1f200, 0x1f202],
+  [0x1f210, 0x1f23b], [0x1f240, 0x1f248], [0x1f250, 0x1f251], [0x1f260, 0x1f265], [0x20000, 0x2fffd], [0x30000, 0x3fffd],
+]
+// Drawn as a colour emoji, two cells, without a variation selector. A symbol that only can be an emoji (the
+// default folder icon U+1F5BF has no emoji property at all) is one cell.
+const EMOJI = /\p{Emoji_Presentation}/u
+
 function cellWidth(cp: number): number {
   if ((cp >= 0x300 && cp <= 0x36f) || (cp >= 0xfe00 && cp <= 0xfe0f)) return 0
-  const wide =
-    (cp >= 0x1100 && cp <= 0x115f) || (cp >= 0x2e80 && cp <= 0xa4cf) || (cp >= 0xac00 && cp <= 0xd7a3) ||
-    (cp >= 0xf900 && cp <= 0xfaff) || (cp >= 0xfe30 && cp <= 0xfe4f) || (cp >= 0xff00 && cp <= 0xff60) ||
-    (cp >= 0xffe0 && cp <= 0xffe6) || (cp >= 0x1f300 && cp <= 0x1f64f) || (cp >= 0x1f900 && cp <= 0x1f9ff) ||
-    (cp >= 0x20000 && cp <= 0x3fffd) || cp === 0x26a1
-  return wide ? 2 : 1
+  if (cp < 0x1100) return 1
+  return WIDE.some(([lo, hi]) => cp >= lo && cp <= hi) || EMOJI.test(String.fromCodePoint(cp)) ? 2 : 1
 }
 export const textWidth = (s: string): number => [...s].reduce((w, ch) => w + cellWidth(ch.codePointAt(0) ?? 0), 0)
+
+// Cut to n cells, the last one an ellipsis.
+export function clip(s: string, n: number): string {
+  if (textWidth(s) <= n) return s
+  let out = ''
+  let used = 0
+  for (const ch of s) {
+    const w = cellWidth(ch.codePointAt(0) ?? 0)
+    if (used + w > n - 1) break
+    out += ch
+    used += w
+  }
+  return `${out}…`
+}
 export const partWidth = (p: Part): number => p.reduce((w, s) => w + textWidth(s.t), 0)
 export const plain = (p: Part): string => p.map((s) => s.t).join('')
 
@@ -269,7 +290,6 @@ export type View = {
   agent: string | null
   sessionName: string | null
   outputStyle: string | null
-  vim: string | null
   forge: Forge | null
   // `limit`: the auto-compact window when it is smaller than the model's `window` (see effectiveWindow).
   context: { tokens?: number; window: number; percent?: number; limit?: number } | null
@@ -598,7 +618,6 @@ export function buildRows(st: Style, v: View, cols: number, rows: 1 | 2 = 2, lin
   }
   const style = clean(v.outputStyle ?? '')
   if (style && style.toLowerCase() !== 'default') extras.push(seg('style', 5, [c(st, P.DIM, `✎ ${clip(style, 20)}`)], { optional: true }))
-  if (v.vim) extras.push(seg('vim', 3, [c(st, P.DIM, `[${clean(v.vim).slice(0, 1)}]`)], { optional: true }))
   // The script draws the counts at the far right, after the garnish.
   const tail = linesRow === 1 ? [] : forge
 
@@ -614,9 +633,9 @@ export function buildRows(st: Style, v: View, cols: number, rows: 1 | 2 = 2, lin
     ...(linesRow === 2 ? [lines] : []),
   ]
   // Every source or segment that failed, as a dim ✗name at the end of row 1, so a screenshot says why a
-  // segment is missing.
+  // segment is missing. Under the branch (9): on a short row the names become a count, which goes before it.
   const names = [...new Set(failed)]
-  const notice = names.length ? [seg('failed', 9, [c(st, 'faint', names.map((n) => `✗${n}`).join(' '))])] : []
+  const notice = names.length ? [seg('failed', 8.7, [c(st, 'faint', names.map((n) => `✗${n}`).join(' ')), c(st, 'faint', `✗${names.length}`)])] : []
   const out = rows === 1 ? [fit(st, [...ident, ...extras, ...tail, ...notice, ...budgets, ...stats], budget)] : [fit(st, [...ident, ...extras, ...tail, ...notice], budget), fit(st, [...budgets, ...stats], budget)]
   return out.filter((r) => r.length)
 }
@@ -655,13 +674,12 @@ export function parseNumstat(out: string): { added: number; removed: number } {
   return { added, removed }
 }
 
-// `git rev-parse --show-toplevel --absolute-git-dir --git-common-dir`: the worktree's name when this is a
-// linked worktree (its own git dir differs from the shared one), else null.
+// `git rev-parse --path-format=absolute --show-toplevel --absolute-git-dir --git-common-dir`: the worktree's
+// name when this is a linked worktree (its own git dir differs from the shared one), else null.
 export function parseWorktree(out: string): string | null {
   const [top = '', gitDir = '', common = ''] = out.split('\n').map((s) => s.trim())
   if (!top || !gitDir || !common) return null
-  const norm = (p: string) => (p.startsWith('/') ? p : `${top}/${p}`).replace(/\/+$/, '').replace(/\/\.git$/, '/.git')
-  if (norm(gitDir) === norm(common) || !gitDir.includes('/worktrees/')) return null
+  if (gitDir === common || !gitDir.includes('/worktrees/')) return null
   return top.split('/').filter(Boolean).pop() ?? null
 }
 

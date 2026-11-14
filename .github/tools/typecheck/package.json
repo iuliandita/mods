@@ -1,0 +1,10 @@
+{
+  "name": "mods-typecheck",
+  "private": true,
+  "description": "Pinned compiler and types for scripts/typecheck --hosts",
+  "devDependencies": {
+    "@types/bun": "1.4.4",
+    "@types/node": "24.19.2",
+    "typescript": "5.8.3"
+  }
+}

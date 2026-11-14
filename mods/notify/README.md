@@ -41,9 +41,11 @@ For Codex and OpenCode see [Codex and OpenCode](#codex-and-opencode) and
 Other notification types (a finished login, say) are ignored. Child and headless sessions are
 skipped when their host exposes a signal:
 
-- Claude Code: `agent_id`, a `T3CODE_THREAD_ID` starting with `thread:`, or
-  `CLAUDE_CODE_ENTRYPOINT=sdk-cli` (`claude -p`). The generic Claude child-session env flags do
-  not distinguish interactive parent sessions and are not used.
+- Claude Code: `agent_id`, a `T3CODE_THREAD_ID` starting with `thread:delegated-task:`, or
+  `CLAUDE_CODE_ENTRYPOINT=sdk-cli` (`claude -p`). T3 Code is a desktop app that runs these agents
+  in threads and can delegate work to child threads; it sets `T3CODE_THREAD_ID` in each session,
+  and other thread ids still notify. The generic Claude child-session env flags do not
+  distinguish interactive parent sessions and are not used.
 - Codex: the first `session_meta` record at `transcript_path` identifies `codex exec` and native
   subagents. The read stops at the first line, with a 64 KiB cap. T3 child sessions are checked
   through the optional local database lookup below.
@@ -69,6 +71,8 @@ set `events` to `finish` to avoid that.
   `off` disables this lookup; Claude Code uses its environment signal instead.
 - `state`: `on` (default) or `off`. For finishes, the last non-blank line of the current turn's
   final assistant message can start with `[done]`, `[needs you]`, `[waiting]`, or `[partial]`.
+  The mod does not produce these markers: they appear only when the agent's own instructions
+  tell it to end each turn with one.
   These map to `Done`, `Needs you`, `Running`, and `Unfinished`. Matching is case-sensitive;
   trailing text is ignored. Other lines or unavailable messages give `Finished`. `off` always
   gives `Finished`. The body stays "<label> on <branch>" when the branch is known.
@@ -77,7 +81,8 @@ set `events` to `finish` to avoid that.
 - `sound`: `off` (default) or `on`. On macOS the notification plays the `Glass` sound. On Linux the
   mod sets the `sound-name` hint, which only some notification servers honor.
 
-Claude Code takes `mode`, `events`, `sound`, `t3` and `state` as plugin options.
+Claude Code takes `mode`, `events`, `sound` and `state` as plugin options. Its `t3` plugin
+option is accepted and has no effect, because Claude Code never reads the database.
 Codex and OpenCode read the same names from
 `~/.config/iuliandita-mods/notify.json`, a JSON object with string values, for example
 `{"events": "finish", "sound": "on"}`. The path is fixed under your account's home, and a repository
@@ -85,9 +90,11 @@ cannot change it. A file that cannot be read gives the defaults and one warning 
 
 ## Missing notifier
 
-If `notify-send` or `osascript` is not installed, cannot run, exits non-zero, or the platform is not
-Linux or macOS, the mod shows one warning and the session carries on:
+If `notify-send` or `osascript` is not installed, cannot run, exits non-zero, times out, or the
+platform is not Linux or macOS, the mod shows one warning and the session carries on:
 `notify: warning: notify-send not found: no notification was shown; install it or set mode to off`.
+After a notifier timeout (5 s), Claude Code and OpenCode send no more notifications until the
+session or the OpenCode server restarts, so a hung notification service delays one event only.
 On Claude Code the warning is a toast, once per session. On OpenCode it goes to the host log, once
 per distinct message. A Codex hook is a new process each time, so its warning goes to the hook's
 stderr on every call. `scripts/mods doctor` lists the notifier for your platform under `requires`.
@@ -146,7 +153,9 @@ Install steps are in [INSTALL.md](../../INSTALL.md); what each host can do is in
   it is the session directory's last folder, and `~` for the home folder itself. The branch comes
   from reading `.git/HEAD` (a detached HEAD shows the first 7 characters of the commit); if that
   cannot be read, the body has no branch. No git command is run on any host. Control characters
-  are replaced with spaces and each name is cut at 60 characters.
+  are replaced with spaces and each name is cut at 60 characters. Characters git does not allow
+  in a branch name are dropped, and on Linux `&`, `<` and `>` in the body are escaped so a
+  branch name cannot format the notification.
 - Codex cancels unfinished background permission hooks when the session ends. The finish hook
   waits up to its one-second cap; the notifier and the legacy `notify` setting's delivery each
   have a 250 ms process timeout. A slow notifier can still time out before showing anything.

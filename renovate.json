@@ -56,6 +56,40 @@
       "groupName": "claude-code",
       "semanticCommitType": "deps",
       "semanticCommitScope": "ci"
+    },
+    {
+      "matchManagers": [
+        "npm",
+        "bun"
+      ],
+      "matchFileNames": [
+        ".github/tools/typecheck/**"
+      ],
+      "groupName": "typecheck",
+      "semanticCommitType": "deps",
+      "semanticCommitScope": "ci"
+    },
+    {
+      "matchManagers": [
+        "custom.regex"
+      ],
+      "semanticCommitType": "deps",
+      "semanticCommitScope": "ci"
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "zizmor binary version passed to zizmor-action",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/security\\.yml$/"
+      ],
+      "matchStrings": [
+        "uses: zizmorcore/zizmor-action@[^\\n]+\\n\\s+with:\\n\\s+version: \"(?<currentValue>[^\"]+)\""
+      ],
+      "depNameTemplate": "zizmorcore/zizmor",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.+)$"
     }
   ]
 }

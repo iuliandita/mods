@@ -11,11 +11,13 @@ export const UNSET = '\0unset'
 const EXPORTED = '1'
 const NOT_EXPORTED = '0'
 const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
+const CD_ENV = ['HOME', 'CDPATH', 'OLDPWD']
 
 export type ProcState = { proc: Tracker<string>; names: Set<string>; startDir: string; home: string }
 
 export function newProcState(startDir: string, home: string): ProcState {
-  const proc = createTracker<string>((v) => v, (k) => (k === 'dir' || k === 'prev' ? [startDir] : k === 'stack' ? ['[]'] : [REAL]))
+  // `prev` starts unknown: the OLDPWD the shell inherited is not the start directory.
+  const proc = createTracker<string>((v) => v, (k) => (k === 'dir' ? [startDir] : k === 'prev' ? [UNKNOWN] : k === 'stack' ? ['[]'] : [REAL]))
   return { proc, names: new Set<string>(), startDir, home }
 }
 
@@ -40,6 +42,11 @@ export function setEnv(st: ProcState, k: string, v: Possible<string>, effect: Fl
   st.proc.set(`env:${k}`, [v], effect)
 }
 
+// A directory a variable names for `cd`, or null when it is not a literal absolute path.
+function literalDir(v: string): string | null {
+  return v.startsWith('/') && !hasVariable(v) ? resolvePath('/', v, '/') : null
+}
+
 type How = 'export' | 'unexport' | 'plain'
 
 // One `NAME=V` or `NAME` word of an assignment, `export` or `declare`. `export` (and `declare -x`) exports the value;
@@ -52,6 +59,7 @@ function declareWord(st: ProcState, word: string, how: How, effect: Flow): void 
   if (!NAME.test(k)) return
   st.names.add(k)
   if (eq !== -1) st.proc.set(`var:${k}`, [word.slice(eq + 1)], effect)
+  if (eq !== -1 && k === 'OLDPWD') st.proc.set('prev', [literalDir(word.slice(eq + 1)) ?? UNKNOWN], effect)
   if (how === 'unexport') {
     st.proc.set(`x:${k}`, [NOT_EXPORTED], effect)
     st.proc.set(`env:${k}`, [UNSET], effect)
@@ -111,6 +119,7 @@ export function applyUnset(st: ProcState, argv: string[], effect: Flow): void {
     setEnv(st, a, UNSET, effect)
     st.proc.set(`var:${a}`, [UNSET], effect)
     st.proc.set(`x:${a}`, [NOT_EXPORTED], effect)
+    if (a === 'OLDPWD') st.proc.set('prev', [UNKNOWN], effect)
   }
 }
 
@@ -134,17 +143,34 @@ export function applyDeclare(st: ProcState, argv: string[], dyn: boolean[], effe
 }
 
 // `here` maps a possible directory to the one the command runs in (`env -C` moves it).
-export function applyCd(st: ProcState, argv: string[], here: (d: Possible<string>) => string | null, loop: boolean, effect: Flow): void {
+// `assigns` is the call's own prefix (`HOME=/x cd`). The shell values of HOME (no operand, `~`), OLDPWD (`-`) and
+// CDPATH (a relative operand outside `.` and `..`) decide where it goes; one the command assigned is followed when it
+// is a literal absolute path, and the directory is unknown otherwise.
+export function applyCd(
+  st: ProcState, argv: string[], here: (d: Possible<string>) => string | null, loop: boolean, effect: Flow, assigns: Record<string, string> = {},
+): void {
   const dirs = st.proc.get('dir')
-  const target = argv.slice(1).find((a) => a === '-' || (a !== '--' && !a.startsWith('-')))
-  const physical = argv.slice(1).some((a) => /^-[LPe@]*P[e@]*$/.test(a))
-  const relative = target !== undefined && target !== '-' && !/^(?:\/|~$|~\/)/.test(target)
-  const to: Possible<string>[] =
-    target === undefined
-      ? [st.home]
-      : target === '-'
-        ? st.proc.get('prev')
-        : dirs.map((d) => (loop && relative ? UNKNOWN : (move(st, here(d), target, physical) ?? UNKNOWN)))
+  let k = 1
+  let physical = false
+  for (; k < argv.length && /^-[LPe@]+$/.test(argv[k]!); k++) physical = /P[e@]*$/.test(argv[k]!)
+  const literal = argv[k] === '--'
+  if (literal) k++
+  const target = argv[k]
+  const tilde = target === '~' || (target?.startsWith('~/') ?? false)
+  const relative = target !== undefined && target !== '-' && !tilde && !target.startsWith('/')
+  const searched = relative && !/^\.\.?(?:\/|$)/.test(target!) && st.proc.get('var:CDPATH').some((v) => v !== REAL && v !== UNSET && v !== '')
+  // An option the guard does not know makes cd fail or go elsewhere.
+  const option = !literal && target !== undefined && target !== '-' && target.startsWith('-')
+  let to: Possible<string>[]
+  if (option || searched || CD_ENV.some((n) => Object.hasOwn(assigns, n))) to = [UNKNOWN]
+  else if (target === '-') to = st.proc.get('prev')
+  else if (target === undefined || tilde) {
+    to = st.proc.get('var:HOME').map((v) => {
+      const home = v === REAL ? st.home : v === UNKNOWN ? null : literalDir(v)
+      if (home === null) return UNKNOWN
+      return target === undefined ? home : (move({ ...st, home }, null, target, physical) ?? UNKNOWN)
+    })
+  } else to = dirs.map((d) => (loop && relative ? UNKNOWN : (move(st, here(d), target, physical) ?? UNKNOWN)))
   st.proc.set('prev', dirs, effect)
   st.proc.set('dir', to, effect)
 }

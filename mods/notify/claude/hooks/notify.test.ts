@@ -36,7 +36,7 @@ test('finish markers: exact last non-blank line only, fixed labels, and state of
 test('Claude child and opt-out signals skip, while unrelated session flags do not', () => {
   for (const [env, expected] of [
     [{ IULIANDITA_MODS_NOTIFY: 'off' }, true], [{ T3CODE_THREAD_ID: 'thread:delegated-task:child' }, true],
-    [{ T3CODE_THREAD_ID: 'thread:other' }, true], [{ CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' }, true],
+    [{ T3CODE_THREAD_ID: 'thread:other' }, false], [{ CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' }, true],
     [{ T3CODE_THREAD_ID: 'bare-uuid', CLAUDE_CODE_ENTRYPOINT: 't3-code' }, false],
     [{ CLAUDE_CODE_CHILD_SESSION: '1', CLAUDECODE: '1', CLAUDE_CODE_SESSION_ATTENDED: '0' }, false],
     [{ CLAUDE_CODE_ENTRYPOINT: 'cli' }, false], [{}, false],
@@ -116,6 +116,8 @@ test('place and branch are cleaned and cut at 60 characters, and a failing reade
   const broken: Fs = { read: async () => Promise.reject(new Error('EIO')), exists: async () => Promise.reject(new Error('EIO')) }
   expect(await resolvePlace('/h/r/sub', '/h', broken)).toEqual({ place: 'sub', branch: null })
   expect(clean('  a \t b  ', 10)).toBe('a b')
+  const odd = await resolvePlace('/h/r', '/h', tree({ '/h/r/.git/HEAD': 'ref: refs/heads/a b~c^d:e?f*g[h\\i' }))
+  expect(odd.branch).toBe('abcdefghi')
 })
 
 const HARNESSES = [
@@ -135,6 +137,13 @@ test('the title names the harness and the body the branch', async () => {
 test('Linux clears library overrides before notify-send with the text after `--`; sound adds a hint', () => {
   expect(notifierArgv('linux', notice({ title: '-rf' }), false)).toEqual(['env', '-u', 'LD_LIBRARY_PATH', '-u', 'LD_PRELOAD', 'notify-send', '--app-name=mods', '--', '-rf', 'Finished'])
   expect(notifierArgv('linux', notice(), true)).toEqual(['env', '-u', 'LD_LIBRARY_PATH', '-u', 'LD_PRELOAD', 'notify-send', '--app-name=mods', '--hint=string:sound-name:message-new-instant', '--', 'my-repo', 'Finished'])
+})
+
+test('Linux escapes markup characters in the body, so a branch name cannot format the notification', async () => {
+  const n = await withContext(claudeNotice('Stop', { cwd: '/h/mods' })!, '/h', tree({ '/h/mods/.git/HEAD': 'ref: refs/heads/<b>x</b>&y\n' }))
+  expect(n.body).toBe('Finished on <b>x</b>&y')
+  expect(notifierArgv('linux', n, false)?.at(-1)).toBe('Finished on &lt;b&gt;x&lt;/b&gt;&amp;y')
+  expect(notifierArgv('darwin', n, false)?.[2]).toContain('"Finished on <b>x</b>&y"')
 })
 
 test('macOS uses osascript with quoted string literals; quotes and backslashes cannot end the string', () => {
@@ -161,6 +170,8 @@ test('delivery: sent, or one warning line for a missing notifier, a failing one 
   const none = await deliver(ok, 'win32', notice(), false)
   expect(none.ok === false && none.warning).toContain('no notifier for win32')
   expect(calls).toHaveLength(1)
+  const slow = await deliver(async () => ({ exitCode: 1, timedOut: true }), 'linux', notice(), false)
+  expect(slow).toEqual({ ok: false, timedOut: true, warning: 'notify: warning: notify-send timed out: no notification was shown; check the desktop notification service' })
   for (const r of [missing, broken, failing, none]) expect(r.ok === false && r.warning.split('\n')).toHaveLength(1)
 })
 

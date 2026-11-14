@@ -6,7 +6,7 @@ import type { ConfigTaint } from './state'
 const PUSH_VALUE_OPTS = new Set(['-o', '--push-option', '--repo', '--receive-pack', '--exec'])
 
 const PUSH_BOOL = new Set([
-  '--all', '--mirror', '--tags', '--follow-tags', '--no-follow-tags', '--force', '--force-with-lease', '--no-force-with-lease', '--force-if-includes',
+  '--all', '--branches', '--mirror', '--tags', '--follow-tags', '--no-follow-tags', '--force', '--force-with-lease', '--no-force-with-lease', '--force-if-includes',
   '--no-force-if-includes', '--dry-run', '--set-upstream', '--atomic', '--no-atomic', '--verify', '--no-verify', '--verbose', '--quiet', '--porcelain',
   '--delete', '--prune', '--thin', '--no-thin', '--progress', '--no-progress', '--ipv4', '--ipv6', '--signed', '--no-signed', '--no-recurse-submodules',
 ])
@@ -42,7 +42,7 @@ function pushTargets(args: string[]): PushTargets {
     for (let i = 0; i < args.length; i++) {
       const a = args[i]!
       if (PUSH_VALUE_OPTS.has(a)) i++
-      else if (a === '--all' || a === '--mirror') all = '--all/--mirror'
+      else if (a === '--all' || a === '--branches' || a === '--mirror') all = '--all/--branches/--mirror'
       else if (a === '--tags') tags = true
       else if (a.startsWith('--') && !a.includes('=') && !PUSH_BOOL.has(a) && !positional.length) {
         unsure = true

@@ -6,6 +6,7 @@ const KEYWORDS = new Set(['{', '}', '!', 'if', 'then', 'do', 'else', 'elif', 'wh
 export const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh'])
 const SHELL_LONG = new Set(['--norc', '--noprofile', '--posix', '--login', '--restricted', '--verbose', '--noediting', '--debugger', '--dump-strings', '--dump-po-strings', '--pretty-print', '--help', '--version'])
 const SHELL_LONG_VALUE = new Set(['--rcfile', '--init-file'])
+const STDIN_PATHS = new Set(['/dev/stdin', '/dev/fd/0', '/proc/self/fd/0'])
 // Wrapper -> short option letters and long options that take a separate value; `skip` counts positionals before
 // the command; `chdir` names the option that sets the directory the command runs in; `shell` the flags that run
 // the command words through a shell (`sudo -s 'git push'`).
@@ -249,5 +250,5 @@ export function shellScript(argv: string[]): { ok: boolean; script?: string; at?
   }
   const first = argv[k]
   if (c) return first === undefined ? { ok: false } : { ok: true, script: first, at: k }
-  return { ok: true, at: k, stdin: s || first === undefined }
+  return { ok: true, at: k, stdin: s || first === undefined || STDIN_PATHS.has(first) }
 }

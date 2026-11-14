@@ -37,7 +37,7 @@ def test_doctor_reports_guard_trust_from_an_isolated_snapshot(tmp_path: Path, mo
         ], "warnings": [], "errors": []}]}
 
     monkeypatch.setattr(codex, "_list_hooks", inventory)
-    write_mod(tmp_path, "alpha")
+    add_hosts(write_mod(tmp_path, "guard-rules", hosts=["codex"]), "codex")
     code, payload = doctor(tmp_path)
     assert code == expected and payload["ok"] is (expected == 0)
     assert len(payload["codex_hooks"]) == 2
@@ -50,8 +50,9 @@ def test_doctor_reports_guard_trust_from_an_isolated_snapshot(tmp_path: Path, mo
 def test_inventory_failure_is_not_a_clean_doctor_result(tmp_path: Path, monkeypatch) -> None:
     (Path(os.environ["CODEX_HOME"]) / "plugins/cache/iuliandita-mods").mkdir(parents=True)
     monkeypatch.setattr(codex, "_list_hooks", lambda *args: {"data": []})
-    with pytest.raises(CatalogError, match="/hooks"):
-        codex.hook_trust(tmp_path)
+    with pytest.raises(CatalogError, match="/hooks") as err:
+        codex.hook_trust(tmp_path, set())
+    assert str(err.value).startswith("Codex hook trust could not be checked")
 
 
 def test_app_server_transport_lists_only_and_ignores_notifications(tmp_path: Path, monkeypatch) -> None:
@@ -95,6 +96,20 @@ def test_doctor_ignores_leftover_trust_state_of_uninstalled_plugins(tmp_path: Pa
         ], "warnings": [], "errors": []}]}
 
     monkeypatch.setattr(codex, "_list_hooks", inventory)
-    rows, errors = codex.hook_trust(tmp_path)
+    rows, errors = codex.hook_trust(tmp_path, {"guard-rules"})
     assert seen == [["guard-rules"]]
     assert [row["mod"] for row in rows] == ["guard-rules"] and errors == []
+
+
+def test_doctor_enforces_trust_for_the_catalog_guards_with_a_codex_host(tmp_path: Path, monkeypatch) -> None:
+    (Path(os.environ["CODEX_HOME"]) / "plugins/cache/iuliandita-mods").mkdir(parents=True)
+    monkeypatch.setattr("modslib.install.claude.version", lambda: "test")
+    untrusted = {"eventName": "preToolUse", "trustStatus": "untrusted", "enabled": True}
+    monkeypatch.setattr(codex, "_list_hooks", lambda *args: {"data": [{"hooks": [
+        {"pluginId": f"{name}@iuliandita-mods", **untrusted} for name in ("newguard", "plain", "guard-rules")
+    ], "warnings": [], "errors": []}]})
+    add_hosts(write_mod(tmp_path, "newguard", hosts=["codex"]), "codex")
+    add_hosts(write_mod(tmp_path, "plain", kind="notify", hosts=["codex"]), "codex")
+    code, payload = doctor(tmp_path)
+    assert code == 1 and len(payload["codex_hooks"]) == 3
+    assert len(payload["errors"]) == 1 and payload["errors"][0].startswith("newguard: Codex preToolUse hook is untrusted")

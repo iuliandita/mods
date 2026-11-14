@@ -10,7 +10,9 @@ from pathlib import Path
 
 import pytest
 
-BIN = Path(__file__).resolve().parent.parent / "mods/secret-box/claude/bin/secret-box"
+ROOT = Path(__file__).resolve().parent.parent
+BIN = ROOT / "mods/secret-box/claude/bin/secret-box"
+ENTRY = ROOT / "tests/secret_box_entry.py"
 
 
 def load_module():
@@ -25,9 +27,9 @@ def run(tmp_path, *args, secrets=None, stdin=None):
     store = tmp_path / "store.json"
     if secrets is not None:
         store.write_text(json.dumps(secrets))
-    env = dict(os.environ, SECRET_BOX_TEST="1", SECRET_BOX_BACKEND=f"file:{store}")
+    env = dict(os.environ, SECRET_BOX_TEST_STORE=str(store))
     return subprocess.run(
-        [sys.executable, str(BIN), *args], input=stdin, env=env, capture_output=True, text=True
+        [sys.executable, str(ENTRY), *args], input=stdin, env=env, capture_output=True, text=True
     )
 
 
@@ -72,10 +74,10 @@ def test_exec_rejects_other_options(tmp_path):
 def test_scrub_reply_is_raw_utf8_with_lone_surrogates_escaped(tmp_path):
     store = tmp_path / "store.json"
     store.write_text(json.dumps({"tok": "s3cr3t-value-xyz"}))
-    env = dict(os.environ, SECRET_BOX_TEST="1", SECRET_BOX_BACKEND=f"file:{store}")
+    env = dict(os.environ, SECRET_BOX_TEST_STORE=str(store))
     texts = ["汉字 s3cr3t-value-xyz", "lone \ud800 surrogate"]
     p = subprocess.run(
-        [sys.executable, str(BIN), "scrub"], input=json.dumps(texts).encode(), env=env, capture_output=True
+        [sys.executable, str(ENTRY), "scrub"], input=json.dumps(texts).encode(), env=env, capture_output=True
     )
     assert p.returncode == 0, p.stderr
     assert "汉字".encode() in p.stdout
@@ -84,7 +86,7 @@ def test_scrub_reply_is_raw_utf8_with_lone_surrogates_escaped(tmp_path):
     assert [r["text"] for r in reply["results"]] == ["汉字 {{secret:tok}}", "lone \ud800 surrogate"]
     big = "汉" * 700_000
     p = subprocess.run(
-        [sys.executable, str(BIN), "scrub"], input=json.dumps([big]).encode(), env=env, capture_output=True
+        [sys.executable, str(ENTRY), "scrub"], input=json.dumps([big]).encode(), env=env, capture_output=True
     )
     assert p.returncode == 0 and len(p.stdout) < 4 * 1024 * 1024 // 1.5
 
@@ -210,21 +212,48 @@ def test_keychain_rejects_bad_format_and_overlong_input(monkeypatch):
 
 
 @pytest.mark.parametrize("platform,expected", [("linux", "LibsecretBackend"), ("darwin", "KeychainBackend"), ("win32", None)])
-def test_backend_platform_selection_and_test_override(monkeypatch, tmp_path, platform, expected):
+def test_backend_follows_the_platform_and_no_environment_variable_selects_another(monkeypatch, tmp_path, platform, expected):
     sb = load_module()
-    monkeypatch.delenv("SECRET_BOX_BACKEND", raising=False)
     monkeypatch.setattr(sb.sys, "platform", platform)
-    if expected is None:
-        with pytest.raises(sb.SecretBoxError, match="unsupported platform"):
-            sb.get_backend()
-    else:
-        assert type(sb.get_backend()).__name__ == expected
-    monkeypatch.setenv("SECRET_BOX_BACKEND", f"file:{tmp_path / 'store.json'}")
-    monkeypatch.delenv("SECRET_BOX_TEST", raising=False)
-    with pytest.raises(sb.SecretBoxError, match="test-only"):
-        sb.get_backend()
-    monkeypatch.setenv("SECRET_BOX_TEST", "1")
-    assert isinstance(sb.get_backend(), sb.FileBackend)
+    for env in ({}, {"SECRET_BOX_BACKEND": f"file:{tmp_path / 'store.json'}", "SECRET_BOX_TEST": "1"}):
+        for key in ("SECRET_BOX_BACKEND", "SECRET_BOX_TEST"):
+            monkeypatch.delenv(key, raising=False)
+        for key, value in env.items():
+            monkeypatch.setenv(key, value)
+        if expected is None:
+            with pytest.raises(sb.SecretBoxError, match="unsupported platform"):
+                sb.get_backend()
+        else:
+            assert type(sb.get_backend()).__name__ == expected
+
+
+def test_shipped_helper_ignores_the_old_test_backend_variables(tmp_path):
+    store = tmp_path / "store.json"
+    store.write_text(json.dumps({"from-file": "file-backend-value"}))
+    exe = tmp_path / "bin" / "secret-tool"
+    exe.parent.mkdir()
+    exe.write_text("#!/bin/sh\nif [ \"$1\" = search ]; then printf 'attribute.name = from-keyring\\n'; fi\n")
+    exe.chmod(0o755)
+    env = dict(os.environ, SECRET_BOX_TEST="1", SECRET_BOX_BACKEND=f"file:{store}",
+               PATH=f"{exe.parent}{os.pathsep}{os.environ['PATH']}")
+    if not sys.platform.startswith("linux"):
+        pytest.skip("the fake keyring tool stands in for secret-tool on Linux")
+    p = subprocess.run([sys.executable, str(BIN), "names"], env=env, capture_output=True, text=True)
+    assert (p.returncode, p.stdout) == (0, "from-keyring\n")
+
+
+@pytest.mark.parametrize("copy", ["claude", "codex", "opencode"])
+def test_no_shipped_helper_copy_carries_a_file_backend(copy):
+    assert "FileBackend" not in (ROOT / "mods/secret-box" / copy / "bin/secret-box").read_text()
+
+
+def test_no_model_facing_text_says_how_to_turn_the_box_off():
+    hits = []
+    for path in sorted((ROOT / "mods/secret-box").rglob("*")):
+        if path.is_file() and path.name != "README.md" and "node_modules" not in path.parts:
+            text = path.read_text(errors="replace").lower()
+            hits += [f"{path.relative_to(ROOT)}: {phrase}" for phrase in ("mode to off", "disable the plugin") if phrase in text]
+    assert hits == []
 
 
 @pytest.mark.parametrize(
@@ -305,8 +334,8 @@ def test_issue_95_commands_cannot_print_values(tmp_path, command):
     values = {"long": "stored-value-just-added", "short": "xY9"}
     store.write_text(json.dumps(values))
     helper = tmp_path / "secret-box"
-    helper.symlink_to(BIN)
-    env = dict(os.environ, SECRET_BOX_TEST="1", SECRET_BOX_BACKEND=f"file:{store}",
+    helper.symlink_to(ENTRY)
+    env = dict(os.environ, SECRET_BOX_TEST_STORE=str(store),
                PATH=f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
     # env -i deliberately clears the backend settings; dispatch still rejects values before access.
     command = command.replace("HELPER", str(helper))

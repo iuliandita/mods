@@ -15,12 +15,12 @@
     "git"
   ],
   "surfaces": {
-    "terminal": "verified",
+    "terminal": "untested",
     "desktop": "untested",
     "vscode": "untested",
     "headless": "untested"
   },
-  "verified_on": "2.1.296",
+  "verified_on": null,
   "hosts": [
     "codex",
     "opencode"

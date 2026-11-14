@@ -154,26 +154,43 @@ def _check_mod_with_claude(mod: Mod) -> list[str]:
     return errs
 
 
-def validate(root: Path, *, run_claude: bool = True) -> list[str]:
+def _report(problems: list[str], skipped: list[str], code: int | None = None) -> tuple[int, dict]:
+    payload: dict = {"ok": not problems, "errors": problems, "problems": problems}
+    if skipped:
+        payload["skipped"] = skipped
+    return (1 if problems else 0) if code is None else code, payload
+
+
+def validate_report(root: Path, *, run_claude: bool = True) -> tuple[int, dict]:
+    skipped: list[str] = []
     try:
         mods = load_all(root, include_local=True)
     except CatalogError as exc:
-        return [str(exc)]
+        return _report([str(exc)], skipped)
     try:
-        stale = generate(root, check=True)
+        stale = generate(root, check=True, skipped=skipped)
     except ToolMissing:
         raise
     except CatalogError as exc:
-        return [str(exc)]
+        return _report([str(exc)], skipped)
     problems = [
         f"generated file is stale: {p.relative_to(root)} (run scripts/mods generate)" for p in stale
     ]
     problems += scan_private(root)
     if run_claude:
-        for mod in mods:
-            problems += _check_mod_with_claude(mod)
-        if any(not m.is_local for m in mods):
-            proc = claude.run("plugin", "validate", "--strict", str(root), check=False)
-            if proc.returncode != 0:
-                problems.append(f"marketplace: claude plugin validate --strict failed:\n{proc.stdout}")
-    return problems
+        try:
+            for mod in mods:
+                problems += _check_mod_with_claude(mod)
+            if any(not m.is_local for m in mods):
+                proc = claude.run("plugin", "validate", "--strict", str(root), check=False)
+                if proc.returncode != 0:
+                    problems.append(f"marketplace: claude plugin validate --strict failed:\n{proc.stdout}")
+        except claude.ClaudeError as exc:
+            # 3 only when the missing claude CLI is the sole problem
+            sole = isinstance(exc, claude.ClaudeMissing) and not problems
+            return _report([*problems, str(exc)], skipped, 3 if sole else 1)
+    return _report(problems, skipped)
+
+
+def validate(root: Path, *, run_claude: bool = True) -> list[str]:
+    return validate_report(root, run_claude=run_claude)[1]["problems"]

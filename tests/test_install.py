@@ -29,6 +29,31 @@ def test_install_adds_marketplace_then_each_mod(fake_claude: Path, tmp_path: Pat
     assert "plugin install alpha@iuliandita-mods --scope user --json" in log
 
 
+def test_install_with_a_source_adds_the_marketplace_once(fake_claude: Path, tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    code, payload = install_mods(
+        root, ["alpha", "beta"], scope="user", include_local=False, source="owner/repo#main"
+    )
+    assert code == 0 and payload["installed"] == ["alpha@iuliandita-mods", "beta@iuliandita-mods"]
+    log = calls(fake_claude)
+    assert [c for c in log if c.startswith("plugin marketplace add")] == [
+        "plugin marketplace add owner/repo#main"
+    ]
+    assert log.index("plugin marketplace add owner/repo#main") < log.index(
+        "plugin install alpha@iuliandita-mods --scope user --json"
+    )
+
+
+def test_doctor_and_the_catalog_report_the_pinned_stable_source(tmp_path: Path, monkeypatch) -> None:
+    root = _repo(tmp_path)
+    monkeypatch.setattr("modslib.install.claude.version", lambda: "1.0.0")
+    _, payload = doctor(root)
+    assert payload["source"] == "iuliandita/mods#main"
+    catalog = json.loads((root / "mods.json").read_text())
+    assert catalog["source"] == "iuliandita/mods"
+    assert catalog["stable_source"] == "iuliandita/mods#main"
+
+
 def test_unknown_name_lists_known_ones(fake_claude: Path, tmp_path: Path) -> None:
     root = _repo(tmp_path)
     code, payload = install_mods(root, ["nope"], scope="user", include_local=False, source=None)
@@ -82,7 +107,21 @@ def test_list_and_doctor_survive_a_claude_that_cannot_run(
     code, payload = list_mods(root)
     assert code == 0 and payload["claude"] == {"found": False, "version": None}
     code, payload = doctor(root)
-    assert code == 3 and payload["claude"]["found"] is False
+    assert code == 1 and payload["claude"]["found"] is False
+    assert "could not run" in payload["errors"][0]
+
+
+@pytest.mark.parametrize(("broken", "code"), [(False, 3), (True, 1)])
+def test_doctor_exits_3_only_when_a_missing_claude_is_the_sole_error(
+    no_claude: None, tmp_path: Path, broken: bool, code: int
+) -> None:
+    root = _repo(tmp_path)
+    if broken:
+        write_mod(root, "bad", kind="widget")
+    got, payload = doctor(root)
+    assert got == code and payload["claude"] == {"found": False, "version": None}
+    assert "claude CLI not found" in payload["errors"][0]
+    assert len(payload["errors"]) == (2 if broken else 1)
 
 
 @pytest.mark.parametrize("platform,backend", [("linux", "secret-tool"), ("darwin", "security")])

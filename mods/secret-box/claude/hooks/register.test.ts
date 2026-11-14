@@ -1,6 +1,6 @@
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
-import { makeScrubber } from './scrub'
+import { makeScrubber } from './scrub.oracle'
 
 const SECRET = 'p@ss/w0rd-longer'
 const B64 = 'cEBzcy93MHJkLWxvbmdlcg=='
@@ -22,7 +22,7 @@ function world(
   files = new Map<string, string>(),
   stats = new Map<string, StatOverride | (() => StatOverride)>(),
 ) {
-  const seen = { commands: [] as string[], loads: 0, toasts: [] as string[], reads: [] as string[], writes: [] as string[] }
+  const seen = { commands: [] as string[], loads: 0, toasts: [] as string[], failToasts: false, reads: [] as string[], writes: [] as string[] }
   on('fs.stat', (_$, e) => {
     const configured = stats.get(e.path)
     const over = typeof configured === 'function' ? configured() : configured
@@ -60,10 +60,14 @@ function world(
   })
   on('ui.toast', (_$, e) => {
     seen.toasts.push(e.text)
+    if (seen.failToasts) throw new Error('no toast')
     return { value: undefined }
   })
   return seen
 }
+
+// A deny reason is read by the model: it names what the user must fix, never how to switch the box off.
+const HOW_TO_TURN_OFF = /\bmode\b.*\b(off|dry)\b|disable/i
 
 const row = (text: string) => ({
   message: { type: 'user' as const, role: 'user' as const, content: [{ type: 'tool_result', tool_use_id: 't1', content: text }] },
@@ -248,10 +252,23 @@ test('when the values cannot be loaded the placeholder command is denied and nev
   const seen = world(on, 'fail')
   const denied = await $.tool.call({ tool: 'Bash', command: 'curl {{secret:api.token}}' })
   expect(denied.deny).toContain('fail closed')
+  expect(denied.deny).toContain('unlocked')
+  expect(denied.deny).not.toMatch(HOW_TO_TURN_OFF)
   expect(denied.deny).not.toContain(SECRET)
   const plain = await $.tool.call({ tool: 'Bash', command: 'ls' })
   expect(plain.deny).toBeUndefined()
   expect(seen.commands).toEqual(['ls'])
+})
+
+test('a hook failure denies a placeholder command without saying how to switch the box off', { options: { secretScopes: '{"api.token":["/projects/**"]}' } }, async ($, on) => {
+  const seen = world(on)
+  on('session.cwd', () => {
+    throw new Error('no cwd')
+  })
+  const denied = await $.tool.call({ tool: 'Bash', command: 'curl {{secret:api.token}}' })
+  expect(denied.deny).toContain('fail closed')
+  expect(denied.deny).not.toMatch(HOW_TO_TURN_OFF)
+  expect(seen.commands).toEqual([])
 })
 
 test('a failed scrub withholds result text and conversation text', async ($, on) => {
@@ -280,6 +297,25 @@ test('dry mode toasts what it would do and rewrites nothing', { options: { mode:
   expect(seen.toasts).toHaveLength(2)
   expect(seen.toasts.join(' ')).toContain('api.token')
   expect(seen.toasts.join(' ')).not.toContain(SECRET)
+})
+
+test('a dry-mode toast that fails changes nothing: the command runs, the row is stored and the message is sent', { options: { mode: 'dry' } }, async ($, on) => {
+  const seen = world(on)
+  const session = mock.session(on)
+  const sent: string[] = []
+  on('session.send', (_$, e) => {
+    sent.push(e.text)
+    return { isDelivered: true as const }
+  })
+  seen.failToasts = true
+  const r = await $.tool.call({ tool: 'Bash', command: 'curl {{secret:api.token}}' })
+  expect(r.deny).toBeUndefined()
+  expect(seen.commands).toEqual(['curl {{secret:api.token}}'])
+  await $.session.append(row(`x ${SECRET}`))
+  expect(session.appended()).toHaveLength(1)
+  expect((await $.session.send({ to: 'a1', text: `use ${SECRET}` } as never)).isDelivered).toBe(true)
+  expect(sent).toEqual([`use ${SECRET}`])
+  expect(seen.toasts).toHaveLength(3)
 })
 
 test('a sent message has a known value replaced, and is not sent when the check fails', async ($, on) => {

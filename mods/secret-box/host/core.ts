@@ -2,17 +2,9 @@ import { statSync } from 'node:fs'
 import { execFile } from 'node:child_process'
 
 import { parseReply, scrubBatch } from '../claude/hooks/remote'
-import { placeholderNames, rewriteCommand, type Scrubber } from '../claude/hooks/scrub'
+import { parseMode, placeholderNames, rewriteCommand, WITHHELD, type Mode, type Scrubber } from '../claude/hooks/scrub'
 
-export type Mode = 'off' | 'dry' | 'on'
-
-// An unreadable option counts as on, so a typo cannot switch the box off.
-export const parseMode = (v: unknown): Mode => (v === 'off' || v === 'dry' ? v : 'on')
-
-export { placeholderNames }
-
-export const LOAD_FAILED =
-  'secret-box: the stored secrets could not be loaded, so the command was blocked before it ran (fail closed). Check that the keyring backend works and is unlocked (run "secret-box names" in a terminal), or set mode to off or dry in ~/.config/iuliandita-mods/secret-box.json.'
+export { parseMode, placeholderNames, rewriteCommand as rewrite, WITHHELD, type Mode }
 
 export const helperMissing = (helper: string): string => `secret-box: the helper ${helper} was not found, so the command was blocked (fail closed). Reinstall the plugin.`
 
@@ -36,10 +28,6 @@ export function request(helper: string, texts: string[]) {
   })
 }
 
-// The command a host runs instead: the helper fills the placeholders in and scrubs its own output.
-export const rewrite = (helper: string, command: string): string => rewriteCommand(helper, command, true)
-
-export const WITHHELD = '[secret-box: this content was withheld because scrubbing failed]'
 const MAX_DEPTH = 24
 
 // @opencode/ai 2.2.1 schema/messages: only allowlisted fields are structural.
@@ -89,10 +77,12 @@ function withholdMessages(value: unknown): unknown {
   })
 }
 
-// Every string and object key under a value, copied (a class instance keeps its prototype; a value with no
-// own enumerable fields, like a Date, is left as it is). A subtree deeper than MAX_DEPTH or looping back is
-// replaced by a notice and counts as a change, so a caller never keeps the original. A key that then collides
-// with another gets a `#2`, `#3`... suffix.
+// Every string and object key under a value. An array or object with a replacement under it is copied (a class
+// instance keeps its prototype); one with none comes back as the same object, and so does a value with no own
+// enumerable fields, like a Date. Binary views, Map, Set and URL are never walked or copied: a copy built from
+// their own fields would not be one. A subtree deeper than MAX_DEPTH or looping back is replaced by a notice
+// and counts as a change, so a caller never keeps the original. A key that then collides with another gets a
+// `#2`, `#3`... suffix.
 export function scrubValue<T>(value: T, scrub: Scrubber): { value: T; names: string[]; changed: boolean } {
   const names = new Set<string>()
   let changed = false
@@ -105,24 +95,31 @@ export function scrubValue<T>(value: T, scrub: Scrubber): { value: T; names: str
   const walk = (v: unknown, depth: number, path: Set<object>): unknown => {
     if (typeof v === 'string') return text(v)
     if (v === null || typeof v !== 'object') return v
+    if (ArrayBuffer.isView(v) || v instanceof Map || v instanceof Set || v instanceof URL) return v
     if (depth > MAX_DEPTH || path.has(v)) {
       changed = true
       return WITHHELD
     }
     path.add(v)
     try {
-      if (Array.isArray(v)) return v.map((x) => walk(x, depth + 1, path))
+      if (Array.isArray(v)) {
+        const items = v.map((x) => walk(x, depth + 1, path))
+        return items.some((x, i) => x !== v[i]) ? items : v
+      }
       // Error.message/stack/cause are non-enumerable but consumed by the host too.
       const entries = v instanceof Error ? Object.getOwnPropertyNames(v).map((key) => [key, Reflect.get(v, key)] as const) : Object.entries(v)
       if (entries.length === 0) return v
       const out = Object.create(Object.getPrototypeOf(v)) as Record<string, unknown>
+      let same = true
       for (const [k, x] of entries) {
         const base = text(k)
         let key = base
         for (let n = 2; Object.hasOwn(out, key); n++) key = `${base}#${n}`
-        Object.defineProperty(out, key, { value: walk(x, depth + 1, path), enumerable: true, configurable: true, writable: true })
+        const value = walk(x, depth + 1, path)
+        if (key !== k || value !== x) same = false
+        Object.defineProperty(out, key, { value, enumerable: true, configurable: true, writable: true })
       }
-      return out
+      return same ? v : out
     } finally {
       path.delete(v)
     }

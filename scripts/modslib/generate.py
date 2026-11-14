@@ -6,7 +6,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from modslib.catalog import CatalogError, Mod, ToolMissing, inject_span, load_all, load_mods, shared_dir
+from modslib.catalog import CatalogError, Mod, ToolMissing, load_all, load_mods
 
 MARKETPLACE_NAME = "iuliandita-mods"
 LOCAL_MARKETPLACE_NAME = "iuliandita-mods-local"
@@ -77,6 +77,7 @@ def build_catalog(mods: list[Mod]) -> dict:
         "schema": 1,
         "marketplace": MARKETPLACE_NAME,
         "source": GITHUB_SOURCE,
+        "stable_source": CLAUDE_STABLE_SOURCE,
         "mods": [
             {
                 **{k: v for k, v in m.as_dict().items() if k != "hosts"},
@@ -93,36 +94,6 @@ def build_catalog(mods: list[Mod]) -> dict:
 
 def render(obj: dict) -> str:
     return json.dumps(obj, indent=2) + "\n"
-
-
-def shared_copy_dir(mod: Mod) -> Path:
-    return mod.plugin_dir / "hooks" / "shared"
-
-
-HEADER_PREFIX = "// Generated from shared/"
-
-
-def shared_copy(root: Path, name: str) -> str:
-    header = f"{HEADER_PREFIX}{name} by scripts/mods generate. Do not edit by hand.\n"
-    return header + (shared_dir(root) / name).read_text()
-
-
-def register_path(mod: Mod) -> Path:
-    return mod.plugin_dir / "hooks" / "register.ts"
-
-
-# The mod's register.ts with each listed block rewritten between its markers (checked by the catalog).
-def injected(root: Path, mod: Mod) -> str:
-    text = register_path(mod).read_text()
-    for name in mod.inject:
-        span = inject_span(text, name)
-        if span is None:
-            raise CatalogError(f"{mod.name}: inject markers for {name} are missing")
-        block = (shared_dir(root) / name).read_text()
-        if block and not block.endswith("\n"):
-            block += "\n"
-        text = text[: span[0]] + block + text[span[1] :]
-    return text
 
 
 # The host packages ship one self-contained file each, so a plugin copied out of the repository still runs.
@@ -186,10 +157,7 @@ def host_copies(mod: Mod) -> dict[Path, Path]:
 def targets(root: Path, *, include_local: bool, bundles: bool = False) -> dict[Path, str]:
     mods = load_all(root, include_local=include_local)
     public = load_mods(root)
-    out = {
-        shared_copy_dir(m) / name: shared_copy(root, name) for m in mods for name in m.shared
-    }
-    out |= {register_path(m): injected(root, m) for m in mods if m.inject}
+    out: dict[Path, str] = {}
     for m in mods:
         out |= {dest: src.read_text() for dest, src in host_copies(m).items()}
     if bundles:
@@ -208,21 +176,13 @@ def targets(root: Path, *, include_local: bool, bundles: bool = False) -> dict[P
     return out
 
 
-# Copies in a mod's hooks/shared/ that its mod.json no longer lists.
-def extra_copies(root: Path, *, include_local: bool) -> list[Path]:
-    return [
-        p
-        for m in load_all(root, include_local=include_local)
-        if shared_copy_dir(m).is_dir()
-        for p in sorted(shared_copy_dir(m).iterdir())
-        if p.is_file() and p.name not in m.shared
-    ]
-
-
 # Host bundles need the pinned bun. Writing them always does; checking them does only when
 # MODS_REQUIRE_BUN=1 (CI), so a machine without that bun can still install and validate, and
-# `bundles=False` leaves them out entirely.
-def generate(root: Path, *, check: bool = False, include_local: bool = False, bundles: bool = True) -> list[Path]:
+# `bundles=False` leaves them out entirely. A check that skips them says so in `skipped`.
+def generate(
+    root: Path, *, check: bool = False, include_local: bool = False, bundles: bool = True,
+    skipped: list[str] | None = None,
+) -> list[Path]:
     required = not check or os.environ.get("MODS_REQUIRE_BUN") == "1"
     with_bundles = bundles and any(m.hosts for m in load_all(root, include_local=include_local))
     if with_bundles:
@@ -230,18 +190,9 @@ def generate(root: Path, *, check: bool = False, include_local: bool = False, bu
         if problem and required:
             raise (ToolMissing if problem[1] else CatalogError)(problem[0])
         with_bundles = problem is None
+        if problem and skipped is not None:
+            skipped.append(f"host bundle check skipped: {problem[0]}; set MODS_REQUIRE_BUN=1 to make this a failure")
     changed: list[Path] = []
-    extras = extra_copies(root, include_local=include_local)
-    foreign = [p for p in extras if not p.read_text().startswith(HEADER_PREFIX)]
-    if foreign:
-        raise CatalogError(
-            "not a generated copy (no generated header), move or delete it by hand: "
-            + ", ".join(str(p.relative_to(root)) for p in foreign)
-        )
-    for path in extras:
-        changed.append(path)
-        if not check:
-            path.unlink()
     modes = {dest: bool(src.stat().st_mode & 0o111) for m in load_all(root, include_local=include_local) for dest, src in host_copies(m).items()}
     for path, text in targets(root, include_local=include_local, bundles=with_bundles).items():
         stale = not path.is_file() or path.read_text() != text or (path in modes and bool(path.stat().st_mode & 0o111) != modes[path])

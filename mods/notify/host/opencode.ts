@@ -46,6 +46,7 @@ export async function setup(ctx: Context, deps: Deps = {}): Promise<() => void> 
   const started = new Map<string, number>()
   const stop = new AbortController()
   const said = new Set<string>()
+  let stalled = false
   const say = (line: string): void => {
     if (!said.has(line)) {
       said.add(line)
@@ -84,7 +85,8 @@ export async function setup(ctx: Context, deps: Deps = {}): Promise<() => void> 
       return
     }
     const pending = opencodeNotice(e.type, ctx.location.directory)
-    if (!pending) return
+    // A notifier that hung once would hold the event loop for the full timeout on every later event.
+    if (!pending || stalled) return
     // Read per event, so a change to the options file needs no restart.
     const { config, warning } = readConfig(deps.options)
     if (warning) say(warning)
@@ -117,6 +119,7 @@ export async function setup(ctx: Context, deps: Deps = {}): Promise<() => void> 
     const notice = await withContext(pending, deps.home === undefined ? home() : deps.home, deps.fs ?? nodeFs)
     const result = await deliver(run, platform, notice, config.sound)
     if (!result.ok) say(result.warning)
+    if (!result.ok && result.timedOut) stalled = true
   }
 
   void (async () => {

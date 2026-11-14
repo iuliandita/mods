@@ -63,7 +63,8 @@ notice. Stored history and output files are not rewritten; opaque media/provider
 content added by later hooks, tool definitions, request options and transport headers are not
 covered by these checks.
 Each scrub reads current values; removed or rotated values are unknown to later scrubs. A
-wrapped command retains its initial values while filtering its own stdout and stderr. Claude Code
+wrapped command retains its initial values while filtering its own stdout and stderr; if the
+values cannot be read to build that filter, `exec` exits 5 and nothing runs. Claude Code
 may leave large or inaccessible saved outputs unchanged, Codex filters only a wrapped command's own
 output, and OpenCode does not rewrite saved files. Keychain command tests use mocks; real macOS
 access and host integration remain unverified. See [what secret-box does not protect](mods/secret-box/README.md#what-it-does-not-protect).
@@ -71,11 +72,43 @@ access and host integration remain unverified. See [what secret-box does not pro
 ### notify
 
 `notify` makes no network or model calls. It starts one local program (`notify-send` or
-`osascript`) with the repo folder name, the harness, the branch name and a fixed reason as text, never message text or
-commands, and without a shell. It reads options only from the plugin options or the user-level
-`notify.json`. A failing notifier is a warning line and never denies an operation. Codex waits
-for the finish hook, capped at one second with a 250 ms notifier timeout; permission
-notifications stay in the background.
+`osascript`), without a shell, and passes it the repo folder name, the harness, the branch name
+and a fixed reason. These go to the desktop notification service. On Linux, `&`, `<` and `>` in
+the body are escaped so a branch name cannot format the notification.
+
+What it reads:
+
+- With `state=on` (the default), the last non-blank line of the turn's final assistant message,
+  to pick one of four fixed labels (`Done`, `Needs you`, `Running`, `Unfinished`). The label is
+  disclosed; no other message text or command is. `state=off` reads nothing and always says
+  `Finished`.
+- With `t3=auto` (the default) on Codex and OpenCode, a local T3 Code state database, read-only,
+  to detect child sessions. `t3=off` prevents the read. Claude Code does not read it.
+- On Codex, the first line of the session transcript (64 KiB cap), to detect `codex exec` and
+  subagent sessions.
+- `.git/HEAD` for the branch; no git command is run.
+- Options from the Claude plugin options or the user-level `notify.json`, plus the environment
+  opt-out `IULIANDITA_MODS_NOTIFY=off`, which suppresses every notification of that process.
+
+A failing notifier is a warning line and never denies an operation. Codex waits for the finish
+hook, capped at one second with a 250 ms notifier timeout; permission notifications stay in the
+background. See [notify's limits](mods/notify/README.md#limits).
+
+### statusline
+
+`statusline` is the only mod with network egress, and it has none of its own: with `forge=on`
+(the default), in a git repository whose `origin` is on github.com, gitlab.com or a host listed
+in `forgeHosts`, it runs your logged-in `gh` or `glab`. That sends the repository's owner and
+name and the current branch name to the forge, to read PR and issue counts. `forge=off` stops
+these calls; without `gh` or `glab` nothing is sent. Everything else it runs or reads (`git`,
+`kubectl`, the session transcript, settings) stays on the machine. See
+[statusline's egress](mods/statusline/README.md#egress).
+
+### delegation-board
+
+`delegation-board` only observes: no hook changes a spawn, a turn or a tool call, and it makes
+no network or model calls. It shows the session's subagents with their task descriptions and
+token counts in a pane on the machine running the agent.
 
 ## Not in Scope
 

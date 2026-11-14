@@ -9,7 +9,7 @@ import pytest
 
 from conftest import write_mod
 from modslib import claude
-from modslib.checks import scan_private, validate
+from modslib.checks import scan_private, validate, validate_report
 from modslib.generate import generate
 
 HOME_PATH = "/ho" + "me/alice/project"
@@ -175,3 +175,30 @@ def test_scan_flags_emails_except_the_public_identifier_and_placeholders(
 ) -> None:
     (tmp_path / "notes.md").write_text(f"contact {email}\n")
     assert bool(scan_private(tmp_path)) is hit
+
+
+@pytest.mark.parametrize(
+    ("exc", "stale", "code"),
+    [
+        (claude.ClaudeMissing("claude CLI not found"), False, 3),
+        (claude.ClaudeMissing("claude CLI not found"), True, 1),
+        (claude.ClaudeError("claude plugin validate timed out"), False, 1),
+        (claude.ClaudeError("claude plugin validate timed out"), True, 1),
+    ],
+)
+def test_validate_keeps_its_problems_when_claude_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exc: Exception, stale: bool, code: int
+) -> None:
+    write_mod(tmp_path, "alpha")
+    generate(tmp_path)
+    if stale:
+        (tmp_path / "mods.json").write_text("{}\n")
+
+    def raiser(*args: str, check: bool = True) -> None:
+        raise exc
+
+    monkeypatch.setattr(claude, "run", raiser)
+    got, payload = validate_report(tmp_path)
+    expected = ["generated file is stale: mods.json (run scripts/mods generate)"] if stale else []
+    assert got == code and payload["ok"] is False
+    assert payload["problems"] == payload["errors"] == [*expected, str(exc)]

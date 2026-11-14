@@ -5,8 +5,11 @@ import { evaluate, parseConfig, type Env } from './rules'
 // Verdicts: A allow, U unparsed, D:<rule> denied by that rule. The current branch is feature/x and the current
 // kube context kind-dev (relaxed, as kind-* is).
 type Want = 'A' | 'U' | `D:${string}`
+// `branches` maps a directory to its branch; `tagged` means a tag shares the branch's name.
 type World = {
   branch?: string
+  branches?: Record<string, string>
+  tagged?: boolean
   context?: string
   workspace?: string
   cwd?: string
@@ -19,9 +22,10 @@ type Row = [cmd: string, want: Want, extra?: Extra]
 const RULES = { identityRules: JSON.stringify([{ prefix: '~/personal/', email: 'me@personal.example' }]) }
 const PROD = { world: { context: 'prod-eu' } }
 const C_FILE = { '/h/personal/repo/c': 'current-context: prod-eu\n' }
+const LOCAL_BRANCH = 'rev-parse --verify --quiet refs/heads/'
 
 function fakeEnv(w: World = {}): Env & { probes: (Record<string, string> | undefined)[] } {
-  const r = { branch: 'feature/x', context: 'kind-dev', workspace: 'default', cwd: '/h/personal/repo', files: {}, gitConfig: {}, ...w }
+  const r = { branch: 'feature/x', branches: {} as Record<string, string>, tagged: false, context: 'kind-dev', workspace: 'default', cwd: '/h/personal/repo', files: {}, gitConfig: {}, ...w }
   const files: Record<string, string> = r.files
   const config: Record<string, string> = r.gitConfig
   const probes: (Record<string, string> | undefined)[] = []
@@ -37,7 +41,7 @@ function fakeEnv(w: World = {}): Env & { probes: (Record<string, string> | undef
       if (key.endsWith(' workspace show')) return { ok: true, out: r.workspace }
       return { ok: false, out: '' }
     },
-    git: async (_dir, args, env) => {
+    git: async (dir, args, env) => {
       const key = args.join(' ')
       if (key.startsWith('config --get-regexp')) {
         const lines = Object.entries(config).filter(([k]) => /^remote\..+\.push$/.test(k)).map(([k, v]) => `${k} ${v}`)
@@ -47,8 +51,12 @@ function fakeEnv(w: World = {}): Env & { probes: (Record<string, string> | undef
         const v = config[key.slice('config --get '.length)]
         return v === undefined ? { ok: false, out: '' } : { ok: true, out: v }
       }
-      if (key.startsWith('symbolic-ref')) return { ok: true, out: r.branch }
-      if (key.startsWith('rev-parse --verify --quiet refs/heads/')) return { ok: ['develop', 'main', 'feature/x'].includes(key.slice(37)), out: '' }
+      if (key.startsWith('symbolic-ref')) {
+        const branch = r.branches[dir] ?? r.branch
+        // Real git: the full ref without `--short`; with it, the shortest name no other ref shares.
+        return { ok: true, out: !args.includes('--short') ? `refs/heads/${branch}` : r.tagged ? `heads/${branch}` : branch }
+      }
+      if (key.startsWith(LOCAL_BRANCH)) return { ok: ['develop', 'main', 'feature/x'].includes(key.slice(LOCAL_BRANCH.length)), out: '' }
       if (key.startsWith('rev-parse --verify')) return { ok: true, out: '' }
       if (key.startsWith('rev-parse --show-toplevel')) return { ok: true, out: '/h/personal/repo' }
       const ident = /var GIT_(AUTHOR|COMMITTER)_IDENT$/.exec(key)
@@ -509,6 +517,71 @@ export const ROWS: Row[] = [
   ['(( n <<= 1 )) && git status', 'A'],
   ['echo $(( 1 + 2 )) && git status', 'A'],
   ['eval "$(ssh-agent -s)"', 'A'],
+
+  // #197: switching to an existing unprotected branch leaves the protected one.
+  ['git checkout feature/x && git commit -m x', 'A', { world: { branch: 'main' } }],
+  ['git switch feature/x && git push origin feature/x', 'A', { world: { branch: 'main' } }],
+  // #197: an escaped `$` or backslash-newline inside double quotes.
+  [String.raw`bash -c "git push origin \$(git branch --show-current)"`, 'U'],
+  [String.raw`bash -c "git push origin \$BR"`, 'U'],
+  [String.raw`eval "git push origin \$BR"`, 'U'],
+  ['git push origin "ma\\\nin"', 'D:protected-branch'],
+  [String.raw`git push origin "ma\in"`, 'A'],
+  [String.raw`bash -c "git checkout \$B && git commit -m x"`, 'D:protected-branch'],
+  [String.raw`bash -c "git switch \$B && git push"`, 'D:protected-branch'],
+  [`git push origin 'feature/$BR'`, 'U'],
+  [`git switch '$B' && git commit -m x`, 'D:protected-branch'],
+  [`git rebase origin/develop '$B'`, 'D:protected-branch'],
+  [String.raw`git commit -m "costs \$5 and a \"quote\""`, 'A'],
+  // #197: `${...}` and `$[...]` are one word piece, whatever is inside.
+  ['echo ${x:- #}; git push origin main', 'D:protected-branch'],
+  ['echo $[1<<2]\ngit push origin main', 'D:protected-branch'],
+  ['echo ${x:+ <<EOF}\ngit push origin main\nEOF', 'D:protected-branch'],
+  ['echo $[ 1 # 2 ]; git push origin main', 'D:protected-branch'],
+  ['echo ${x:- #}; kubectl delete ns x', 'D:context', PROD],
+  ['echo ${x:- #}; kubectl delete ns x', 'D:context', { world: { context: 'staging-1' } }],
+  ['echo ${x:-$(git push origin main)}', 'D:protected-branch'],
+  ['echo ${x:-a} $[1+2] && git push origin feature/x', 'A'],
+  // #197: a shell told to read its script from stdin by path.
+  ...['/dev/stdin', '/dev/fd/0', '/proc/self/fd/0'].map((path): Row => [`bash ${path} <<< 'git push origin main'`, 'U']),
+  // #197: option values that are not operands, and operands that look like options.
+  ['git rebase -S origin/main main', 'D:protected-branch'],
+  ['git rebase --gpg-sign origin/main main', 'D:protected-branch'],
+  ['git rebase -Skey origin/develop feature/x', 'A'],
+  ['git merge --no-ff feature -m --ff-only', 'D:protected-branch', { world: { branch: 'main' } }],
+  ['git merge --no-ff feature -- --ff-only', 'D:protected-branch', { world: { branch: 'main' } }],
+  ['git merge --ff-only feature', 'A', { world: { branch: 'main' } }],
+  ['git push origin --branches', 'D:protected-branch'],
+  ['git push --branches', 'D:protected-branch'],
+  // #197: `symbolic-ref --short` prints `heads/main` when a tag is also named main.
+  ['git commit -m x', 'D:protected-branch', { world: { branch: 'main', tagged: true } }],
+  // #197: command words another shell or a case-insensitive file system runs as the tool.
+  ['=git push origin main', 'U'],
+  ['GIT push origin main', 'U'],
+  ['Kubectl delete ns x', 'U', PROD],
+  // #197: directory changes that depend on OLDPWD, HOME or CDPATH.
+  ...([
+    ['export OLDPWD=/h/protected; cd - && git commit -m x', 'D:protected-branch'],
+    ['OLDPWD=/h/protected; cd - && git commit -m x', 'D:protected-branch'],
+    ['cd /h/other && export OLDPWD=/h/protected && cd - && git commit -m x', 'D:protected-branch'],
+    ['cd - && git commit -m x', 'D:lookup'],
+    ['unset OLDPWD; cd - && git commit -m x', 'D:lookup'],
+    ['cd -- -repo && git commit -m x', 'D:protected-branch'],
+    ['export HOME=/h/protected; cd && git commit -m x', 'D:protected-branch'],
+    ['export HOME=/h/protected; cd ~ && git commit -m x', 'D:protected-branch'],
+    ['HOME=/h/protected cd && git commit -m x', 'D:lookup'],
+    ['export CDPATH=/h; cd protected && git commit -m x', 'D:lookup'],
+    ['cd /h/other && cd /h/protected && git commit -m x', 'D:protected-branch'],
+    ['cd /h/protected && cd - && git commit -m x', 'A'],
+    ['export CDPATH=/h; cd ./sub && git commit -m x', 'A'],
+    ['cd sub && git commit -m x', 'A'],
+  ] as [string, Want][]).map(([cmd, want]): Row => [cmd, want, { world: { branches: { '/h/protected': 'main', '/h/personal/repo/-repo': 'main' } } }]),
+  // #197: forge verb aliases and closing or reopening comments.
+  ...[
+    'gh pr new --body', 'gh issue new --body', 'gh release new v1 --notes', 'glab mr new --description', 'glab issue new --description',
+    'gh pr close 1 --comment', 'gh pr reopen 1 --comment', 'gh issue close 1 -c', 'gh issue reopen 1 -c', 'fj pr close 1 -w', 'fj issue close 1 -w',
+  ].map((cmd): Row => [`${cmd} "Co-Authored-By: A <a@example.com>"`, 'D:attribution']),
+  ['gh pr close 1 --comment "superseded by #12"', 'A'],
 
   // STATE
   ['declare -x GIT_DIR=/x; git commit -m x', 'U'],

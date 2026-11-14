@@ -11,8 +11,8 @@ import time
 from pathlib import Path
 
 from modslib.catalog import CatalogError
+from modslib.generate import MARKETPLACE_NAME
 
-MARKET = "iuliandita-mods"
 RETRUST = "After every Codex plugin install or update, open /hooks in Codex and review and trust each changed hook; guards fail open until trusted again."
 
 
@@ -69,9 +69,9 @@ def _list_hooks(cwd: Path, snapshot: Path) -> dict:
                     proc.wait()
 
 
-def hook_trust(cwd: Path) -> tuple[list[dict], list[str]]:
+def hook_trust(cwd: Path, guards: set[str]) -> tuple[list[dict], list[str]]:
     home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
-    cache = home / "plugins/cache" / MARKET
+    cache = home / "plugins/cache" / MARKETPLACE_NAME
     if not cache.is_dir():
         return [], []
     try:
@@ -85,7 +85,7 @@ def hook_trust(cwd: Path) -> tuple[list[dict], list[str]]:
                     shutil.copyfile(source, snapshot / name)
                     (snapshot / name).chmod(0o600)
             for plugin in cache.iterdir():
-                plugin_id = f"{plugin.name}@{MARKET}"
+                plugin_id = f"{plugin.name}@{MARKETPLACE_NAME}"
                 def legacy_path(base: Path) -> Path:
                     digest = hashlib.sha256()
                     for part in (os.fsencode(base / "config.toml"), plugin_id.encode()):
@@ -97,7 +97,7 @@ def hook_trust(cwd: Path) -> tuple[list[dict], list[str]]:
                     target = legacy_path(snapshot)
                     target.parent.mkdir(exist_ok=True)
                     shutil.copyfile(original, target)
-            shutil.copytree(cache, snapshot / "plugins/cache" / MARKET, symlinks=True)
+            shutil.copytree(cache, snapshot / "plugins/cache" / MARKETPLACE_NAME, symlinks=True)
             result = _list_hooks(cwd, snapshot)
         rows: list[dict] = []
         errors: list[str] = []
@@ -113,15 +113,15 @@ def hook_trust(cwd: Path) -> tuple[list[dict], list[str]]:
                 if not isinstance(hook, dict):
                     raise ValueError("Codex returned an invalid hook")
                 plugin = hook.get("pluginId")
-                if not isinstance(plugin, str) or not plugin.endswith("@" + MARKET):
+                if not isinstance(plugin, str) or not plugin.endswith("@" + MARKETPLACE_NAME):
                     continue
                 status = hook["trustStatus"]
                 if status not in ("trusted", "modified", "untrusted") or not isinstance(hook["enabled"], bool):
                     raise ValueError("Codex returned an unknown hook trust state")
                 mod = plugin.split("@", 1)[0]
                 rows.append({"mod": mod, "event": hook["eventName"], "status": status, "enabled": hook["enabled"]})
-                if mod in ("guard-rules", "secret-box") and (status != "trusted" or not hook["enabled"]):
+                if mod in guards and (status != "trusted" or not hook["enabled"]):
                     errors.append(f"{mod}: Codex {hook['eventName']} hook is {status}" + (" and disabled" if not hook["enabled"] else "") + "; open /hooks in Codex and enable and trust it again")
         return rows, errors
     except (OSError, ValueError, KeyError, TypeError) as exc:
-        raise CatalogError("mods: error: Codex hook trust could not be checked: inventory unavailable or invalid; run codex, inspect /hooks, and retry doctor") from exc
+        raise CatalogError("Codex hook trust could not be checked: inventory unavailable or invalid; run codex, inspect /hooks, and retry doctor") from exc

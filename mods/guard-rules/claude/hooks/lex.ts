@@ -1,4 +1,4 @@
-import { arithEnd, arithOpaque, isSpace, isWordEnd, readAnsiC, readWord, SEPARATORS, skipBodies, skipDouble, skipSubst, type Heredoc } from './scan'
+import { arithEnd, arithOpaque, isSpace, isWordEnd, readAnsiC, readWord, SEPARATORS, skipBodies, skipBracket, skipDouble, skipSubst, type Heredoc } from './scan'
 import { liftAssigns } from './words'
 
 // `op` is the connector text before the command ('&&', '||', ';', '|', newline, ...; '$(' inside a substitution).
@@ -157,8 +157,23 @@ export function tokenize(src: string, depth = 0): { cmds: Simple[]; ok: boolean;
         i = src.length
       } else {
         const body = src.slice(i + 1, end - 1)
-        cur += body
+        // Inside double quotes a backslash escapes only these, and a backslash-newline is removed.
+        cur += body.replace(/\\([$`"\\\n])/g, (_, ch: string) => (ch === '\n' ? '' : ch))
         subsIn(body)
+        i = end
+      }
+    } else if (c === '$' && (src[i + 1] === '{' || src[i + 1] === '[')) {
+      // `${...}` and `$[...]` are one piece: a `#`, `<<` or separator inside is not the command's.
+      const end = skipBracket(src, i + 1)
+      inWord = true
+      dyn = true
+      if (end === -1) {
+        ok = false
+        cur += src.slice(i)
+        i = src.length
+      } else {
+        cur += src.slice(i, end)
+        subsIn(src.slice(i + 2, end - 1))
         i = end
       }
     } else if (c === '$' && src[i + 1] === '(') {

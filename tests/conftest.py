@@ -28,6 +28,12 @@ DEFAULT_TEST = (
 def isolated_codex_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
 
+
+@pytest.fixture(autouse=True)
+def isolated_git_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+
 FAKE_CLAUDE = r"""#!/bin/sh
 echo "$@" >> "$FAKE_CLAUDE_DIR/calls.log"
 if [ -n "$FAKE_CLAUDE_FAIL" ]; then echo "boom" >&2; exit 1; fi

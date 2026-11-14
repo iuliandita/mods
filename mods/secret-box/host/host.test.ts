@@ -1,36 +1,33 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test'
 import { spawnSync } from 'node:child_process'
-import { chmodSync, copyFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { main, type Io } from './cli'
 import { setup } from './opencode'
-import { request, WITHHELD } from './core'
+import { request, scrubValue, WITHHELD } from './core'
 import { parseReply, scrubBatch } from '../claude/hooks/remote'
 import { scopeDenied } from '../claude/hooks/scopes'
 
 const SECRET = 'tok_AbC123xyz-Qq9'
 
+// The shipped helper with a JSON-file backend injected; it reads the store named by SECRET_BOX_TEST_STORE.
+const helper = join(import.meta.dir, '..', '..', '..', 'tests', 'secret_box_entry.py')
+
 let root: string
-let helper: string
 let options: string
 
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'secret-box-host-'))
-  helper = join(root, 'secret-box')
   options = join(root, 'secret-box.json')
-  copyFileSync(join(import.meta.dir, '..', 'claude', 'bin', 'secret-box'), helper)
-  chmodSync(helper, 0o755)
   const store = join(root, 'store.json')
   writeFileSync(store, JSON.stringify({ API_KEY: SECRET }))
-  process.env.SECRET_BOX_BACKEND = `file:${store}`
-  process.env.SECRET_BOX_TEST = '1'
+  process.env.SECRET_BOX_TEST_STORE = store
 })
 
 afterAll(() => {
-  delete process.env.SECRET_BOX_BACKEND
-  delete process.env.SECRET_BOX_TEST
+  delete process.env.SECRET_BOX_TEST_STORE
   rmSync(root, { recursive: true, force: true })
 })
 
@@ -220,6 +217,39 @@ test('codex: off leaves the command alone, dry only reports, an unreadable optio
   expect(dry.hookSpecificOutput).toBeUndefined()
   writeFileSync(options, '{ broken')
   expect((await hook(bash('echo {{secret:API_KEY}}'))).out.hookSpecificOutput.permissionDecision).toBe('deny')
+})
+
+test('codex: a hook failure denies a placeholder command without saying how to switch the box off', async () => {
+  withMode()
+  let calls = 0
+  const i = io(bash('echo {{secret:API_KEY}}'))
+  const out = i.out
+  i.out = (s) => {
+    if (calls++ === 0) throw new Error('write failed')
+    out(s)
+  }
+  expect(await main(['hook'], i)).toBe(0)
+  const answer = JSON.parse(i.stdout).hookSpecificOutput
+  expect(answer.permissionDecision).toBe('deny')
+  expect(answer.permissionDecisionReason).toContain('fail closed')
+  expect(answer.permissionDecisionReason).not.toMatch(/\bmode\b.*\b(off|dry)\b|disable/i)
+})
+
+test('scrubValue leaves binary and built-in container values alone and returns the original when nothing changed', () => {
+  const scrub = (text: string) => ({ text: text.replaceAll(SECRET, '{{secret:API_KEY}}'), names: text.includes(SECRET) ? ['API_KEY'] : [] })
+  const data = new Uint8Array([1, 2, 3])
+  const kept = { map: new Map([['k', SECRET]]), set: new Set([SECRET]), url: new URL('https://example.com/'), view: new DataView(new ArrayBuffer(2)) }
+  const part = { type: 'media', data, text: `see ${SECRET}`, kept }
+  const changed = scrubValue(part, scrub)
+  expect(changed.changed).toBe(true)
+  expect(changed.value.text).toBe('see {{secret:API_KEY}}')
+  expect(changed.value.data).toBe(data)
+  expect(changed.value.kept).toBe(kept)
+  const plain = { type: 'media', data, nested: [{ text: 'nothing here' }], error: new Error('plain') }
+  const same = scrubValue(plain, scrub)
+  expect(same).toEqual({ value: plain, names: [], changed: false })
+  expect(same.value).toBe(plain)
+  expect(same.value.nested).toBe(plain.nested)
 })
 
 test('codex: a missing helper blocks a placeholder command only', async () => {

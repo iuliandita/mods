@@ -53,7 +53,7 @@ export async function hook(io: Io): Promise<number> {
     return 0
   } catch {
     if (placeholderNames(command).length === 0) return 0
-    return deny(io, 'secret-box: the hook failed, so the command was blocked before it ran (fail closed). Set mode to off or dry in ~/.config/iuliandita-mods/secret-box.json, or disable the plugin.')
+    return deny(io, 'secret-box: the hook failed, so the command was blocked before it ran (fail closed). The user must check the secret-box install and its options file, ~/.config/iuliandita-mods/secret-box.json.')
   }
 }
 

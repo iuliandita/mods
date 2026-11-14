@@ -67,7 +67,8 @@ scopes; entries without a scope count at any scope. `installed: null` means inst
 could not be established, not that the plugin is absent.
 
 From a clone, installation registers the clone root as `iuliandita-mods`, not GitHub.
-Use `--source iuliandita/mods` for GitHub, or a git URL/path for another source. Names are still
+Use `--source iuliandita/mods#main` for the stable GitHub branch (without `#main` it follows the
+nightly default branch), or a git URL/path for another source. Names are still
 validated against this clone's catalog, so the alternate source must carry those mods.
 `--root <repo>` selects the catalog root and works before or after the command, as does `--json`.
 Private mods use `scripts/mods install <name> --local`; they register `<clone>/local` as
@@ -101,7 +102,7 @@ then remove only that marketplace registration and retry the intended install:
 
 ```bash
 claude plugin marketplace remove iuliandita-mods
-scripts/mods install guard-rules --source iuliandita/mods --scope user --json
+scripts/mods install guard-rules --source iuliandita/mods#main --scope user --json
 ```
 
 Do not remove unrelated marketplaces or assume removal restores an earlier plugin version.
@@ -169,13 +170,16 @@ options; `delegation-board` reads only `mode` from its file there, `statusline` 
 remove hook-plugin entries from `opencode.json` to uninstall those. Preserve the clone and
 user-level configuration when updating or rolling back a path-based install.
 
-On OpenCode 2.2.1, `secret-box` scrubs messages and system content for primary, compaction,
-generate and title requests, including user `!` shell output sent to a model. Stored history
+For OpenCode 2.2.1, `secret-box` scrubs messages and system content for primary, compaction,
+generate and title requests, including user `!` shell output sent to a model. This was checked
+against the published 2.2.1 types and adapter tests, not in an authenticated session. Stored history
 and output files are not rewritten; see the mod's [limits](mods/secret-box/README.md#what-it-does-not-protect).
 
-After a Codex install the hook command is
-`node <plugin>/bin/guard-rules.mjs`; the same file in a clone (`mods/guard-rules/codex/bin/`) is
-the command line tool for OpenCode users too.
+After a Codex install the hook runs `node "$PLUGIN_ROOT/bin/guard-rules.mjs" hook` inside a
+wrapper that turns any exit status other than 0 or 2 into exit 2, because Codex lets a hook that
+exits 1 through. The full command is in `mods/guard-rules/codex/hooks/hooks.json`; copy it from
+there, never the bare `node` call. The same `guard-rules.mjs` in a clone
+(`mods/guard-rules/codex/bin/`) is the command line tool for OpenCode users too.
 
 ## Retired mods
 
@@ -203,7 +207,7 @@ From a clone, `scripts/mods` speaks JSON (`--json` on every command):
 ```sh
 scripts/mods list --json
 scripts/mods install <mod> [<mod> ...] [--scope user|project|local] [--local] \
-    [--source <owner/repo>]
+    [--source <owner/repo#ref>]
 scripts/mods uninstall <mod> [<mod> ...] [--scope user|project|local]
 scripts/mods doctor --json
 scripts/mods validate [--no-claude]
@@ -213,7 +217,8 @@ scripts/mods generate [--check] [--local]
 `--json` and `--root <repo>` work before or after the subcommand. Option abbreviations such as
 `--js` are rejected. `--root` must be a directory with a `mods/` or `local/mods/` directory;
 otherwise the command exits 1 before reading or writing anything. `--source` installs from
-another marketplace source (an `owner/repo`, git URL or path) instead of this clone; it cannot
+another marketplace source (an `owner/repo` or git URL, each with an optional `#ref`, or a path)
+instead of this clone; it cannot
 be combined with `--local` (exit 1). Mod names are still checked against this clone's catalog,
 not the remote one, so the source must carry the same mods.
 
@@ -223,31 +228,40 @@ What an agent can rely on:
   (a list of strings: empty when `ok` is true, non-empty when false). Exit codes: 0 done, 1 failed, 2 usage
   error (unknown command or flag), 3 a required tool (claude, or the pinned bun) is missing. Usage,
   `--root`, I/O, and `generate` catalog errors carry only these two keys.
+- Exit 3 means the missing tool is the only thing wrong. `doctor` and `validate` keep everything
+  else they found: when the claude CLI is missing and another error or problem is reported with
+  it, they exit 1 and list both. A claude CLI that is present but fails (it cannot run, times
+  out) is exit 1.
 - Each command adds its own keys: `list` adds `claude` and `mods`; `install` adds `installed`
   and `uninstall` adds `uninstalled` (the plugin ids done so far, also on failure), plus `manual`
   and `skipped` when retired mods are involved; `doctor`
-  adds `claude`, `mods`, `notes`, and `source`; `validate` adds `problems` (same strings as
+  adds `claude`, `mods`, `codex_hooks` (one `{"mod", "event", "status", "enabled"}` object per
+  installed Codex hook of this collection), `notes`, and `source` (the pinned stable source,
+  `iuliandita/mods#main`,
+  ready for `--source`; `mods.json` carries the same value as `stable_source`); `validate` adds `problems` (same strings as
   `errors`); `generate` adds `written`, and `generate --check` adds `stale`.
-- `claude` is always `{"found": bool, "version": string|null}`. `doctor` exits 1 with `ok` false
-  when it is not found; `list` still succeeds and reports each `installed` as null. When claude
+- `generate --check` and `validate` add `skipped` (a list of strings) when the pinned bun is
+  missing or has another version and `MODS_REQUIRE_BUN` is not `1`: the host bundles were not
+  checked, the rest was, and the exit code is not affected. Without `--json` the same text is a
+  `note:` line on stderr. With `MODS_REQUIRE_BUN=1` the same condition is a failure instead (3
+  when bun is missing, 1 for another version).
+- `claude` is always `{"found": bool, "version": string|null}`; `found` is false when the claude
+  CLI is missing or does not run. `doctor` then has `ok` false and exits by the rule above;
+  `list` still succeeds and reports each `installed` as null. When claude
   is found but the installed-plugin read fails, `list` exits 1 with `ok` false, a non-empty
   `errors`, and `installed` null. `installed` means installed at any scope, unless `list --scope`
   is given and claude reports a scope per plugin (a plugin without one counts at any scope).
 - `validate --no-claude` skips the checks that need the claude CLI.
+- Without `--json`, an `install` or `uninstall` that fails part way prints the ids it finished
+  on stdout as `completed before the failure: <ids>`, and the error on stderr.
 
 Mods run unsandboxed with the user's permissions. The `/plugin` slash command is unavailable in
 the Desktop Code tab, but a terminal install at user scope loads in Desktop sessions too.
 
 ## Contributor checks
 
-```bash
-python3 -m pytest -q -m "not integration"
-bun test mods/*/host
-scripts/typecheck --hosts
-scripts/mods validate --no-claude
-scripts/mods generate --check
-python3 .github/stack/stack-check.py
-```
+The pre-push check list is in [CONTRIBUTING.md](CONTRIBUTING.md#checks-and-documentation); it
+matches `.github/workflows/ci.yml`.
 
 `generate` builds the Codex and OpenCode bundles with the Bun version in `.bun-version`
 and refuses another version, so the committed files are reproducible.
