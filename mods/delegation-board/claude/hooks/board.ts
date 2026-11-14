@@ -228,7 +228,7 @@ export function sanitizeRows(value: unknown): Row[] {
   return keep(out)
 }
 
-export const clearFinished = (rows: Row[]): Row[] => rows.filter((r) => !isFinished(r.state))
+export const clearFinished = (rows: Row[]): Row[] => rows.filter((r) => !isSettled(r))
 
 // Live rows first (oldest start first, so rows stay put), then the newest settled; a child sits directly
 // after its parent. Orphans and cycles keep the flat order.

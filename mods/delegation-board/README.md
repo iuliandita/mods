@@ -41,7 +41,7 @@ before. Not yet checked by eye in Desktop.
 
 - `/board`: close the pane if it is placed and shown, otherwise open it. If the surface does not
   place it, the command says so and prints the table as text instead.
-- `/board clear`: drop finished rows.
+- `/board clear`: drop finished rows and rows given up on as `unknown`.
 - `/board status`: print the header and footer as text; works where no pane is placed.
 - Anything else prints usage.
 
