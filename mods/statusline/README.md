@@ -75,7 +75,9 @@ and it is dropped before the branch.
 In the terminal a thin dim rule, the band's width, sits above the two rows; Claude Desktop draws
 its own edge above the band, so the mod draws no rule there. The empty row under the band, just
 above the prompt's border, is the engine's own notification row (it is there with this mod off),
-not part of the band. Other mods' bands stack above this one.
+not part of the band. The engine orders bands from different plugins, so the mod does not control
+its position relative to other mods' bands; on Claude Code 2.1.319 and earlier they stacked above
+this one.
 
 Colours are the original script's palettes (dark, light, neutral, and noctalia when its Ghostty
 theme exists), as raw colours. `auto` picks as that script does; without a hint that is neutral,
