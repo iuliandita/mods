@@ -1,9 +1,10 @@
 # statusline
 
 A two-row status line drawn in the band above the prompt, in the terminal and in Claude Desktop.
-It is a port of a `statusLine` script into a mod: the same segments, symbols, palettes and
-width-dropping order, drawn by the engine instead of by a command. In a git repository with a
-GitHub or GitLab remote it runs `gh` or `glab` for PR and issue counts (see Egress).
+It is a port of the author's own `statusLine` script into a mod: the same segments, symbols,
+palettes and width-dropping order, drawn by the engine instead of by a command. That script is not
+part of this repository; "the original script" below means it. In a git repository with a GitHub
+or GitLab remote the mod runs `gh` or `glab` for PR and issue counts (see Egress).
 
 Terminal checks on Claude Code 2.1.301 verified live usage figures and drawing alongside the
 delegation board. See [verification scope](../../docs/COMPATIBILITY.md#claude-terminal-verification)
@@ -55,7 +56,7 @@ without saving) has an unknown API time: the API part is left out rather than sh
 is. Under a minute reads `<1m`, never `0m`. The per-turn `turn_duration` entries are wall time
 including tools, so they are not used.
 
-The pace marks read as in the script: the bar's tick is the share of the window elapsed; `(+2)`
+The pace marks read as in the original script: the bar's tick is the share of the window elapsed; `(+2)`
 is usage points ahead of the clock (green behind, plain on pace, yellow or red ahead); `↻` is the
 time to the reset; `▲22m` is when the limit is hit at the average pace so far (shown when that
 pace ends 10% or more over); `■` means the limit is reached. Bars run green, yellow, red.
@@ -63,21 +64,25 @@ pace ends 10% or more over); `■` means the limit is reached. Bars run green, y
 What does not fit is dropped, least important first, and the rest widen into richer forms. On
 row 1 the PR/issue counts, the session name and the output style are drawn only in width left over,
 the counts last, so on a short row they go first. Then the order of dropping is: agent, PR badge,
-kube context (kept longer when it is a `prod` context), fast mode, folder, lines changed, then the
-worktree and branch; the model is never dropped.
+kube context (kept longer when it is a `prod` context), fast mode, folder, lines changed, the
+failure notice, then the worktree and branch; the model is never dropped.
 
 A segment whose data fails is left out and named by its source at the end of row 1, dim:
 `✗kube`, `✗git`, `✗transcript`, `✗forge`, and so on for any source or segment. So a screenshot
-says why a segment is missing.
+says why a segment is missing. Where the names do not fit, the notice shrinks to a count (`✗2`),
+and it is dropped before the branch.
 
 In the terminal a thin dim rule, the band's width, sits above the two rows; Claude Desktop draws
 its own edge above the band, so the mod draws no rule there. The empty row under the band, just
 above the prompt's border, is the engine's own notification row (it is there with this mod off),
 not part of the band. Other mods' bands stack above this one.
 
-Colours are the script's palettes (dark, light, neutral, and noctalia when its Ghostty theme
-exists), as raw colours. `auto` picks as the script does; without a hint that is neutral, which
-reads on dark and light backgrounds. `NO_COLOR` keeps bold and italic, and badges become `[x]`.
+Colours are the original script's palettes (dark, light, neutral, and noctalia when its Ghostty
+theme exists), as raw colours. `auto` picks as that script does; without a hint that is neutral,
+which reads on dark and light backgrounds. `NO_COLOR` keeps bold and italic, and badges become
+`[x]`. In Desktop, `auto` follows the app's theme on Linux only: the app's theme file is looked for
+under the XDG config folder and a "system" theme is resolved with `gsettings` or `gdbus`. On other
+systems `auto` in Desktop is neutral unless `STATUSLINE_THEME` or `COLORFGBG` says otherwise.
 
 ## Loading
 
@@ -151,14 +156,18 @@ and the API part (none timed yet). Desktop runs Claude Code with the login shell
 ## Options
 
 - `mode`: `on` (default) or `off`. `off` registers no hook: nothing is drawn and nothing runs.
+  When the option reaches the mod only through the stored entry (see "Claude Desktop"), the first
+  pass over the local sources runs once, then the band, the timer and every process stop; `gh` and
+  `glab` are never run. Turning it back on then needs a restart.
 - `rows`: `2` (default) or `1`, everything in one row.
 - `forge`: `on` (default) or `off`. See Egress.
 - `forgeHosts`: extra forge hosts, `host=github` or `host=gitlab`, comma-separated.
-- `icons`: `auto` (default, `unicode`), `unicode`, `nerd` (Nerd Font glyphs, the script's
-  default) or `ascii` (words only); the same set on both surfaces. See "Claude Desktop".
+- `icons`: `auto` (default, `unicode`), `unicode`, `nerd` (Nerd Font glyphs, the original
+  script's default) or `ascii` (words only); the same set on both surfaces. See "Claude Desktop".
 - `placeholders`: `on` (default) or `off`. See Loading.
 - `theme`: `auto` (default), `dark`, `light`, `neutral` or `noctalia`.
-- `refreshSeconds`: 5 to 3600 (default 30). Each finished turn refreshes too.
+- `refreshSeconds`: 5 to 3600 (default 30). Each finished turn refreshes too. A stored value
+  takes effect at the first settings read.
 - `ctxWindow`: `auto` (default) or `full`. See "The context window".
 
 Options are set in the `/config` menu or in `settings.json` under
@@ -191,7 +200,7 @@ shown past 100% (`104%`, in the error colour) when usage exceeds the window. `>2
 The settings are the merged settings Claude Code reads. A `--autocompact` flag given at launch is not
 visible to a mod, so a session started with it shows the saved window instead.
 
-## Replacing the script
+## Replacing a `statusLine` script
 
 This mod draws in the terminal's band too, so a terminal that still has a `statusLine` setting
 shows two status lines. Once this one looks right in both apps:
@@ -202,28 +211,29 @@ shows two status lines. Once this one looks right in both apps:
 To match a script that used Nerd Font icons and a dark palette, set `icons` to `nerd` and `theme`
 to `dark` (or keep `auto` with `STATUSLINE_THEME=dark` in the environment).
 
-## Differences from the script
+## Differences from the original script
 
 - Row 1 runs model, folder, worktree, branch, its PR, the PR/issue counts, lines changed, kube,
-  agent, session name and style; the script puts the counts at the far right of row 1 and the lines
-  at the end of row 2.
-- The folder is always shown; the script hid it when it matched the worktree's name.
-- The width is the band's own width; the script used the terminal's columns less 4.
+  agent, session name and style; the original script puts the counts at the far right of row 1 and
+  the lines at the end of row 2.
+- The folder is always shown; the original script hid it when it matched the worktree's name.
+- The width is the band's own width; the original script used the terminal's columns less 4.
 - Vim mode is not shown: the engine exposes neither the vim setting's current mode nor the prompt's
   state.
 - A spend limit shows its percentage and reset only: the engine does not report its dollar amounts.
 - Cache misses count main-loop responses after the first that wrote the cache without reading any;
-  the terminal's own counter is not exposed, so the number can differ from what the script showed
-  there.
+  the terminal's own counter is not exposed, so the number can differ from what the original script
+  showed there.
 - API time and the cache, lines and title figures are rebuilt from the transcript (the engine's
   last cost snapshot and what follows it) and the requests this mod times; they are complete once
-  the transcript has been read (4 MiB per refresh). Requests made between the last snapshot and the
+  the transcript has been read through (see Loading). Requests made between the last snapshot and the
   mod's load, as after a mid-session reload of the mod, are not counted.
 - `✗ctxwin` marks a context window that could not be resolved (settings unreadable or no model id).
-- Symbols replace the script's words: `⎇`/`⌥` before branch and worktree (no `wt:`), `⑂ n ⊙ n` for
+- Symbols replace the original script's words: `⎇`/`⌥` before branch and worktree (no `wt:`), `⑂ n ⊙ n` for
   the PR and issue counts (no `PRs`), `◔` for the cache, with `w` or `c` for warm or cold (no `cold`),
   `🖿` before the folder and `☸` before the kube context in the `unicode` set.
-- The pace tick is `●` in the terminal too (the script drew `┃` there and `●` only in Desktop).
+- The pace tick is `●` in the terminal too (the original script drew `┃` there and `●` only in
+  Desktop).
 - Failures are named on row 1 for every source, not only kube and forge on row 2.
 
 ## Egress
@@ -236,15 +246,20 @@ for the counts and every 2 minutes (or on a branch change) for the PR, never whi
 remote on any other host is not contacted; an ssh alias is resolved with `ssh -G`, which reads your
 ssh config and does not connect. Without `gh` or `glab` installed nothing is sent.
 
-Everything else stays on the machine: `git`, `kubectl`, `tail` on the session transcript, and
-reads of settings, the kubeconfig and the Desktop app's theme file. With `forge=off` nothing leaves
-the machine.
+Everything else stays on the machine: `git`, `kubectl`, `tail` on the session transcript, reads
+of settings, the kubeconfig and the Desktop app's theme file, and, for a Desktop app set to follow
+the system theme, `gsettings` or `gdbus` to ask the desktop for its colour scheme. When a session's
+transcript is not under its own project folder, the mod lists the folder names under
+`<config dir>/projects` to find it. With `forge=off` nothing leaves the machine; a stored
+`forge: off` is read before the first lookup.
 
 ## Development
 
 Pure formatting, parsing and math live in `claude/hooks/segments.ts`, tested in
-`segments.test.ts`, including a parity test against the script's own output; the hooks and engine
-calls live in `claude/hooks/register.tsx`.
+`segments.test.ts`, including a parity test against the original script's own output; the hooks
+and engine calls live in `claude/hooks/register.tsx`. The expected rows in that parity test were
+captured once by running the original script on the same input data at each width, with its colour
+codes stripped.
 
 ```sh
 scripts/typecheck statusline

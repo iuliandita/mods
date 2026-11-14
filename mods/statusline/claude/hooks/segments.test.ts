@@ -5,7 +5,7 @@ import type { Arrival, Part, Style, View } from './segments'
 import {
   absorbChunk, bar, buildRows, c, cacheFrom, clean, effectiveWindow, emptyTranscript, sessionTotals, fmtTokens, humanize, ICONS, kubeFromTexts, levelColor, modelName,
   noctaliaPalette, PALETTES, parseConfig, parseGhCounts, parseGhPr, parseGlabMr, parseKubectl, parseNumstat, parsePorcelain,
-  iconSet, parseRemote, parseWorktree, partWidth, pendingFor, storedOptions, pickTheme, plain, providerFor, roundEven, systemDark,
+  iconSet, parseRemote, parseWorktree, partWidth, pendingFor, storedOptions, pickTheme, plain, providerFor, roundEven, systemDark, textWidth, clip,
 } from './segments'
 
 const NOW = Date.parse('2026-01-01T00:00:00Z')
@@ -26,6 +26,23 @@ test('numbers and text as the script prints them', () => {
   expect([roundEven(2.5), roundEven(3.5), roundEven(-4.5), roundEven(8.82)]).toEqual([2, 4, -4, 9])
   for (const [id, out] of [['claude-opus-5-5', 'Opus 5.5'], ['claude-sonnet-4-5-20250929', 'Sonnet 4.5'], ['claude-opus-4-6[1m]', 'Opus 4.6'], ['Opus 5.5', 'Opus 5.5']] as const) expect(modelName(id)).toBe(out)
   expect(clean(['a', String.fromCharCode(0x1b), '[31mb', String.fromCharCode(0x202e), 'c'].join(''))).toBe('a[31mbc')
+  // Format characters, the line and paragraph separators and tag characters never reach the band.
+  for (const cp of [0x00ad, 0x061c, 0x200b, 0x200d, 0x2028, 0x2029, 0x2060, 0x2064, 0x2066, 0xfeff, 0xe0001, 0xe0041]) expect([cp, clean(`a${String.fromCodePoint(cp)}b`)]).toEqual([cp, 'ab'])
+})
+
+test('width: cells, not code points, for emoji, CJK and fullwidth text; clip cuts by cells', () => {
+  // Emoji outside the two blocks the first table knew, then CJK, Hangul and fullwidth forms.
+  for (const [text, cells] of [['\u{1f680}', 2], ['\u2705', 2], ['\u2b50', 2], ['\u{1fae0}', 2], ['\u65e5\u672c\u8a9e', 6], ['\ud55c', 2], ['\uff21', 2], ['abc', 3], ['e\u0301', 1]] as const) expect([text, textWidth(text)]).toEqual([text, cells])
+  // No emoji presentation: one cell. The default folder icon is one of these.
+  for (const text of ['\u{1f5bf}', '\u2638\ufe0e', '\u2387']) expect([text, textWidth(text)]).toEqual([text, 1])
+  expect(clip('abcdef', 4)).toBe('abc\u2026')
+  expect(clip('abcd', 4)).toBe('abcd')
+  const cjk = clip('\u65e5'.repeat(40), 14)
+  expect(textWidth(cjk)).toBeLessThanOrEqual(14)
+  expect(cjk).toBe(`${'\u65e5'.repeat(6)}\u2026`)
+  // A branch of wide characters stays inside the row.
+  const v: View = { ...fullRepo, git: { ...(fullRepo.git as NonNullable<View['git']>), branch: '\u65e5'.repeat(40) } }
+  for (const cols of [40, 60, 90]) for (const r of buildRows(neutral(), v, cols)) expect(partWidth(r)).toBeLessThanOrEqual(cols - 4)
 })
 
 test('git: porcelain v2, numstat and the linked worktree', () => {
@@ -134,7 +151,6 @@ const fullRepo: View = {
   agent: 'reviewer',
   sessionName: 'refactor auth',
   outputStyle: 'Explanatory',
-  vim: null,
   forge: null,
   context: { tokens: 126_000, window: 200_000, percent: 63 },
   limits: [{ kind: 'five_hour', percentUsed: 36, resetsAt: new Date(NOW + 3 * H + 30_000).toISOString() }, { kind: 'seven_day', percentUsed: 12, resetsAt: new Date(NOW + 120 * H + 30_000).toISOString() }],
@@ -315,6 +331,23 @@ test('a segment that throws is left out; every failure is a dim ✗name at the e
   expect(mono.some((sp) => sp.fg || sp.bg)).toBe(false)
 })
 
+test('the failure notice goes before the branch: first as a count, then dropped', () => {
+  const v: View = { ...fullRepo, failed: ['ctxwin', 'transcript'] }
+  const row = (cols: number) => plain(buildRows(neutral(), v, cols)[0] ?? [])
+  const gone = (needle: string) => {
+    for (let cols = 200; cols > 20; cols--) if (!row(cols).includes(needle)) return cols
+    return 0
+  }
+  expect(row(200)).toMatch(/\u2717ctxwin \u2717transcript$/)
+  expect(gone('\u2717')).toBeGreaterThan(gone('feat/x'))
+  // Where the names no longer fit, the count stands in, beside the branch.
+  const counted = Array.from({ length: 180 }, (_, i) => i + 21).filter((cols) => row(cols).includes('\u27172'))
+  expect(Math.max(...counted)).toBe(gone('\u2717ctxwin'))
+  for (const cols of counted) expect(row(cols)).toContain('feat/x')
+  // The count outlives the folder, lines, kube, PR and agent.
+  expect(gone('\u2717')).toBeLessThan(gone('repo'))
+})
+
 test('loading: what is pending, per segment, until its data comes or the deadline passes', () => {
   const at: Arrival = { enabled: true, waiting: true, responded: false, transcript: 'none', forgeExpected: false }
   const before: View = { ...leanPlain, context: { window: 200_000 }, limits: [], costUsd: null, durationMs: 5_000, apiMs: 0, cache: null }
@@ -378,17 +411,19 @@ test('session totals: requests that ran before the mod loaded, after the last sn
 // A transcript under another project folder than the session's root names: a session resumed elsewhere.
 // stored: the user's settings.json pluginConfigs, as $.settings.read({ source: 'user' }) returns them; repoStored:
 // the same key in a repository's own settings, which only the merged read carries.
-type Ctl = { kube: 'ok' | 'fail'; settings?: 'fail'; fresh?: boolean; transcript?: string; remote?: string; branch?: string; prList?: string; stored?: Record<string, unknown>; repoStored?: Record<string, unknown> }
+// cwd: where the session is now; settingsGate: a settings read answers after it; readCap: bytes one process read returns.
+type Ctl = { kube: 'ok' | 'fail'; settings?: 'fail'; fresh?: boolean; transcript?: string; remote?: string; branch?: string; prList?: string; stored?: Record<string, unknown>; repoStored?: Record<string, unknown>; cwd?: string; settingsGate?: Promise<void>; readCap?: number }
 const ELSEWHERE = '/u/.claude/projects/-elsewhere/sid.jsonl'
-const ok = (stdout: string, exitCode = 0, stderr = '') => ({ value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false } }) as never
+const ok = (stdout: string, exitCode = 0, stderr = '', isStdoutTruncated = false) => ({ value: { exitCode, stdout, stderr, isStdoutTruncated, isStderrTruncated: false } }) as never
 
 // The engine beneath the mod: session figures, a git repo on develop, a kubeconfig with context lab, a session
 // style from /config, and a stand-in band of its own so stacking shows.
 function engine(on: On, ctl: Ctl = { kube: 'ok' }) {
   const clock = mock.clock(on, { now: NOW })
   const runs: string[][] = []
+  const seen = { settingsReads: 0 }
   on('session.start', () => ({ cwd: '/work/repo' }))
-  on('session.cwd', () => ({ value: '/work/repo' }))
+  on('session.cwd', () => ({ value: ctl.cwd ?? '/work/repo' }))
   on('session.root', () => ({ value: '/work/repo' }))
   on('session.id', () => ({ value: 'sid' }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
@@ -396,7 +431,9 @@ function engine(on: On, ctl: Ctl = { kube: 'ok' }) {
     ? { startedAt: NOW, context: { window: 200_000 }, rateLimits: [] }
     : { startedAt: NOW - 2 * H, context: { tokens: 1000, window: 200_000, percent: 1 }, rateLimits: [{ kind: 'five_hour', percentUsed: 36, resetsAt: new Date(NOW + 3 * H).toISOString() }], cost: { usd: 1.5 } }
   on('session.usage', () => ({ value: usage }) as never)
-  on('settings.read', (_$, e) => {
+  on('settings.read', async (_$, e) => {
+    seen.settingsReads++
+    await ctl.settingsGate
     if (ctl.settings === 'fail') return { deny: 'unreadable' } as never
     const merged = (e as { source?: string }).source === undefined
     const pluginConfigs = merged ? (ctl.repoStored ?? ctl.stored) : ctl.stored
@@ -422,14 +459,22 @@ function engine(on: On, ctl: Ctl = { kube: 'ok' }) {
     runs.push(argv)
     if (argv[0] === 'kubectl') return ctl.kube === 'ok' ? ok('{"contexts":[{"name":"lab","context":{}}]}') : ok('', 1, 'boom')
     if (argv[0] === 'git' && argv.includes('status')) return ok(`# branch.oid 1234567\n# branch.head ${ctl.branch ?? 'develop'}\n`)
-    if (argv[0] === 'tail' && argv.at(-1) === ELSEWHERE) return ok(ctl.transcript ?? '')
+    if (argv[0] === 'tail' && argv.at(-1) === ELSEWHERE) {
+      // ASCII transcripts only: a byte offset is a character offset.
+      const rest = (ctl.transcript ?? '').slice(Number(argv[2]) - 1)
+      return ctl.readCap && rest.length > ctl.readCap ? ok(rest.slice(0, ctl.readCap), 0, '', true) : ok(rest)
+    }
+    if (argv[0] === 'git' && argv.includes('rev-parse')) {
+      const top = argv[argv.indexOf('-C') + 1] ?? ''
+      return ok(`${top}\n${top}/.git\n${top}/.git\n`)
+    }
     if (argv[0] === 'git' && argv.includes('remote.origin.url') && ctl.remote) return ok(`${ctl.remote}\n`)
     if (argv[0] === 'gh' && argv.includes('graphql')) return ok('{"data":{"repository":{"pullRequests":{"totalCount":3},"issues":{"totalCount":12}}}}')
     if (argv[0] === 'gh' && argv[1] === 'pr') return ctl.prList === 'fail' ? ok('', 1, 'offline') : ok(ctl.prList ?? '[]')
     if (argv[0] === 'gh') return ok('[]')
     return ok('', 1)
   })
-  return { clock, runs, ctl }
+  return { clock, runs, ctl, seen }
 }
 
 const mount = async ($: Engine, surface: 'terminal' | 'desktop') => {
@@ -509,7 +554,7 @@ test('the unicode set has no colour emoji: no Emoji_Presentation code point, and
   expect(glyphs).not.toMatch(/\p{Emoji_Presentation}/u)
   for (const g of Object.values(ICONS.unicode)) {
     const chars = [...g.trim()]
-    if (chars.some((ch) => /\p{Extended_Pictographic}/u.test(ch))) expect(chars.at(-1)).toBe('︎')
+    if (chars.some((ch) => /\p{Extended_Pictographic}/u.test(ch))) expect(chars.at(-1)).toBe('\ufe0e')
   }
 })
 
@@ -587,6 +632,70 @@ test("a branch switch with a failing lookup never shows the previous branch's PR
   expect(await row()).toContain('#13')
 })
 
+test('the session moves to another repository: gh is asked about the new one, never the old one again', async ($, on) => {
+  const { clock, runs, ctl } = engine(on, { kube: 'ok', remote: 'https://github.com/owner/repo.git', branch: 'feat/a', prList: '[{"number":12,"isDraft":false,"reviewDecision":"APPROVED"}]' })
+  await started($, clock)
+  await clock.advance(1_000)
+  const row = async () => (await bothSurfaces($, 200)).terminal[0] ?? ''
+  expect(await row()).toContain('#12')
+  expect(runs.some((a) => a[0] === 'git' && a.includes('rev-parse') && a.includes('--path-format=absolute'))).toBe(true)
+
+  const before = runs.length
+  ctl.cwd = '/work/other'
+  ctl.remote = 'https://github.com/owner/other.git'
+  ctl.prList = '[]'
+  await clock.advance(31_000)
+  const forge = runs.slice(before).filter((a) => a[0] === 'gh')
+  expect(forge.some((a) => a.includes('github.com/owner/other'))).toBe(true)
+  expect(forge.some((a) => a.includes('name=other'))).toBe(true)
+  expect(forge.some((a) => a.includes('github.com/owner/repo') || a.includes('name=repo'))).toBe(false)
+  expect(await row()).not.toContain('#12')
+
+  // A folder that is no repository on a forge: nothing of the previous one stays.
+  const mid = runs.length
+  ctl.cwd = '/work/local'
+  ctl.remote = undefined
+  await clock.advance(31_000)
+  expect(runs.slice(mid).some((a) => a[0] === 'gh')).toBe(false)
+  expect(await row()).not.toContain('\u2442')
+})
+
+const STORED_KEY = 'statusline@iuliandita-mods'
+
+test('a stored forge: off wins also when the settings read is slower than git', async ($, on) => {
+  let open = (): void => {}
+  const settingsGate = new Promise<void>((resolve) => (open = resolve))
+  const { clock, runs } = engine(on, { kube: 'ok', remote: 'https://github.com/owner/repo.git', settingsGate, stored: { [STORED_KEY]: { options: { forge: 'off' } } } })
+  await started($, clock)
+  await clock.advance(2_000)
+  expect(runs.some((a) => a[0] === 'git' && a.includes('status'))).toBe(true)
+  expect(runs.some((a) => a[0] === 'gh' || a[0] === 'glab')).toBe(false)
+  open()
+  await clock.advance(2_000)
+  expect(runs.some((a) => a[0] === 'gh' || a[0] === 'glab')).toBe(false)
+})
+
+test('a stored refreshSeconds sets the refresh interval', async ($, on) => {
+  const { clock, seen } = engine(on, { kube: 'ok', stored: { [STORED_KEY]: { options: { refreshSeconds: 5 } } } })
+  await started($, clock)
+  await clock.advance(1_000)
+  const before = seen.settingsReads
+  await clock.advance(21_000)
+  // Four refreshes in 21 seconds, two settings reads each; the 30 seconds register was given would have none.
+  expect(seen.settingsReads - before).toBeGreaterThanOrEqual(8)
+})
+
+test('a stored mode: off stops the band and every process after the first settings read', async ($, on) => {
+  const { clock, runs, seen } = engine(on, { kube: 'ok', remote: 'https://github.com/owner/repo.git', stored: { [STORED_KEY]: { options: { mode: 'off' } } } })
+  await started($, clock)
+  await clock.advance(1_000)
+  expect(runs.some((a) => a[0] === 'gh' || a[0] === 'glab')).toBe(false)
+  const before = [runs.length, seen.settingsReads]
+  await clock.advance(120_000)
+  for (const surface of ['terminal', 'desktop'] as const) expect(await band($, surface)).toBe('engine')
+  expect([runs.length, seen.settingsReads]).toEqual(before)
+})
+
 test('plugin options reach the mod: nerd icons and one row', { options: { icons: 'nerd', rows: '1', forge: 'off' } }, async ($, on) => {
   const { clock, runs } = engine(on)
   await started($, clock)
@@ -631,6 +740,16 @@ test('a resumed session reads its transcript under another project folder: API t
   const { rows } = await mount($, 'terminal')
   expect(rows[2]).toContain('2h00m/1h00m')
   expect(rows[2]).toContain('◔ 99%')
+  expect(rows[1]).toContain('+5 -1')
+})
+
+test('a transcript line longer than one read is skipped by what was read; the lines after it are folded', async ($, on) => {
+  const long = JSON.stringify({ type: 'user', pad: 'x'.repeat(2_500) })
+  const { clock } = engine(on, { kube: 'ok', readCap: 1_000, transcript: `${long}\n${ask}\n${saved}\n` })
+  await started($, clock)
+  const { rows } = await mount($, 'terminal')
+  expect(rows[2]).toContain('2h00m/1h00m')
+  expect(rows[2]).toContain('\u25d4 99%')
   expect(rows[1]).toContain('+5 -1')
 })
 
