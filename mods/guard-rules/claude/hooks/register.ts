@@ -69,7 +69,7 @@ export const register: Register = (on, options) => {
     if (denied.length) return { deny: formatDeny(denied) }
     return next(e)
   }).catch(($, e, next) =>
-    next.called ? next(e) : { deny: 'guard-rules: the guard failed, so the command was blocked (fail closed). Check the plugin options and the debug log. If this keeps happening, set modeAttribution, modeProtectedBranch and modeIdentity to off in the plugin options (modeContext for kubectl, helm and terraform), or disable the plugin.' },
+    next.called ? next(e) : { deny: 'guard-rules: the guard failed, so the command was blocked (fail closed). Ask the user to check the plugin options and the debug log.' },
   )
 
   if (cfg.unparsed === 'ask') {

@@ -98,6 +98,8 @@ const GIT_FLAGS = new Set([
 const GIT_OPAQUE = new Set(['--git-dir', '--work-tree', '--namespace', '--config-env', '--bare'])
 const GIT_OPAQUE_ENV = ['GIT_DIR', 'GIT_COMMON_DIR', 'GIT_WORK_TREE', 'GIT_NAMESPACE']
 const PUSH_OPTION_VALUE = new Set(['-o', '--push-option'])
+const BRANCH_OPERAND_SUBS = new Set(['push', 'switch', 'checkout', 'rebase'])
+const VARIABLE = /\$[A-Za-z_0-9{([@*#?!]|`/
 
 // Reports a word the shell expands in a slot that decides what a call does.
 export type Mark = (why: string) => void
@@ -148,6 +150,10 @@ export function parseGit(s: Simple, argv: string[], dyn0: boolean[], dir0: strin
   const sub = argv[i]
   if (sub === undefined) return { call: null, ok }
   if (dyn[i]) mark('a git subcommand built from a variable, substitution or glob')
+  // A reference that reached an operand as literal text (escaped or single-quoted) may still be expanded by a
+  // shell the guard does not see, and no branch or remote is named that way on purpose.
+  const refers = (j: number) => !argv[j]!.startsWith('-') && VARIABLE.test(argv[j]!)
+  if (BRANCH_OPERAND_SUBS.has(sub)) for (let j = i + 1; j < argv.length; j++) if (refers(j)) dyn[j] = true
   // The remote and refspecs decide what a push updates. A secret placeholder as the remote is a URL with a token,
   // which names no branch; one in a refspec hides the destination.
   for (let j = i + 1, positional = 0; sub === 'push' && j < argv.length; j++) {
@@ -156,7 +162,7 @@ export function parseGit(s: Simple, argv: string[], dyn0: boolean[], dir0: strin
       j++
       continue
     }
-    if (dyn0[j] || (dyn[j] && positional > 0)) mark('a git push remote or refspec built from a variable, substitution, glob or secret placeholder')
+    if (dyn0[j] || refers(j) || (dyn[j] && positional > 0)) mark('a git push remote or refspec built from a variable, substitution, glob or secret placeholder')
     if (!a.startsWith('-')) positional++
   }
   const scrubbed = s.clear || s.unset?.some((k) => IDENTITY_ENV.test(k))

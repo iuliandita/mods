@@ -192,6 +192,45 @@ export function skipSubst(src: string, i: number): number {
   return -1
 }
 
+// `i` is the index of the opening `{` of a "${...}" or `[` of a "$[...]"; returns the index after the matching
+// close, or -1 when it never closes.
+export function skipBracket(src: string, i: number): number {
+  const open = src[i]!
+  const close = open === '{' ? '}' : ']'
+  let depth = 0
+  let pos = i
+  while (pos < src.length) {
+    const c = src[pos]
+    if (c === '\\') {
+      pos += 2
+    } else if (c === "'") {
+      const end = src.indexOf("'", pos + 1)
+      if (end === -1) return -1
+      pos = end + 1
+    } else if (c === '"') {
+      pos = skipDouble(src, pos)
+      if (pos === -1) return -1
+    } else if (c === '$' && src[pos + 1] === '(') {
+      pos = skipSubst(src, pos + 1)
+      if (pos === -1) return -1
+    } else if (c === '`') {
+      const end = src.indexOf('`', pos + 1)
+      if (end === -1) return -1
+      pos = end + 1
+    } else if (c === open && (open === '[' || pos === i || src[pos - 1] === '$')) {
+      depth++
+      pos++
+    } else if (c === close) {
+      depth--
+      pos++
+      if (depth === 0) return pos
+    } else {
+      pos++
+    }
+  }
+  return -1
+}
+
 // `i` is the index of the opening quote; returns the index after the closing one.
 export function skipDouble(src: string, i: number): number {
   let pos = i + 1

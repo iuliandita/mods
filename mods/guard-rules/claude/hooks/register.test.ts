@@ -46,7 +46,8 @@ test('a commit on a protected branch is denied, with the way out in the reason',
 test('a guard that cannot read the session fails closed and says how to recover', async ($) => {
   const r = await $.tool.call({ tool: 'Bash', command: 'git commit -m "feat: x"' })
   expect(r.deny).toContain('fail closed')
-  expect(r.deny).toContain('modeAttribution, modeProtectedBranch and modeIdentity to off')
+  expect(r.deny).toContain('Ask the user to check the plugin options')
+  expect(r.deny).not.toMatch(/to off|disable the plugin/i)
 })
 
 test('a command without git or gh never reads the session or git', async ($, on) => {

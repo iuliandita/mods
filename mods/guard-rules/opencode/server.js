@@ -43,6 +43,7 @@ function createTracker(keyOf, initial = () => [REAL]) {
 var PUSH_VALUE_OPTS = new Set(["-o", "--push-option", "--repo", "--receive-pack", "--exec"]);
 var PUSH_BOOL = new Set([
   "--all",
+  "--branches",
   "--mirror",
   "--tags",
   "--follow-tags",
@@ -95,8 +96,8 @@ function pushTargets(args) {
       const a = args[i];
       if (PUSH_VALUE_OPTS.has(a))
         i++;
-      else if (a === "--all" || a === "--mirror")
-        all = "--all/--mirror";
+      else if (a === "--all" || a === "--branches" || a === "--mirror")
+        all = "--all/--branches/--mirror";
       else if (a === "--tags")
         tags = true;
       else if (a.startsWith("--") && !a.includes("=") && !PUSH_BOOL.has(a) && !positional.length) {
@@ -435,6 +436,8 @@ var GIT_FLAGS = new Set([
 var GIT_OPAQUE = new Set(["--git-dir", "--work-tree", "--namespace", "--config-env", "--bare"]);
 var GIT_OPAQUE_ENV = ["GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_NAMESPACE"];
 var PUSH_OPTION_VALUE = new Set(["-o", "--push-option"]);
+var BRANCH_OPERAND_SUBS = new Set(["push", "switch", "checkout", "rebase"]);
+var VARIABLE = /\$[A-Za-z_0-9{([@*#?!]|`/;
 function parseGit(s, argv, dyn0, dir0, home, flow, mark) {
   const dyn = argv.map((a, k) => (dyn0[k] ?? false) || SECRET_PLACEHOLDER.test(a));
   let dir = dir0;
@@ -483,13 +486,19 @@ function parseGit(s, argv, dyn0, dir0, home, flow, mark) {
     return { call: null, ok };
   if (dyn[i])
     mark("a git subcommand built from a variable, substitution or glob");
+  const refers = (j) => !argv[j].startsWith("-") && VARIABLE.test(argv[j]);
+  if (BRANCH_OPERAND_SUBS.has(sub)) {
+    for (let j = i + 1;j < argv.length; j++)
+      if (refers(j))
+        dyn[j] = true;
+  }
   for (let j = i + 1, positional = 0;sub === "push" && j < argv.length; j++) {
     const a = argv[j];
     if (PUSH_OPTION_VALUE.has(a)) {
       j++;
       continue;
     }
-    if (dyn0[j] || dyn[j] && positional > 0)
+    if (dyn0[j] || refers(j) || dyn[j] && positional > 0)
       mark("a git push remote or refspec built from a variable, substitution, glob or secret placeholder");
     if (!a.startsWith("-"))
       positional++;
@@ -809,6 +818,47 @@ function skipSubst(src, i) {
   }
   return -1;
 }
+function skipBracket(src, i) {
+  const open = src[i];
+  const close = open === "{" ? "}" : "]";
+  let depth = 0;
+  let pos = i;
+  while (pos < src.length) {
+    const c = src[pos];
+    if (c === "\\") {
+      pos += 2;
+    } else if (c === "'") {
+      const end = src.indexOf("'", pos + 1);
+      if (end === -1)
+        return -1;
+      pos = end + 1;
+    } else if (c === '"') {
+      pos = skipDouble(src, pos);
+      if (pos === -1)
+        return -1;
+    } else if (c === "$" && src[pos + 1] === "(") {
+      pos = skipSubst(src, pos + 1);
+      if (pos === -1)
+        return -1;
+    } else if (c === "`") {
+      const end = src.indexOf("`", pos + 1);
+      if (end === -1)
+        return -1;
+      pos = end + 1;
+    } else if (c === open && (open === "[" || pos === i || src[pos - 1] === "$")) {
+      depth++;
+      pos++;
+    } else if (c === close) {
+      depth--;
+      pos++;
+      if (depth === 0)
+        return pos;
+    } else {
+      pos++;
+    }
+  }
+  return -1;
+}
 function skipDouble(src, i) {
   let pos = i + 1;
   while (pos < src.length) {
@@ -966,8 +1016,22 @@ function tokenize(src, depth = 0) {
         i = src.length;
       } else {
         const body = src.slice(i + 1, end - 1);
-        cur += body;
+        cur += body.replace(/\\([$`"\\\n])/g, (_, ch) => ch === `
+` ? "" : ch);
         subsIn(body);
+        i = end;
+      }
+    } else if (c === "$" && (src[i + 1] === "{" || src[i + 1] === "[")) {
+      const end = skipBracket(src, i + 1);
+      inWord = true;
+      dyn = true;
+      if (end === -1) {
+        ok = false;
+        cur += src.slice(i);
+        i = src.length;
+      } else {
+        cur += src.slice(i, end);
+        subsIn(src.slice(i + 2, end - 1));
         i = end;
       }
     } else if (c === "$" && src[i + 1] === "(") {
@@ -1131,8 +1195,9 @@ var UNSET = "\x00unset";
 var EXPORTED = "1";
 var NOT_EXPORTED = "0";
 var NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+var CD_ENV = ["HOME", "CDPATH", "OLDPWD"];
 function newProcState(startDir, home) {
-  const proc = createTracker((v) => v, (k) => k === "dir" || k === "prev" ? [startDir] : k === "stack" ? ["[]"] : [REAL]);
+  const proc = createTracker((v) => v, (k) => k === "dir" ? [startDir] : k === "prev" ? [UNKNOWN] : k === "stack" ? ["[]"] : [REAL]);
   return { proc, names: new Set, startDir, home };
 }
 function parseStack(v) {
@@ -1153,6 +1218,9 @@ function setEnv(st, k, v, effect) {
   st.names.add(k);
   st.proc.set(`env:${k}`, [v], effect);
 }
+function literalDir(v) {
+  return v.startsWith("/") && !hasVariable(v) ? resolvePath("/", v, "/") : null;
+}
 function declareWord(st, word, how, effect) {
   const eq = word.indexOf("=");
   const k = eq === -1 ? word : word.slice(0, eq);
@@ -1161,6 +1229,8 @@ function declareWord(st, word, how, effect) {
   st.names.add(k);
   if (eq !== -1)
     st.proc.set(`var:${k}`, [word.slice(eq + 1)], effect);
+  if (eq !== -1 && k === "OLDPWD")
+    st.proc.set("prev", [literalDir(word.slice(eq + 1)) ?? UNKNOWN], effect);
   if (how === "unexport") {
     st.proc.set(`x:${k}`, [NOT_EXPORTED], effect);
     st.proc.set(`env:${k}`, [UNSET], effect);
@@ -1223,6 +1293,8 @@ function applyUnset(st, argv, effect) {
     setEnv(st, a, UNSET, effect);
     st.proc.set(`var:${a}`, [UNSET], effect);
     st.proc.set(`x:${a}`, [NOT_EXPORTED], effect);
+    if (a === "OLDPWD")
+      st.proc.set("prev", [UNKNOWN], effect);
   }
 }
 function applyDeclare(st, argv, dyn, effect) {
@@ -1244,12 +1316,34 @@ function applyDeclare(st, argv, dyn, effect) {
     declareWord(st, a, how, effect);
   return;
 }
-function applyCd(st, argv, here, loop, effect) {
+function applyCd(st, argv, here, loop, effect, assigns = {}) {
   const dirs = st.proc.get("dir");
-  const target = argv.slice(1).find((a) => a === "-" || a !== "--" && !a.startsWith("-"));
-  const physical = argv.slice(1).some((a) => /^-[LPe@]*P[e@]*$/.test(a));
-  const relative = target !== undefined && target !== "-" && !/^(?:\/|~$|~\/)/.test(target);
-  const to = target === undefined ? [st.home] : target === "-" ? st.proc.get("prev") : dirs.map((d) => loop && relative ? UNKNOWN : move(st, here(d), target, physical) ?? UNKNOWN);
+  let k = 1;
+  let physical = false;
+  for (;k < argv.length && /^-[LPe@]+$/.test(argv[k]); k++)
+    physical = /P[e@]*$/.test(argv[k]);
+  const literal = argv[k] === "--";
+  if (literal)
+    k++;
+  const target = argv[k];
+  const tilde = target === "~" || (target?.startsWith("~/") ?? false);
+  const relative = target !== undefined && target !== "-" && !tilde && !target.startsWith("/");
+  const searched = relative && !/^\.\.?(?:\/|$)/.test(target) && st.proc.get("var:CDPATH").some((v) => v !== REAL && v !== UNSET && v !== "");
+  const option = !literal && target !== undefined && target !== "-" && target.startsWith("-");
+  let to;
+  if (option || searched || CD_ENV.some((n) => Object.hasOwn(assigns, n)))
+    to = [UNKNOWN];
+  else if (target === "-")
+    to = st.proc.get("prev");
+  else if (target === undefined || tilde) {
+    to = st.proc.get("var:HOME").map((v) => {
+      const home = v === REAL ? st.home : v === UNKNOWN ? null : literalDir(v);
+      if (home === null)
+        return UNKNOWN;
+      return target === undefined ? home : move({ ...st, home }, null, target, physical) ?? UNKNOWN;
+    });
+  } else
+    to = dirs.map((d) => loop && relative ? UNKNOWN : move(st, here(d), target, physical) ?? UNKNOWN);
   st.proc.set("prev", dirs, effect);
   st.proc.set("dir", to, effect);
 }
@@ -1415,6 +1509,7 @@ var KEYWORDS = new Set(["{", "}", "!", "if", "then", "do", "else", "elif", "whil
 var SHELLS = new Set(["bash", "sh", "zsh", "dash", "ksh"]);
 var SHELL_LONG = new Set(["--norc", "--noprofile", "--posix", "--login", "--restricted", "--verbose", "--noediting", "--debugger", "--dump-strings", "--dump-po-strings", "--pretty-print", "--help", "--version"]);
 var SHELL_LONG_VALUE = new Set(["--rcfile", "--init-file"]);
+var STDIN_PATHS = new Set(["/dev/stdin", "/dev/fd/0", "/proc/self/fd/0"]);
 var WRAPPERS = {
   sudo: {
     short: "acCDgprRtTUu",
@@ -1669,7 +1764,7 @@ function shellScript(argv) {
   const first = argv[k];
   if (c)
     return first === undefined ? { ok: false } : { ok: true, script: first, at: k };
-  return { ok: true, at: k, stdin: s || first === undefined };
+  return { ok: true, at: k, stdin: s || first === undefined || STDIN_PATHS.has(first) };
 }
 
 // mods/guard-rules/claude/hooks/extract.ts
@@ -1792,7 +1887,7 @@ function applyBuiltin(w, s) {
     if (why)
       mark(w, why);
   } else if (name === "cd")
-    applyCd(w.st, argv, s.here, s.loop, effect);
+    applyCd(w.st, argv, s.here, s.loop, effect, s.u.assigns);
   else if (name === "pushd")
     applyPushd(w.st, argv, s.here, s.loop, effect);
   else if (name === "popd")
@@ -2107,6 +2202,11 @@ function extractCalls(src, startDir, home) {
     }
     if (applyBuiltin(w, s))
       continue;
+    const spelled = s.name.replace(/^=/, "").toLowerCase();
+    if (spelled !== s.name && TOOLS.includes(spelled)) {
+      w.local.push({ why: `the command word ${s.name}, which some shells and file systems run as ${spelled}`, tools: [spelled] });
+      continue;
+    }
     if (s.name === "git" || s.name === "gh" || s.name === "glab" || s.name === "tea" || s.name === "fj" || INFRA_TOOLS.has(s.name))
       emitToolCalls(w, s);
     else if (SHELLS.has(s.name) || s.name === "eval" || s.name === "secret-box")
@@ -2131,11 +2231,11 @@ function stops(call) {
   return STOP_SUBS.has(call.sub) && call.args.length === 1 && (call.args[0] === "--abort" || call.args[0] === "--quit");
 }
 async function currentBranch(env, dir) {
-  const head = await env.git(dir, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
+  const head = await env.git(dir, ["symbolic-ref", "--quiet", "HEAD"]);
   if (!head.ok || !head.out)
     return { name: null, born: true };
   const commit = await env.git(dir, ["rev-parse", "--verify", "--quiet", "HEAD"]);
-  return { name: head.out, born: commit.ok };
+  return { name: head.out.replace(/^refs\/heads\//, ""), born: commit.ok };
 }
 function createFollower(env) {
   const repos = createTracker((f) => ("detached" in f) ? "\x00detached" : `${f.cur}\x00${f.prev ?? "\x00"}`);
@@ -2240,7 +2340,19 @@ var SWITCH_BOOL = new Set([
   "-l",
   "--ignore-skip-worktree-bits"
 ]);
-var REBASE_VALUE = new Set(["--onto", "-s", "--strategy", "-X", "--strategy-option", "-x", "--exec", "-C", "--whitespace", "-S", "--gpg-sign"]);
+var REBASE_VALUE = new Set(["--onto", "-s", "--strategy", "-X", "--strategy-option", "-x", "--exec", "-C", "--whitespace"]);
+var MERGE_VALUE = new Set(["--message", "--file", "--strategy", "--strategy-option", "--into-name", "--cleanup"]);
+function fastForwardOnly(args) {
+  let last = "";
+  for (let i = 0;i < args.length && args[i] !== "--"; i++) {
+    const a = args[i];
+    if (a === "--ff" || a === "--no-ff" || a === "--ff-only")
+      last = a;
+    else if (MERGE_VALUE.has(a) || /^-[A-Za-z]*[mFsX]$/.test(a))
+      i++;
+  }
+  return last === "--ff-only";
+}
 function switchTarget(call) {
   const { sub, args } = call;
   if (sub !== "checkout" && sub !== "switch")
@@ -2360,8 +2472,7 @@ async function protectedBranchViolations(call, cfg, env, follow, taint = { confi
   const out = [];
   const hint = "Work on a feature branch and land it by pull request; for an intentional direct change, ask the user to run it themselves with the ! prefix.";
   const add = (message) => out.push({ rule: "protected-branch", mode: cfg.protectedBranch, message });
-  const ffFlags = call.args.filter((a) => a === "--ff" || a === "--no-ff" || a === "--ff-only");
-  const fastForward = call.sub === "merge" && ffFlags[ffFlags.length - 1] === "--ff-only";
+  const fastForward = call.sub === "merge" && fastForwardOnly(call.args);
   const unknown = `protected-branch: an earlier "git switch", "git checkout", "git rebase" or "git symbolic-ref" in this command (such as "git switch -", a branch built from a variable, or an option the guard does not know) goes to a branch the guard cannot tell, so git ${call.sub} counts as on a protected branch. Run the switch on its own first. ${hint}`;
   const rewritten = call.sub === "rebase" && !stops(call) ? rebaseBranch(call) : undefined;
   if (rewritten === UNKNOWN) {
@@ -2802,7 +2913,9 @@ async function identityViolations(call, cfg, env, created, configWritten = false
   }
   const probe = probeEnv(call.assigns);
   if (probe === null) {
-    return [{ rule: "unparsed", mode: cfg.identity, message: "unparsed: GIT_CONFIG_COUNT is not a literal number up to 32, so the identity git would use cannot be checked. Use -c user.email=... instead." }];
+    if (cfg.unparsed === "off")
+      return [];
+    return [{ rule: "unparsed", mode: cfg.unparsed === "dry" && cfg.identity === "on" ? "dry" : cfg.identity, message: "unparsed: GIT_CONFIG_COUNT is not a literal number up to 32, so the identity git would use cannot be checked. Use -c user.email=... instead." }];
   }
   if (probe === "other") {
     return add("identity: this command passes git config through GIT_CONFIG_PARAMETERS or an include.path in GIT_CONFIG_KEY_n, so the identity cannot be checked. Use -c user.email=... instead.");
@@ -2993,13 +3106,13 @@ function selfKillViolations(command, mode) {
 
 // mods/guard-rules/claude/hooks/rules.ts
 var GH_MESSAGE = {
-  pr: new Set(["create", "edit", "comment", "review", "merge"]),
-  issue: new Set(["create", "edit", "comment"]),
-  release: new Set(["create", "edit"])
+  pr: new Set(["create", "new", "edit", "comment", "review", "merge", "close", "reopen"]),
+  issue: new Set(["create", "new", "edit", "comment", "close", "reopen"]),
+  release: new Set(["create", "new", "edit"])
 };
-var GLAB_VERBS = new Set(["create", "update", "note", "edit", "merge"]);
+var GLAB_VERBS = new Set(["create", "new", "update", "note", "edit", "merge"]);
 var TEA_VERBS = new Set(["create", "edit", "comment"]);
-var FJ_VERBS = new Set(["create", "edit", "comment", "merge"]);
+var FJ_VERBS = new Set(["create", "edit", "comment", "merge", "close"]);
 var FORGE_MESSAGE = {
   gh: GH_MESSAGE,
   glab: { mr: GLAB_VERBS, issue: GLAB_VERBS, release: GLAB_VERBS },
@@ -3036,7 +3149,7 @@ function parseConfig(options) {
   const errors = [];
   const branches = String(options.protectedBranches ?? "develop,main").split(",").map((b) => b.trim()).filter(Boolean);
   if (!branches.length)
-    errors.push("protectedBranches must name at least one branch (set modeProtectedBranch to off to turn the rule off)");
+    errors.push("protectedBranches must name at least one branch");
   let identityRules = [];
   const raw = String(options.identityRules ?? "").trim();
   if (raw) {
@@ -3227,14 +3340,14 @@ async function evaluate(command, cfg, rawEnv) {
     all.push({
       rule: "lookup",
       mode: lookupMode,
-      message: "lookup: git could not be run to check the branch or identity (it failed or timed out), so the command was blocked. Retry it; if this keeps happening, set the rule modes to off in the plugin options."
+      message: "lookup: git could not be run to check the branch or identity (it failed or timed out), so the command was blocked. Retry it; if it keeps failing, tell the user that git does not run in the command's directory."
     });
   }
   if (runLookupFailed && cfg.context !== "off") {
     all.push({
       rule: "lookup",
       mode: cfg.context,
-      message: "lookup: the current kubectl context or terraform workspace could not be read (the command failed or timed out), so the command was blocked. Retry it, or name the environment in the command (--context, --kube-context, TF_WORKSPACE); if this keeps happening, set modeContext to off in the plugin options."
+      message: "lookup: the current kubectl context or terraform workspace could not be read (the command failed or timed out), so the command was blocked. Retry it, or name the environment in the command (--context, --kube-context, TF_WORKSPACE); if it keeps failing, tell the user that kubectl or terraform does not answer."
     });
   }
   const seen = new Set;
@@ -3353,7 +3466,7 @@ function nodeEnv(cwd, classes = loadClasses) {
 }
 
 // mods/guard-rules/host/check.ts
-var FAILED = "guard-rules: the guard failed, so the command was blocked (fail closed). Check the options file (~/.config/iuliandita-mods/guard-rules.json) and the host log. If this keeps happening, set modeAttribution, modeProtectedBranch and modeIdentity to off in the options file (modeContext for kubectl, helm and terraform), or disable the plugin.";
+var FAILED = "guard-rules: the guard failed, so the command was blocked (fail closed). Ask the user to check the options file (~/.config/iuliandita-mods/guard-rules.json) and the host log.";
 var SELF_CLASSIFY = /guard-rules\S*\s+context\s+(?!list\b)\S/;
 var CLASSIFY_DENIED = 'guard-rules: only the user can change classifications. Ask the user to run "guard-rules context ..." in their own terminal.';
 var OWN_DIRS = /(?:\.config|\.local\/share)\/iuliandita-mods/;

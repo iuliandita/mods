@@ -7,11 +7,18 @@ This guards against accidents. It is not a security boundary.
 ### What the parser models
 
 The guard reads the command text only (no aliases, functions or variables from your shell, and nothing a script
-such as `make release` runs). It models a small, explicit grammar and treats everything else as unparsed:
+such as `make release` runs). It models a small, explicit grammar and treats everything else as unparsed.
+The grammar assumes bash. Where another shell reads a command differently, the guard does not follow it; a
+command word that names a guarded tool only after dropping a leading `=` (zsh's `=git`) or in another letter
+case (`GIT`, found on a case-insensitive file system) is unparsed.
 
 - Words are literal when built from plain characters, `'...'`, `$'...'`, `"..."` without `$` or backticks, and
-  backslash escapes. Anything else (`$X`, `${...}`, `$(...)`, backticks, `$((...))`, unquoted `*?[`, unquoted
-  `{a,b}` or `{1..3}`) is dynamic.
+  backslash escapes (inside `"..."` only `\$`, `` \` ``, `\"`, `\\` and a backslash-newline are escapes).
+  Anything else (`$X`, `${...}`, `$[...]`, `$(...)`, backticks, `$((...))`, unquoted `*?[`, unquoted
+  `{a,b}` or `{1..3}`) is dynamic. `${...}` and `$[...]` are read as one piece up to their closing bracket,
+  and the substitutions inside them are parsed. A `$NAME`, `${...}`, `$(...)` or backtick that stays as
+  literal text in a push remote or refspec, or in a `switch`, `checkout` or `rebase` operand (single-quoted,
+  or escaped for a later shell), also counts as dynamic.
 - Connectors `&& || ; | |& &` and newlines; `( )`, `{ }`, `!`, `if`/`while`/`until`/`for` with their keywords,
   `[[ ]]`, `test` and `[`; comments, redirections and assignment prefixes.
 - Builtins: `export` (`-n` removes the export), `unset [-v|-f|-n]`, `declare`/`typeset`/`local`/`readonly` with only
@@ -40,7 +47,8 @@ These constructs make the whole command unparsed when a parsed call or its text 
 - a dynamic word in a slot that decides the call: the git subcommand, a `-C` or `-c` value, a push remote or
   refspec, a gh/glab/tea/fj area or verb, a kubectl/helm/terraform verb, `--context`, `--kube-context` or
   `--kubeconfig`;
-- a dynamic script for `eval` or `secret-box exec`; a shell reading its script from stdin (`| sh`, `<<<`, a heredoc);
+- a dynamic script for `eval` or `secret-box exec`; a shell reading its script from stdin (`| sh`, `<<<`, a heredoc,
+  or `/dev/stdin`, `/dev/fd/0` or `/proc/self/fd/0` as the script file);
   any `source`/`.` call (the guard does not read sourced files); an `env -S` string the guard cannot split;
 - `case`, `select`, `coproc`, `trap`, `alias`, function definitions (`f()`, `function f`), and `declare` with
   other flags;
@@ -140,11 +148,18 @@ separately, use a file-reading tool, or run the command yourself.
   `( ... )` subshell, every value it could have is checked and a write is denied if any one is protected or
   unknown. A loop body is checked a second time for the back edge; a relative `cd` or `git switch -` inside a loop
   is unknown. More than 8 values for one state count as unknown. `pushd +N`/`-N` makes the directory unknown.
+- `cd` reads three shell variables. `cd -` goes to `OLDPWD`: the directory an earlier `cd` of the command left,
+  or a literal absolute path the command assigned to it; at the start of a command it is unknown. A bare `cd`,
+  `cd ~` and `cd ~/x` use a `HOME` the command assigned when it is a literal absolute path. A relative operand
+  that does not start with `./` or `../` is unknown once the command assigned `CDPATH`. A `HOME`, `CDPATH` or
+  `OLDPWD` prefix on the `cd` itself, or an option other than `-L`, `-P`, `-e` and `-@`, makes the directory
+  unknown; after `--` the operand is read as written (`cd -- -dir`). A `CDPATH` or `OLDPWD` the shell inherited
+  is not read.
 - A plain `cd` collapses `..` as the shell's logical `cd` does. `git -C`, `env -C`, `sudo -D`, `terraform -chdir`
   and `cd -P` let the OS resolve `..` after any symlink, so the guard probes that path as written; terraform there
   counts as `(custom target)`.
-- It fails closed: if the guard itself errors, the command is blocked and the reason says so and how to switch the
-  rules off. A git lookup that fails or times out (10 s) denies the command, while a non-repository or a detached
+- It fails closed: if the guard itself errors, the command is blocked and the reason says so and what the user
+  should check. A git lookup that fails or times out (10 s) denies the command, while a non-repository or a detached
   HEAD is allowed.
 - Whenever a command contains a message-bearing call, the whole command text and decoded argument words are scanned. A fixture or `grep`
   containing a trailer in the same command as a commit can be denied; split the command.

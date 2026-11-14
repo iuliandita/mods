@@ -3,7 +3,7 @@ import { INFRA_TOOLS, parseGh, parseGit, parseInfra, SECRET_PLACEHOLDER, type Ca
 import { tokenize, type Simple } from './lex'
 import { basename, hasVariable } from './paths'
 import { applyAssign, applyCd, applyDeclare, applyExport, applyPopd, applyPushd, applySet, applyUnset, dirOf, move, newProcState, UNSET, type ProcState } from './state'
-import { IDENTITY_ENV, isDataWord, mayName, READ_ENV, toolWords } from './words'
+import { IDENTITY_ENV, isDataWord, mayName, READ_ENV, TOOLS, toolWords } from './words'
 import { SHELLS, shellScript, unwrap } from './wrappers'
 
 // `opaque` lists constructs the guard does not model anywhere in the command (unparsed when the text names a
@@ -177,7 +177,7 @@ function applyBuiltin(w: Walk, s: Step): boolean {
     const why = applyDeclare(w.st, argv, s.dyn, effect)
     if (why) mark(w, why)
   }
-  else if (name === 'cd') applyCd(w.st, argv, s.here, s.loop, effect)
+  else if (name === 'cd') applyCd(w.st, argv, s.here, s.loop, effect, s.u.assigns)
   else if (name === 'pushd') applyPushd(w.st, argv, s.here, s.loop, effect)
   else if (name === 'popd') applyPopd(w.st, argv, s.dyn, effect)
   else if (name === 'set') applySet(w.st, argv, effect)
@@ -456,6 +456,12 @@ export function extractCalls(src: string, startDir: string, home: string): Parse
       continue
     }
     if (applyBuiltin(w, s)) continue
+    // zsh runs `=git` as git, and a case-insensitive file system finds `GIT`.
+    const spelled = s.name.replace(/^=/, '').toLowerCase()
+    if (spelled !== s.name && TOOLS.includes(spelled)) {
+      w.local.push({ why: `the command word ${s.name}, which some shells and file systems run as ${spelled}`, tools: [spelled] })
+      continue
+    }
     if (s.name === 'git' || s.name === 'gh' || s.name === 'glab' || s.name === 'tea' || s.name === 'fj' || INFRA_TOOLS.has(s.name)) emitToolCalls(w, s)
     else if (SHELLS.has(s.name) || s.name === 'eval' || s.name === 'secret-box') inlineScript(w, s)
     else markOpaque(w, s)

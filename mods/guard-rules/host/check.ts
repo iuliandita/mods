@@ -6,7 +6,7 @@ import { guardDirs } from './env'
 export type Check = { deny?: string; notice?: string }
 
 const FAILED =
-  'guard-rules: the guard failed, so the command was blocked (fail closed). Check the options file (~/.config/iuliandita-mods/guard-rules.json) and the host log. If this keeps happening, set modeAttribution, modeProtectedBranch and modeIdentity to off in the options file (modeContext for kubectl, helm and terraform), or disable the plugin.'
+  'guard-rules: the guard failed, so the command was blocked (fail closed). Ask the user to check the options file (~/.config/iuliandita-mods/guard-rules.json) and the host log.'
 
 // Best effort: a command that runs the CLI's `context` subcommand with anything but `list` is left for the user to
 // type. The model could still spell it past this filter, so it is not a boundary.

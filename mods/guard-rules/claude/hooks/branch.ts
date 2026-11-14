@@ -25,10 +25,11 @@ export function stops(call: GitCall): boolean {
 }
 
 async function currentBranch(env: Env, dir: string): Promise<{ name: string | null; born: boolean }> {
-  const head = await env.git(dir, ['symbolic-ref', '--quiet', '--short', 'HEAD'])
+  // Not `--short`: with a tag of the same name it prints `heads/main`.
+  const head = await env.git(dir, ['symbolic-ref', '--quiet', 'HEAD'])
   if (!head.ok || !head.out) return { name: null, born: true }
   const commit = await env.git(dir, ['rev-parse', '--verify', '--quiet', 'HEAD'])
-  return { name: head.out, born: commit.ok }
+  return { name: head.out.replace(/^refs\/heads\//, ''), born: commit.ok }
 }
 
 // REAL is the branch git reports; UNKNOWN is a branch the guard cannot tell (`git switch -`).
@@ -124,7 +125,19 @@ const SWITCH_BOOL = new Set([
   '--recurse-submodules', '--no-recurse-submodules', '--ignore-other-worktrees', '--overwrite-ignore', '--no-overwrite-ignore', '-l',
   '--ignore-skip-worktree-bits',
 ])
-const REBASE_VALUE = new Set(['--onto', '-s', '--strategy', '-X', '--strategy-option', '-x', '--exec', '-C', '--whitespace', '-S', '--gpg-sign'])
+const REBASE_VALUE = new Set(['--onto', '-s', '--strategy', '-X', '--strategy-option', '-x', '--exec', '-C', '--whitespace'])
+const MERGE_VALUE = new Set(['--message', '--file', '--strategy', '--strategy-option', '--into-name', '--cleanup'])
+
+// The last of `--ff`, `--no-ff` and `--ff-only` among the options of a merge: not an option's value, not after `--`.
+function fastForwardOnly(args: string[]): boolean {
+  let last = ''
+  for (let i = 0; i < args.length && args[i] !== '--'; i++) {
+    const a = args[i]!
+    if (a === '--ff' || a === '--no-ff' || a === '--ff-only') last = a
+    else if (MERGE_VALUE.has(a) || /^-[A-Za-z]*[mFsX]$/.test(a)) i++
+  }
+  return last === '--ff-only'
+}
 
 // Where a checkout or switch goes, getopt style (`-bmain`, `-qb main`, `--create=x`, `--orphan x`); undefined when
 // it does not switch (`checkout -- file`, `checkout main file`). An option the guard does not know is `unknown`.
@@ -229,8 +242,7 @@ export async function protectedBranchViolations(call: GitCall, cfg: Config, env:
   const out: Violation[] = []
   const hint = 'Work on a feature branch and land it by pull request; for an intentional direct change, ask the user to run it themselves with the ! prefix.'
   const add = (message: string) => out.push({ rule: 'protected-branch', mode: cfg.protectedBranch, message })
-  const ffFlags = call.args.filter((a) => a === '--ff' || a === '--no-ff' || a === '--ff-only')
-  const fastForward = call.sub === 'merge' && ffFlags[ffFlags.length - 1] === '--ff-only'
+  const fastForward = call.sub === 'merge' && fastForwardOnly(call.args)
   const unknown = `protected-branch: an earlier "git switch", "git checkout", "git rebase" or "git symbolic-ref" in this command (such as "git switch -", a branch built from a variable, or an option the guard does not know) goes to a branch the guard cannot tell, so git ${call.sub} counts as on a protected branch. Run the switch on its own first. ${hint}`
   const rewritten = call.sub === 'rebase' && !stops(call) ? rebaseBranch(call) : undefined
   if (rewritten === UNKNOWN) {
