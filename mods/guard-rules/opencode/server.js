@@ -3375,7 +3375,13 @@ var configDir = () => join(home(), ".config", "iuliandita-mods");
 var dataDir = () => join(home(), ".local", "share", "iuliandita-mods");
 var ownDirs = () => [configDir(), dataDir()];
 var optionsPath = (mod) => join(configDir(), `${mod}.json`);
-function loadOptions(mod, path = optionsPath(mod)) {
+function loadOptions(mod, file) {
+  let path;
+  try {
+    path = file ?? optionsPath(mod);
+  } catch {
+    return { options: {}, error: "the options file could not be located: the account has no home directory entry" };
+  }
   let text;
   try {
     text = readFileSync(path, "utf8");
@@ -3404,14 +3410,22 @@ function run(dir, argv, vars, timeoutMs = TIMEOUT_MS) {
     const [cmd, ...args] = argv;
     if (cmd === undefined)
       return resolve({ ok: false, out: "", failed: true });
-    const child = execFile(cmd, args, { cwd: dir, env: vars ? { ...process.env, ...vars } : process.env, timeout: timeoutMs, maxBuffer: MAX_BUFFER, encoding: "utf8" }, (err, stdout) => {
+    const done = (result) => {
+      clearTimeout(deadline);
       running.delete(child);
+      resolve(result);
+    };
+    const child = execFile(cmd, args, { cwd: dir, env: vars ? { ...process.env, ...vars } : process.env, maxBuffer: MAX_BUFFER, encoding: "utf8" }, (err, stdout) => {
       if (!err)
-        return resolve({ ok: true, out: stdout.trim() });
+        return done({ ok: true, out: stdout.trim() });
       const e = err;
-      resolve(typeof e.code === "number" && !e.killed ? { ok: false, out: stdout.trim() } : { ok: false, out: "", failed: true });
+      done(typeof e.code === "number" && !e.killed ? { ok: false, out: stdout.trim() } : { ok: false, out: "", failed: true });
     });
     running.add(child);
+    const deadline = setTimeout(() => {
+      child.kill("SIGKILL");
+      done({ ok: false, out: "", failed: true });
+    }, timeoutMs);
   });
 }
 

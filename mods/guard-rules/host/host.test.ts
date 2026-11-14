@@ -6,7 +6,7 @@ import { join } from 'node:path'
 
 import { checkCommand, checkTool } from './check'
 import { main, type Io } from './cli'
-import { configPath, loadClasses, loadConfig, nodeEnv } from './env'
+import { configPath, loadClasses, loadConfig, nodeEnv, run } from './env'
 import { setup } from './opencode'
 
 let root: string
@@ -271,5 +271,20 @@ test('the built Codex bundle runs under node: bad input blocks with 2, a plain c
     const denied = run(call('git commit -m x'))
     expect(denied.status).toBe(0)
     expect(JSON.parse(denied.stdout).hookSpecificOutput.permissionDecision).toBe('deny')
+  }
+})
+
+test('a lookup that ignores SIGTERM is killed and reported as failed at its deadline', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'guard-rules-run-'))
+  try {
+    const script = join(dir, 'ignore-term.js')
+    writeFileSync(script, "process.on('SIGTERM', () => {})\nsetInterval(() => {}, 1000)\n")
+    const started = Date.now()
+    const result = await Promise.race([run(dir, [process.execPath, script], undefined, 500), Bun.sleep(2500).then(() => 'pending')])
+    expect(result).toEqual({ ok: false, out: '', failed: true })
+    expect(Date.now() - started).toBeLessThan(1500)
+    expect(await run(dir, [process.execPath, '-e', 'process.exit(3)'], undefined, 5000)).toEqual({ ok: false, out: '' })
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
   }
 })

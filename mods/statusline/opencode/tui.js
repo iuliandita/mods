@@ -31,14 +31,23 @@ var money = (n) => `$${n.toFixed(2)}`;
 var isControl = (c) => c < 32 || c >= 127 && c <= 159 || c === 1564 || c >= 8203 && c <= 8207 || c === 8232 || c === 8233 || c >= 8234 && c <= 8238 || c >= 8288 && c <= 8292 || c >= 8294 && c <= 8297 || c === 65279 || c >= 917504 && c <= 917631;
 var clean = (s, max) => [...[...s].map((ch) => isControl(ch.codePointAt(0) ?? 0) ? " " : ch).join("").replace(/ +/g, " ").trim()].slice(0, max).join("");
 var MAX_JOBS = 32;
+var MAX_FAILURES = 3;
 function ticker(everyMs) {
-  const jobs = new Set;
+  const jobs = new Map;
   const timer = setInterval(() => {
-    for (const job of [...jobs]) {
+    for (const [job, failures] of [...jobs]) {
       try {
         if (job() === false)
           jobs.delete(job);
+        else if (failures > 0 && jobs.has(job))
+          jobs.set(job, 0);
       } catch (e) {
+        if (!jobs.has(job))
+          continue;
+        if (failures + 1 < MAX_FAILURES) {
+          jobs.set(job, failures + 1);
+          continue;
+        }
         console.error(`terminal plugin: a redraw failed and was stopped (${e instanceof Error ? e.message : String(e)})`);
         jobs.delete(job);
       }
@@ -47,13 +56,20 @@ function ticker(everyMs) {
   timer.unref?.();
   return {
     add: (job) => {
-      jobs.add(job);
+      jobs.set(job, 0);
       if (jobs.size > MAX_JOBS)
-        jobs.delete(jobs.values().next().value);
+        jobs.delete(jobs.keys().next().value);
       return () => void jobs.delete(job);
     },
     stop: () => clearInterval(timer)
   };
+}
+function firstDraw(draw) {
+  try {
+    return draw();
+  } catch {
+    return "";
+  }
 }
 function bind(tick, node, draw) {
   tick.add(() => {
@@ -82,7 +98,7 @@ function line(ctx, sessionID, now) {
     if (ctxTokens > 0)
       parts.push(`ctx ${tokens(ctxTokens)}`);
     parts.push(money(s.cost ?? 0));
-    const created = toMs(s.time.created);
+    const created = toMs(s.time?.created);
     if (created !== undefined)
       parts.push(duration(now - created));
   }
@@ -98,7 +114,7 @@ async function setup(ctx, makeText) {
     append: "session.composer.top",
     render: (input) => {
       const draw = () => line(ctx, input.sessionID, Date.now());
-      const node = make(draw());
+      const node = make(firstDraw(draw));
       ctx.data.session.sync(input.sessionID).catch(() => {});
       bind(tick, node, draw);
       return node;

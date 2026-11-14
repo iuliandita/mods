@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test'
+import { expect, spyOn, test } from 'bun:test'
 
 import type { Data, SessionInfo } from '../../../host-lib/tui'
 import { bind, duration, ticker, toMs, tokens } from '../../../host-lib/tui'
@@ -98,4 +98,51 @@ test('a redraw stops once the host destroys its node, and a failing draw is drop
   await Bun.sleep(60)
   expect(draws).toBe(seen)
   tick.stop()
+})
+
+test('a session record without times still draws a line', () => {
+  const bare = { ...session(), time: undefined } as unknown as SessionInfo
+  expect(line(ctx({ session: bare }).value, 's1', 0)).toBe('◆ deepseek-v4.1-flash  proj  ctx 42k  $0.43')
+})
+
+test('a first draw that throws gives the host an empty node, which the next redraw fills', async () => {
+  const c = ctx({ branch: 'main' })
+  const info = c.value.data.location.vcs.info
+  let calls = 0
+  c.value.data.location.vcs.info = () => {
+    if (calls++ === 0) throw new Error('boom')
+    return info()
+  }
+  const cleanup = await setup(c.value, (content) => ({ content }))
+  const node = c.claims[0]!.render({ sessionID: 's1' }) as { content: string }
+  expect(node.content).toBe('')
+  await Bun.sleep(1200)
+  expect(node.content).toContain('⎇ main')
+  cleanup()
+})
+
+test('a redraw is kept through a few failures in a row and dropped after that; a success resets the count', async () => {
+  const tick = ticker(10)
+  const errors = spyOn(console, 'error').mockImplementation(() => {})
+  try {
+    let flaky = 0
+    const node = { content: '' }
+    bind(tick, node, () => {
+      if (++flaky % 3 !== 0) throw new Error('boom')
+      return `n${flaky}`
+    })
+    let broken = 0
+    bind(tick, { content: '' }, () => {
+      broken++
+      throw new Error('boom')
+    })
+    await Bun.sleep(150)
+    expect(flaky).toBeGreaterThan(6)
+    expect(node.content).toMatch(/^n\d+$/)
+    expect(broken).toBe(3)
+    expect(errors).toHaveBeenCalledTimes(1)
+  } finally {
+    errors.mockRestore()
+    tick.stop()
+  }
 })

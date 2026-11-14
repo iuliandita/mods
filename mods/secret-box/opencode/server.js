@@ -10,7 +10,13 @@ import { join } from "node:path";
 var home = () => userInfo().homedir;
 var configDir = () => join(home(), ".config", "iuliandita-mods");
 var optionsPath = (mod) => join(configDir(), `${mod}.json`);
-function loadOptions(mod, path = optionsPath(mod)) {
+function loadOptions(mod, file) {
+  let path;
+  try {
+    path = file ?? optionsPath(mod);
+  } catch {
+    return { options: {}, error: "the options file could not be located: the account has no home directory entry" };
+  }
   let text;
   try {
     text = readFileSync(path, "utf8");
