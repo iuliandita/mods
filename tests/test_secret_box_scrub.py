@@ -17,7 +17,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 BIN = ROOT / "mods/secret-box/claude/bin/secret-box"
-SCRUB_TS = ROOT / "mods/secret-box/claude/hooks/scrub.ts"
+ENTRY = ROOT / "tests/secret_box_entry.py"
+ORACLE_TS = ROOT / "mods/secret-box/claude/hooks/scrub.oracle.ts"
 
 SAMPLES = [
     "tok_AbC123xyz",
@@ -28,6 +29,7 @@ SAMPLES = [
     "  padded-secret-value \t\n",
     "dGhpcyBpcyBhIGZha2Uga2V5IHRoYXQgaXMgNDA=",
     "short",
+    "a&b<c>d/e f g-ü",
     " nbsp　wide-trim﻿",
 ]
 
@@ -44,8 +46,8 @@ def run(tmp_path, *args, secrets=None, backend=None):
     store = tmp_path / "store.json"
     if secrets is not None:
         store.write_text(json.dumps(secrets))
-    env = dict(os.environ, SECRET_BOX_TEST="1", SECRET_BOX_BACKEND=backend or f"file:{store}")
-    return subprocess.run([sys.executable, str(BIN), *args], env=env, capture_output=True)
+    env = dict(os.environ, SECRET_BOX_TEST_STORE=str(backend or store))
+    return subprocess.run([sys.executable, str(ENTRY), *args], env=env, capture_output=True)
 
 
 def test_forms_match_typescript(tmp_path):
@@ -56,7 +58,7 @@ def test_forms_match_typescript(tmp_path):
         pytest.skip("bun not installed")
     (tmp_path / "samples.json").write_text(json.dumps(SAMPLES))
     (tmp_path / "forms.ts").write_text(
-        f"import {{ forms }} from {json.dumps(str(SCRUB_TS))}\n"
+        f"import {{ forms }} from {json.dumps(str(ORACLE_TS))}\n"
         "const v: string[] = JSON.parse(await Bun.file(process.argv[2]!).text())\n"
         "console.log(JSON.stringify(Object.fromEntries(v.map((s) => [s, forms(s).sort()]))))\n"
     )
@@ -127,8 +129,8 @@ def test_overlapping_spans_in_batch_and_every_stream_split(tmp_path, pairs, text
     store = tmp_path / "store.json"
     store.write_text(json.dumps(dict(pairs)))
     reply = subprocess.run(
-        [sys.executable, str(BIN), "scrub"], input=json.dumps([text]), text=True,
-        env=dict(os.environ, SECRET_BOX_TEST="1", SECRET_BOX_BACKEND=f"file:{store}"),
+        [sys.executable, str(ENTRY), "scrub"], input=json.dumps([text]), text=True,
+        env=dict(os.environ, SECRET_BOX_TEST_STORE=str(store)),
         capture_output=True, check=True,
     )
     names = ["first", "second"] if "{{secret:second}}" in expected else ["first"]
@@ -172,6 +174,38 @@ def test_scrub_retains_command_values_when_the_command_removes_them(tmp_path):
     assert not store.exists()
 
 
+def test_scrub_covers_an_injected_value_when_the_second_read_answers_nothing(tmp_path):
+    marker = tmp_path / "ran"
+    p = exec_scrub(tmp_path, f"touch {marker}; printf '%s' {{{{secret:tok}}}}", secrets={"tok": [VALUE, None]})
+    assert p.returncode == 0 and marker.exists()
+    assert p.stdout == b"{{secret:tok}}"
+
+
+def test_scrub_covers_the_old_and_the_new_value_after_a_rotation(tmp_path):
+    new = "rotated-Value/99"
+    script = f"printf '%s|%s' {{{{secret:tok}}}} {shlex.quote(new)}"
+    p = exec_scrub(tmp_path, script, secrets={"tok": [VALUE, new], "other": "another-stored-value"})
+    assert p.returncode == 0
+    assert p.stdout == b"{{secret:tok}}|{{secret:tok}}"
+    p = exec_scrub(tmp_path, "printf '%s' another-stored-value", secrets={"tok": [VALUE, new], "other": "another-stored-value"})
+    assert p.stdout == b"{{secret:other}}"
+
+
+@pytest.mark.parametrize("value,rendered", [
+    ("a&b<c>d/e-xyz", "a\\u0026b\\u003cc\\u003ed/e-xyz"),
+    ("a&b<c>d/e-xyz", "a\\u0026b\\u003Cc\\u003Ed/e-xyz"),
+    ("a&b<c>d/e-xyz", "a&b<c>d\\/e-xyz"),
+    ("a&b<c>d/e-xyz", "a\\u0026b\\u003Cc\\u003Ed\\/e-xyz"),
+    ("ü line -xyz", "ü\\u2028line\\u2029-xyz"),
+    ("ü line -xyz", "\\u00fc\\u2028line\\u2029-xyz"),
+    ("pässwörd/123", "p\\u00e4ssw\\u00f6rd\\/123"),
+])
+def test_html_safe_and_slash_escaped_json_forms_are_scrubbed(value, rendered):
+    sb = load_module()
+    clean, names = sb.Scrubber([("tok", value)]).scrub(f'{{"k": "{rendered}"}}'.encode())
+    assert clean == b'{"k": "{{secret:tok}}"}' and names == {"tok"}
+
+
 def test_scrub_signal_death_is_128_plus_signal(tmp_path):
     assert exec_scrub(tmp_path, "kill -TERM $$").returncode == 128 + 15
 
@@ -184,7 +218,7 @@ def test_scrub_missing_secret_exits_3(tmp_path):
 
 def test_scrub_fails_closed_when_backend_cannot_load(tmp_path):
     marker = tmp_path / "ran"
-    p = run(tmp_path, "exec", "--scrub", "--", f"touch {marker}", backend=f"file:{tmp_path}")
+    p = run(tmp_path, "exec", "--scrub", "--", f"touch {marker}", backend=tmp_path)
     assert p.returncode == 5 and not marker.exists()
     assert b"(fail closed)" in p.stderr
 
@@ -203,8 +237,8 @@ def test_exec_without_the_scrub_flag_scrubs_too(tmp_path):
 def test_scrub_returns_when_a_background_child_keeps_the_pipes_open(tmp_path):
     started = time.monotonic()
     p = subprocess.run(
-        [sys.executable, str(BIN), "exec", "--scrub", "--", "sleep 30 & echo started"],
-        env=dict(os.environ, SECRET_BOX_TEST="1", SECRET_BOX_BACKEND=f"file:{tmp_path / 's.json'}"),
+        [sys.executable, str(ENTRY), "exec", "--scrub", "--", "sleep 30 & echo started"],
+        env=dict(os.environ, SECRET_BOX_TEST_STORE=str(tmp_path / 's.json')),
         capture_output=True,
         timeout=20,
     )
@@ -214,9 +248,9 @@ def test_scrub_returns_when_a_background_child_keeps_the_pipes_open(tmp_path):
 
 def test_scrub_forwards_sigterm_to_the_command(tmp_path):
     marker = tmp_path / "ran"
-    env = dict(os.environ, SECRET_BOX_TEST="1", SECRET_BOX_BACKEND=f"file:{tmp_path / 's.json'}")
+    env = dict(os.environ, SECRET_BOX_TEST_STORE=str(tmp_path / 's.json'))
     script = f"trap 'echo got > {marker}; exit 7' TERM; echo ready; while :; do sleep 0.1; done"
-    proc = subprocess.Popen([sys.executable, str(BIN), "exec", "--scrub", "--", script], env=env, stdout=subprocess.PIPE)
+    proc = subprocess.Popen([sys.executable, str(ENTRY), "exec", "--scrub", "--", script], env=env, stdout=subprocess.PIPE)
     assert proc.stdout.readline() == b"ready\n"
     proc.send_signal(signal.SIGTERM)
     assert proc.wait(timeout=10) == 7

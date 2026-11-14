@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import { base64, makeScrubber, placeholderNames, rewriteCommand, scrubToolAnswer, withhold, type Scrubber } from './scrub'
+import { placeholderNames, rewriteCommand, scrubToolAnswer, withhold, type Scrubber } from './scrub'
+import { base64, makeScrubber } from './scrub.oracle'
 
 test('the longest known form wins and a replacement is never scanned again', () => {
   const scrub = makeScrubber(new Map([['short', 'hunter2hunter2'], ['long', 'hunter2hunter2-extra'], ['tiny', 'abc']]))
@@ -57,6 +58,13 @@ for (const [label, value, lower, upper] of ESCAPED) {
   })
 }
 
+// What Go's encoding/json (HTML-safe escapes, lower hex), PHP's json_encode (\\/) and its JSON_HEX flags (upper hex) print.
+test('a value is scrubbed in its HTML-safe and slash-escaped JSON forms', () => {
+  const scrub = makeScrubber(new Map([['tok', 'a&b<c>d/e-xyz'], ['sep', 'ü\u2028line\u2029-xyz']])) as Scrubber
+  const text = ['a\\u0026b\\u003cc\\u003ed/e-xyz', 'a\\u0026b\\u003Cc\\u003Ed/e-xyz', 'a&b<c>d\\/e-xyz', 'a\\u0026b\\u003Cc\\u003Ed\\/e-xyz', 'ü\\u2028line\\u2029-xyz'].join(' | ')
+  expect(scrub(text)).toEqual({ text: [...Array(4).fill('{{secret:tok}}'), '{{secret:sep}}'].join(' | '), names: ['tok', 'sep'] })
+})
+
 test('an all-ASCII value gets no extra \\u escape form', () => {
   const scrub = makeScrubber(new Map([['tok', 'hunter2hunter2']])) as Scrubber
   expect(scrub('\\u0068unter2hunter2')).toEqual({ text: '\\u0068unter2hunter2', names: [] })
@@ -64,7 +72,7 @@ test('an all-ASCII value gets no extra \\u escape form', () => {
 
 test('placeholders need a valid name and the command is quoted for POSIX sh', () => {
   expect(placeholderNames('a {{secret:x.y-1}} {{secret:x.y-1}} {{secret:b c}} {{secret:}}')).toEqual(['x.y-1'])
-  expect(rewriteCommand('/p q/secret-box', "echo '{{secret:x}}'")).toBe("'/p q/secret-box' exec -- 'echo '\\''{{secret:x}}'\\'''")
+  expect(rewriteCommand('/p q/secret-box', "echo '{{secret:x}}'")).toBe("'/p q/secret-box' exec --scrub -- 'echo '\\''{{secret:x}}'\\'''")
 })
 
 test('a Bash result record has hints and structuredContent scrubbed; the path fields stay as they are', () => {
