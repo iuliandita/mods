@@ -77,6 +77,7 @@ def build_catalog(mods: list[Mod]) -> dict:
         "schema": 1,
         "marketplace": MARKETPLACE_NAME,
         "source": GITHUB_SOURCE,
+        "stable_source": CLAUDE_STABLE_SOURCE,
         "mods": [
             {
                 **{k: v for k, v in m.as_dict().items() if k != "hosts"},

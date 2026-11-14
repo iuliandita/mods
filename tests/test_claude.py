@@ -61,15 +61,23 @@ def test_ensure_marketplace_adds_an_unknown_one_and_accepts_the_same_source(
         ({"name": "m", "source": "git", "url": "git@host:o/r.git"}, "git@host:o/r.git"),
         ({"name": "m", "source": "git", "url": "https://host/o/r.git"}, "https://host/o/r.git"),
         ({"name": "m", "source": "directory", "path": "REL"}, "REL"),
+        ({"name": "m", "source": "github", "repo": "owner/repo"}, "owner/repo"),
+        ({"name": "m", "source": "github", "repo": "owner/repo", "ref": "main"}, "owner/repo#main"),
+        ({"name": "m", "source": "git", "url": "https://host/o/r.git", "ref": "main"}, "https://host/o/r.git#main"),
+        ({"name": "m", "source": "github", "repo": "owner/repo"}, "SHADOWED"),
     ],
 )
-def test_ensure_marketplace_does_not_re_add_a_git_url_or_relative_path(
+def test_ensure_marketplace_does_not_re_add_the_same_source(
     fake_claude: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, entry: dict, source: str
 ) -> None:
     if source == "REL":
         monkeypatch.chdir(tmp_path)
         (tmp_path / "clone").mkdir()
         entry["path"], source = str(tmp_path / "clone"), "clone"
+    if source == "SHADOWED":
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "owner" / "repo").mkdir(parents=True)
+        source = "owner/repo"
     _known(fake_claude, entry)
     assert claude.ensure_marketplace("m", source) is False
     assert not _adds(fake_claude)
@@ -80,6 +88,12 @@ def test_ensure_marketplace_does_not_re_add_a_git_url_or_relative_path(
     [
         ({"name": "m", "source": "github", "repo": "owner/repo"}, "CLONE", "owner/repo"),
         ({"name": "m", "source": "github", "repo": "owner/repo"}, "someone/fork", "owner/repo"),
+        ({"name": "m", "source": "github", "repo": "owner/repo", "ref": "main"}, "owner/repo", "github repo owner/repo#main, expected owner/repo;"),
+        ({"name": "m", "source": "github", "repo": "owner/repo"}, "owner/repo#main", "github repo owner/repo, expected owner/repo#main;"),
+        ({"name": "m", "source": "github", "repo": "owner/repo", "ref": "main"}, "owner/repo#dev", "github repo owner/repo#main, expected owner/repo#dev;"),
+        ({"name": "m", "source": "git", "url": "https://host/o/r.git", "ref": "main"}, "https://host/o/r.git", "git url https://host/o/r.git#main, expected"),
+        ({"name": "m", "source": "npm", "package": "x"}, "owner/repo", "npm source that could not be compared"),
+        ({"name": "m", "source": "github", "repo": "owner/repo"}, "not a source", "could not be compared"),
     ],
 )
 def test_ensure_marketplace_refuses_a_different_source(

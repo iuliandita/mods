@@ -67,7 +67,8 @@ scopes; entries without a scope count at any scope. `installed: null` means inst
 could not be established, not that the plugin is absent.
 
 From a clone, installation registers the clone root as `iuliandita-mods`, not GitHub.
-Use `--source iuliandita/mods` for GitHub, or a git URL/path for another source. Names are still
+Use `--source iuliandita/mods#main` for the stable GitHub branch (without `#main` it follows the
+nightly default branch), or a git URL/path for another source. Names are still
 validated against this clone's catalog, so the alternate source must carry those mods.
 `--root <repo>` selects the catalog root and works before or after the command, as does `--json`.
 Private mods use `scripts/mods install <name> --local`; they register `<clone>/local` as
@@ -101,7 +102,7 @@ then remove only that marketplace registration and retry the intended install:
 
 ```bash
 claude plugin marketplace remove iuliandita-mods
-scripts/mods install guard-rules --source iuliandita/mods --scope user --json
+scripts/mods install guard-rules --source iuliandita/mods#main --scope user --json
 ```
 
 Do not remove unrelated marketplaces or assume removal restores an earlier plugin version.
@@ -203,7 +204,7 @@ From a clone, `scripts/mods` speaks JSON (`--json` on every command):
 ```sh
 scripts/mods list --json
 scripts/mods install <mod> [<mod> ...] [--scope user|project|local] [--local] \
-    [--source <owner/repo>]
+    [--source <owner/repo#ref>]
 scripts/mods uninstall <mod> [<mod> ...] [--scope user|project|local]
 scripts/mods doctor --json
 scripts/mods validate [--no-claude]
@@ -213,7 +214,8 @@ scripts/mods generate [--check] [--local]
 `--json` and `--root <repo>` work before or after the subcommand. Option abbreviations such as
 `--js` are rejected. `--root` must be a directory with a `mods/` or `local/mods/` directory;
 otherwise the command exits 1 before reading or writing anything. `--source` installs from
-another marketplace source (an `owner/repo`, git URL or path) instead of this clone; it cannot
+another marketplace source (an `owner/repo` or git URL, each with an optional `#ref`, or a path)
+instead of this clone; it cannot
 be combined with `--local` (exit 1). Mod names are still checked against this clone's catalog,
 not the remote one, so the source must carry the same mods.
 
@@ -226,7 +228,8 @@ What an agent can rely on:
 - Each command adds its own keys: `list` adds `claude` and `mods`; `install` adds `installed`
   and `uninstall` adds `uninstalled` (the plugin ids done so far, also on failure), plus `manual`
   and `skipped` when retired mods are involved; `doctor`
-  adds `claude`, `mods`, `notes`, and `source`; `validate` adds `problems` (same strings as
+  adds `claude`, `mods`, `notes`, and `source` (the pinned stable source, `iuliandita/mods#main`,
+  ready for `--source`; `mods.json` carries the same value as `stable_source`); `validate` adds `problems` (same strings as
   `errors`); `generate` adds `written`, and `generate --check` adds `stale`.
 - `claude` is always `{"found": bool, "version": string|null}`. `doctor` exits 1 with `ok` false
   when it is not found; `list` still succeeds and reports each `installed` as null. When claude

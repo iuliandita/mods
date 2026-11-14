@@ -77,14 +77,15 @@ _REPO = re.compile(r"[A-Za-z0-9][\w.-]*/[\w.-]+")
 _GIT_URL = re.compile(r"[A-Za-z][\w+.-]*://\S+|[\w.-]+@[\w.-]+:\S+")
 
 
-def _kind(entry: dict) -> tuple[str, str]:
+def _kind(entry: dict) -> tuple[str, str, str]:
+    ref = entry["ref"] if isinstance(entry.get("ref"), str) else ""
     if isinstance(entry.get("path"), str) and entry["path"]:
-        return "directory", entry["path"]
+        return "directory", entry["path"], ""
     if entry.get("source") == "github" and isinstance(entry.get("repo"), str) and entry["repo"]:
-        return "github", entry["repo"]
+        return "github", entry["repo"], ref
     if isinstance(entry.get("url"), str) and entry["url"]:
-        return "git", entry["url"]
-    return str(entry.get("source") or "unknown"), ""
+        return "git", entry["url"], ref
+    return str(entry.get("source") or "unknown"), "", ""
 
 
 def ensure_marketplace(name: str, source: str) -> bool:
@@ -94,24 +95,29 @@ def ensure_marketplace(name: str, source: str) -> bool:
     if entry is None:
         run("plugin", "marketplace", "add", source)
         return True
-    kind, found = _kind(entry)
+    kind, found, found_ref = _kind(entry)
     fix = f"run `claude plugin marketplace remove {name}` and retry"
-    if _GIT_URL.fullmatch(source):
+    # claude stores `owner/repo#ref` and `url#ref` as the repo or url plus a separate ref
+    base, _, ref = source.partition("#")
+    is_path = os.path.isabs(source) or source.startswith(".")
+    if _GIT_URL.fullmatch(base):
         wanted = "git"
-        same = kind == "git" and found == source
-    elif os.path.isabs(source) or source.startswith(".") or os.path.isdir(source):
+        same = kind == "git" and (found, found_ref) == (base, ref)
+    elif not is_path and _REPO.fullmatch(base):
+        wanted = "github"
+        same = kind == "github" and (found, found_ref) == (base, ref)
+    elif is_path or os.path.isdir(source):
         # a relative path is compared by where it points from the current directory
         wanted = "directory"
         same = kind == "directory" and os.path.realpath(found) == os.path.realpath(source)
-    elif _REPO.fullmatch(source):
-        wanted = "github"
-        same = kind == "github" and found == source
     else:
         wanted, same = "", False
     if wanted and found and kind in ("directory", "github", "git"):
         if same:
             return False
         shown = {"github": "github repo", "git": "git url"}.get(kind, "directory") + f" {found}"
+        if found_ref:
+            shown += f"#{found_ref}"
         raise ClaudeError(
             f"marketplace '{name}' is already added from {shown}, expected {source}; {fix}"
         )

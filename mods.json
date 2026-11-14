@@ -2,6 +2,7 @@
   "schema": 1,
   "marketplace": "iuliandita-mods",
   "source": "iuliandita/mods",
+  "stable_source": "iuliandita/mods#main",
   "mods": [
     {
       "name": "delegation-board",
