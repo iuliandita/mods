@@ -16,31 +16,8 @@ REQUIRED = (
     "name", "summary", "kind", "egress", "modes", "default_mode",
     "requires", "surfaces", "verified_on",
 )
-OPTIONAL = ("shared", "inject", "hosts", "host_files", "requires_by_platform")
-SHARED_RE = re.compile(r"^[a-z][a-z0-9-]*\.ts$")
-INJECT_RE = re.compile(r"^([a-z][a-z0-9-]*)\.inject\.ts$")
+OPTIONAL = ("hosts", "host_files", "requires_by_platform")
 HOST_FILE_RE = re.compile(r"^[a-z][a-z0-9-]*(/[a-z][a-z0-9._-]*)+$")
-
-
-def inject_markers(file: str) -> tuple[str, str]:
-    """Begin and end marker lines (with newline) of a block injected into a mod's register.ts."""
-    m = INJECT_RE.match(file)
-    assert m, file
-    name = m.group(1)
-    return (
-        f"// @inject {name} begin (generated from shared/{file}; do not edit)\n",
-        f"// @inject {name} end\n",
-    )
-
-
-def inject_span(text: str, file: str) -> tuple[int, int] | None:
-    """Start and end offsets of the text between a block's markers, or None unless each occurs once, in order."""
-    begin, end = inject_markers(file)
-    if text.count(begin) != 1 or text.count(end) != 1:
-        return None
-    start = text.index(begin) + len(begin)
-    stop = text.index(end)
-    return (start, stop) if stop >= start else None
 
 
 class CatalogError(Exception):
@@ -64,8 +41,6 @@ class Mod:
     verified_on: str | None
     path: Path
     is_local: bool
-    shared: tuple[str, ...] = ()
-    inject: tuple[str, ...] = ()
     hosts: tuple[str, ...] = ()
     host_files: tuple[str, ...] = ()
     requires_by_platform: dict[str, list[str]] = field(default_factory=dict)
@@ -97,11 +72,7 @@ def mods_dir(root: Path, *, local: bool) -> Path:
     return root / "local" / "mods" if local else root / "mods"
 
 
-def shared_dir(root: Path) -> Path:
-    return root / "shared"
-
-
-def _problems(path: Path, data: object, shared: Path) -> list[str]:
+def _problems(path: Path, data: object) -> list[str]:
     where = path.name
     if not isinstance(data, dict):
         return [f"{where}: mod.json must be an object"]
@@ -164,39 +135,6 @@ def _problems(path: Path, data: object, shared: Path) -> list[str]:
         errs.append(f"{where}: verified_on must be a version string or null")
     elif isinstance(surfaces, dict) and "verified" in surfaces.values() and not verified_on:
         errs.append(f"{where}: verified_on is required when a surface is verified")
-    files = data.get("shared", [])
-    if not (
-        isinstance(files, list)
-        and all(isinstance(f, str) and SHARED_RE.match(f) for f in files)
-        and len(set(files)) == len(files)
-    ):
-        errs.append(f"{where}: shared must list distinct file names under shared/ (name.ts)")
-    else:
-        missing = [f for f in files if not (shared / f).is_file()]
-        if missing:
-            errs.append(f"{where}: shared file(s) not found in shared/: {', '.join(missing)}")
-    blocks = data.get("inject", [])
-    if not (
-        isinstance(blocks, list)
-        and all(isinstance(f, str) and INJECT_RE.match(f) for f in blocks)
-        and len(set(blocks)) == len(blocks)
-    ):
-        errs.append(f"{where}: inject must list distinct file names under shared/ (name.inject.ts)")
-    else:
-        missing = [f for f in blocks if not (shared / f).is_file()]
-        if missing:
-            errs.append(f"{where}: inject file(s) not found in shared/: {', '.join(missing)}")
-        register = path / "claude" / "hooks" / "register.ts"
-        try:
-            source = register.read_text()
-        except OSError:
-            source = ""
-        unmarked = [f for f in blocks if inject_span(source, f) is None]
-        if unmarked:
-            errs.append(
-                f"{where}: claude/hooks/register.ts lacks one ordered begin/end marker pair for: "
-                + ", ".join(unmarked)
-            )
     hosts = data.get("hosts", [])
     if not (
         isinstance(hosts, list)
@@ -284,7 +222,7 @@ def _plugin_problems(path: Path, name: str) -> list[str]:
     return []
 
 
-def parse_mod(path: Path, *, is_local: bool, shared: Path) -> Mod:
+def parse_mod(path: Path, *, is_local: bool) -> Mod:
     manifest = path / "mod.json"
     if not manifest.is_file():
         raise CatalogError(f"{path.name}: mod.json is missing")
@@ -292,7 +230,7 @@ def parse_mod(path: Path, *, is_local: bool, shared: Path) -> Mod:
         data = json.loads(manifest.read_text())
     except (OSError, ValueError) as exc:
         raise CatalogError(f"{path.name}: mod.json could not be read ({exc})") from exc
-    errs = _problems(path, data, shared)
+    errs = _problems(path, data)
     if not errs:
         errs = _plugin_problems(path, data["name"])
     if errs:
@@ -310,8 +248,6 @@ def parse_mod(path: Path, *, is_local: bool, shared: Path) -> Mod:
         verified_on=data["verified_on"],
         path=path,
         is_local=is_local,
-        shared=tuple(data.get("shared", [])),
-        inject=tuple(data.get("inject", [])),
         hosts=tuple(data.get("hosts", [])),
         host_files=tuple(data.get("host_files", [])),
     )
@@ -325,7 +261,7 @@ def load_mods(root: Path, *, local: bool = False) -> list[Mod]:
     errs: list[str] = []
     for path in sorted(p for p in base.iterdir() if p.is_dir()):
         try:
-            mods.append(parse_mod(path, is_local=local, shared=shared_dir(root)))
+            mods.append(parse_mod(path, is_local=local))
         except CatalogError as exc:
             errs.append(str(exc))
     if errs:

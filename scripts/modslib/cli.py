@@ -75,7 +75,7 @@ def _parser() -> argparse.ArgumentParser:
         )
 
     g = add(
-        "generate", help="write marketplace.json, mods.json and the shared-code copies"
+        "generate", help="write marketplace.json, mods.json and the host packages' generated files"
     )
     g.add_argument("--check", action="store_true", help="write nothing; exit 1 if stale")
     g.add_argument("--local", action="store_true", help="also write the local marketplace")

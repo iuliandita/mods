@@ -58,35 +58,11 @@ def test_unreadable_mod_json_is_a_catalog_error(tmp_path: Path) -> None:
         ({"egress": ["none", "anthropic"]}, "egress"),
         ({"modes": ["off", "dry"], "default_mode": "on"}, "default_mode"),
         ({"verified_on": None}, "verified_on"),
+        ({"shared": []}, r"alpha: unknown field\(s\) shared"),
+        ({"inject": []}, r"alpha: unknown field\(s\) inject"),
     ],
 )
 def test_invalid_fields_are_rejected(tmp_path: Path, over: dict, match: str) -> None:
     write_mod(tmp_path, "alpha", **over)
-    with pytest.raises(CatalogError, match=match):
-        load_mods(tmp_path)
-
-
-def test_unknown_shared_file_is_rejected(tmp_path: Path) -> None:
-    (tmp_path / "shared").mkdir()
-    (tmp_path / "shared" / "clock.ts").write_text("")
-    write_mod(tmp_path, "alpha", shared=["clock.ts", "nope.ts"])
-    with pytest.raises(CatalogError, match="alpha: shared file.*nope.ts"):
-        load_mods(tmp_path)
-
-
-@pytest.mark.parametrize(
-    ("inject", "source", "match"),
-    [
-        (["blk.inject.ts"], "export const register = 1\n", "lacks one ordered begin/end marker pair for: blk.inject.ts"),
-        (["nope.inject.ts"], "", "inject file.*nope.inject.ts"),
-        (["blk.ts"], "", "inject must list"),
-    ],
-)
-def test_inject_needs_a_known_template_and_its_markers(
-    tmp_path: Path, inject: list[str], source: str, match: str
-) -> None:
-    (tmp_path / "shared").mkdir()
-    (tmp_path / "shared" / "blk.inject.ts").write_text("")
-    write_mod(tmp_path, "alpha", inject=inject, register_source=source or None)
     with pytest.raises(CatalogError, match=match):
         load_mods(tmp_path)
