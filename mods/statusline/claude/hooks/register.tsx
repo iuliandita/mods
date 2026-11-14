@@ -4,7 +4,7 @@ import type { Config, Forge, GitInfo, Palette, Pr, Span, Style, ThemeHints, Tran
 import {
   absorbChunk, buildRows, iconSet, PACE_TICK, PENDING_DEADLINE_MS, pendingFor, cacheFrom, effectiveWindow, sessionTotals, emptyTranscript, GH_QUERY, ICONS, kubeFromTexts, modelName, noctaliaPalette, PALETTES,
   parseConfig, storedOptions, parseGhCounts, parseGhPr, parseGlabMr, parseKubectl, parseNumstat, parsePorcelain, parseRemote, parseWorktree,
-  pickTheme, providerFor, rule, systemDark, transcriptPath,
+  pickTheme, providerFor, rule, systemDark, transcriptPath, utf8Length,
 } from './segments'
 
 // Everything below runs off the render path: a refresh every `refreshSeconds` and after each main-loop turn
@@ -50,6 +50,8 @@ type Snap = {
   worktree: string | null
   diff: { added: number; removed: number } | null
   gitAt: number
+  // The repository the cached origin URL, the slow flag and the forge answers belong to: its top level.
+  repo: string | null
   slowUntil: number
   kube: { ctx: string; ns: string } | null
   kubeSig: string
@@ -81,6 +83,9 @@ type Snap = {
   sources: Set<string> // data sources whose last refresh failed
   busy: Set<string>
   timer: Timer | null
+  timerMs: number
+  // The first settings read: the stored options are known once it ends, so the forge lookup waits for it.
+  settled: Promise<void> | null
 }
 
 async function nowMs($: Engine): Promise<number> {
@@ -122,6 +127,18 @@ async function refreshGit($: Engine, s: Snap): Promise<void> {
   const now = await nowMs($)
   s.gitAt = now
   const run = (args: string[]) => $.process.run(gitArgv(cwd, ...args), { cwd, timeoutMs: GIT_TIMEOUT_MS })
+  const wt = await run(['rev-parse', '--path-format=absolute', '--show-toplevel', '--absolute-git-dir', '--git-common-dir'])
+  const repo = (wt.exitCode === 0 && wt.stdout.split('\n')[0]?.trim()) || cwd
+  if (repo !== s.repo) {
+    // Another repository: what was cached and answered for the last one must not be drawn or asked for here.
+    s.repo = repo
+    s.remote = null
+    s.slowUntil = 0
+    s.target = null
+    s.forge = null
+    s.pr = null
+    s.prKey = ''
+  }
   const skip = now < s.slowUntil
   let res
   try {
@@ -139,7 +156,6 @@ async function refreshGit($: Engine, s: Snap): Promise<void> {
     return
   }
   s.git = parsePorcelain(res.stdout, now < s.slowUntil)
-  const wt = await run(['rev-parse', '--show-toplevel', '--absolute-git-dir', '--git-common-dir'])
   s.worktree = wt.exitCode === 0 ? parseWorktree(wt.stdout) : null
   const diff = await run(['diff', '--numstat', 'HEAD'])
   s.diff = diff.exitCode === 0 ? parseNumstat(diff.stdout) : null
@@ -352,10 +368,11 @@ async function refreshTranscript($: Engine, s: Snap): Promise<void> {
       // A snapshot read in the first catch-up predates every request this mod timed; one written while it runs
       // already holds what was timed until then.
       if (tx.s.snapshots !== before) tx.apiAtSnapshot = tx.untimed !== null ? s.apiMs : 0
-      // A single line longer than one read can never complete: skip what was read. A half-written last line
-      // waits for the next refresh.
-      if (used === 0 && !res.isStdoutTruncated) break
-      tx.offset += used === 0 ? st.size - tx.offset : used
+      // A single line longer than one read can never complete: skip what was read, and the next read drops the
+      // rest of that line as one it cannot parse. A half-written last line waits for the next refresh.
+      const read = used || (res.isStdoutTruncated ? utf8Length(res.stdout) : 0)
+      if (read === 0) break
+      tx.offset += read
       if ((await nowMs($)) - start > TRANSCRIPT_BUDGET_MS) break
     }
     // Once the first read reaches the end, the figures stand; later appends are folded refresh by refresh.
@@ -415,24 +432,31 @@ async function refreshTheme($: Engine, s: Snap): Promise<void> {
 // the same pass, each as soon as what it needs is known, so the first full band is ready about a second after
 // load.
 async function refresh($: Engine, s: Snap): Promise<void> {
+  if (s.cfg.mode === 'off') return
   const now = await nowMs($)
   if (!s.loadAt) s.loadAt = now
+  const settings = job(s, 'settings', async () => {
+    const set = await $.settings.read()
+    s.outputStyle = typeof set.outputStyle === 'string' ? set.outputStyle : null
+    s.settingsEffort = typeof set.effortLevel === 'string' ? set.effortLevel : null
+    // The merged settings carry both window keys; only these two are kept.
+    s.windowSettings = { autoCompactWindow: set.autoCompactWindow, modelSettings: set.modelSettings }
+    // The options as the user's settings.json stores them, over the ones register was given: Claude Desktop has
+    // been seen drawing the band without the user's options (icons: nerd drawn as unicode). Only the user source:
+    // the merge also carries a repository's own .claude/settings.json, which must not change a user's options.
+    const stored = storedOptions((await $.settings.read({ source: 'user' })).pluginConfigs, $.plugin.name)
+    if (stored) {
+      s.cfg = parseConfig({ ...s.options, ...stored })
+      // A stored interval replaces the timer's; a stored mode: off ends it.
+      if (s.timer) schedule($, s)
+    }
+    if (!s.agent && typeof set.agent === 'string') s.agent = set.agent
+  })
+  s.settled ??= settings
   const session = Promise.all([
     job(s, 'model', async () => void (s.model = await $.session.model())),
     job(s, 'usage', async () => void (s.usage = await $.session.usage())),
-    job(s, 'settings', async () => {
-      const set = await $.settings.read()
-      s.outputStyle = typeof set.outputStyle === 'string' ? set.outputStyle : null
-      s.settingsEffort = typeof set.effortLevel === 'string' ? set.effortLevel : null
-      // The merged settings carry both window keys; only these two are kept.
-      s.windowSettings = { autoCompactWindow: set.autoCompactWindow, modelSettings: set.modelSettings }
-      // The options as the user's settings.json stores them, over the ones register was given: Claude Desktop has
-      // been seen drawing the band without the user's options (icons: nerd drawn as unicode). Only the user source:
-      // the merge also carries a repository's own .claude/settings.json, which must not change a user's options.
-      const stored = storedOptions((await $.settings.read({ source: 'user' })).pluginConfigs, $.plugin.name)
-      if (stored) s.cfg = parseConfig({ ...s.options, ...stored })
-      if (!s.agent && typeof set.agent === 'string') s.agent = set.agent
-    }).then(() =>
+    settings.then(() =>
       // The style in force is the /config row: a style chosen in the session lives there, not in a settings file.
       job(s, 'config', async () => {
         const row = (await $.config.list()).find((r) => r.key === 'outputStyle')
@@ -449,7 +473,11 @@ async function refresh($: Engine, s: Snap): Promise<void> {
       job(s, 'id', async () => void (s.sessionId = await $.session.id())),
     ]).then(() => job(s, 'transcript', () => refreshTranscript($, s))),
     job(s, 'cwd', async () => void (s.cwd = await $.session.cwd())).then(() =>
-      now - s.gitAt > GIT_TTL_MS ? job(s, 'git', () => refreshGit($, s)).then(() => job(s, 'forge', () => refreshForge($, s))) : undefined,
+      now - s.gitAt > GIT_TTL_MS
+        ? job(s, 'git', () => refreshGit($, s))
+            .then(() => s.settled)
+            .then(() => (s.cfg.mode === 'off' ? undefined : job(s, 'forge', () => refreshForge($, s))))
+        : undefined,
     ),
   ])
   await session
@@ -462,8 +490,18 @@ async function refresh($: Engine, s: Snap): Promise<void> {
   redraw($)
 }
 
+// The refresh timer, at the interval the options in force give; none with mode: off.
+function schedule($: Engine, s: Snap): void {
+  if (s.timer && s.timerMs === s.cfg.refreshMs && s.cfg.mode !== 'off') return
+  s.timer?.cancel()
+  s.timer = null
+  if (s.cfg.mode === 'off') return
+  s.timerMs = s.cfg.refreshMs
+  s.timer = $.clock.every(s.timerMs, () => void refresh($, s).catch(() => {}))
+}
+
 function kick($: Engine, s: Snap): void {
-  if (!s.timer) s.timer = $.clock.every(s.cfg.refreshMs, () => void refresh($, s).catch(() => {}))
+  schedule($, s)
   void refresh($, s).catch(() => {})
 }
 
@@ -491,7 +529,6 @@ function view(s: Snap, now: number): View {
     agent: s.agent,
     sessionName: partial?.title ?? s.sessionTitle,
     outputStyle: s.outputStyle,
-    vim: null,
     forge: s.forge,
     context: u?.context
       ? { ...u.context, limit: effectiveWindow({ mode: s.cfg.ctxWindow, engineWindow: u.context.window, model: s.model, settings: s.windowSettings, env: s.windowEnv }) }
@@ -529,17 +566,18 @@ function noteClassic(s: Snap, e: { transcript_path?: string; agent_id?: string; 
 
 export const register: Register = (on, options) => {
   const cfg = parseConfig(options)
-  // off: no hook, no timer, no process.
+  // off: no hook, no timer, no process. An off that only the stored options carry is learned from the first
+  // settings read and ends the timer, the probes and the band from then on.
   if (cfg.mode === 'off') return
 
   const s: Snap = {
     cfg, options, model: null, effort: null, cwd: null, root: null, sessionId: null, transcriptPath: null, agent: null, sessionTitle: null,
-    outputStyle: null, settingsEffort: null, windowSettings: {}, windowEnv: null, usage: null, git: null, worktree: null, diff: null, gitAt: 0, slowUntil: 0,
+    outputStyle: null, settingsEffort: null, windowSettings: {}, windowEnv: null, usage: null, git: null, worktree: null, diff: null, gitAt: 0, repo: null, slowUntil: 0,
     kube: null, kubeSig: '', kubeError: null, remote: null, sshHosts: new Map(), target: null, pr: null, prAt: 0, prKey: '',
     forge: null, forgeAt: 0, forgeDataAt: 0, forgeError: null, unsupported: new Map(), tx: null, txChecked: false, txSearch: null,
     loadAt: 0, firstPass: false, steps: 0,
     hints: { env: null, terminalEnv: null, colorFgBg: null, desktopMode: null, systemDark: null }, noctalia: null, noColor: false,
-    themeAt: 0, apiMs: 0, shown: new Set(), sources: new Set(), busy: new Set(), timer: null,
+    themeAt: 0, apiMs: 0, shown: new Set(), sources: new Set(), busy: new Set(), timer: null, timerMs: 0, settled: null,
   }
 
   on('session.start', async ($, e, next) => {
@@ -611,7 +649,7 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (e.props.hasSurvey) return next(e)
+    if (e.props.hasSurvey || s.cfg.mode === 'off') return next(e)
     if (!s.usage && !s.model) {
       // A refresh already under way (from session.start) fills the snapshot; only a missed start kicks here.
       if (!s.timer) kick($, s)
