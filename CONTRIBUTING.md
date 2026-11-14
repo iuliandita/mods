@@ -6,31 +6,20 @@ Report suspected vulnerabilities through [SECURITY.md](SECURITY.md), not a publi
 
 ## Sources and generated files
 
-`mods/<name>/mod.json` is the catalog source. Edit `shared/` helpers and inject templates,
-then run `scripts/mods generate`. Never hand-edit `mods.json`, the marketplace catalog,
-copied `hooks/shared/` helpers, injected blocks, the Codex marketplace (`.agents/plugins/`), or
-the built `codex/` and `opencode/` bundles (edit `mods/<name>/host/` instead). Private mods belong
-under ignored `local/`.
+`mods/<name>/mod.json` is the catalog source. After changing it or a mod's `host/` code, run
+`scripts/mods generate`. Never hand-edit `mods.json`, the marketplace catalog, the Codex
+marketplace (`.agents/plugins/`), or the built `codex/` and `opencode/` bundles (edit
+`mods/<name>/host/` instead). Private mods belong under ignored `local/`.
 Mods run unsandboxed with user permissions. Review egress and source changes explicitly.
 
 ## Layout details
 
 - `mods/<name>/claude/` is the plugin itself. `scripts/modslib/` is the CLI package, `tests/` is
   its pytest suite, and `.github/` holds CI.
-- `shared/` holds TypeScript helpers several mods use. A mod lists the ones it needs in
-  `"shared"` in its mod.json; `scripts/mods generate` copies them to
-  `mods/<name>/claude/hooks/shared/` (committed, so each mod installs on its own). Edit
-  `shared/`, never the copies. Only helpers that never touch `$` live there: the engine does not
-  follow `$` across an import, and `claude plugin validate` lists a mod's `$` calls (env, http,
-  store) from the mod's own files, so code that uses `$` stays in each mod on purpose.
-- `shared/<name>.inject.ts` is code that uses `$` and several mods need (for example a client or log
-  write chain). A mod lists it in `"inject"` in its mod.json and holds the marker pair
-  `// @inject <name> begin (...)` / `// @inject <name> end` in `claude/hooks/register.ts`;
-  `scripts/mods generate` rewrites the text between them, and `generate --check` and `validate`
-  flag a block that differs. Edit the template, never the block. Mod-specific parts stay outside it.
 - A mod that also runs on Codex or OpenCode lists them in `"hosts"` in its mod.json. The
-  engine-neutral logic stays in `claude/hooks/` (it must not import `claude-code`); only
-  `claude/hooks/register.ts` is Claude-specific. `mods/<name>/host/` holds the Node adapters
+  engine-neutral logic stays in `claude/hooks/` (it must not import `claude-code`); only the
+  entry file, `claude/hooks/register.ts` (`register.tsx` in `delegation-board` and `statusline`),
+  is Claude-specific. `mods/<name>/host/` holds the Node adapters
   (`bin.ts` for Codex, `opencode.ts` for OpenCode, tested with `bun test`), and `scripts/mods
   generate` bundles them with the Bun in `.bun-version` into `codex/bin/<name>.mjs` and
   `opencode/server.js` (committed, never hand-edited) and writes `.agents/plugins/marketplace.json`.
@@ -54,19 +43,36 @@ Mods run unsandboxed with user permissions. Review egress and source changes exp
 python3 -m pytest -q -m "not integration"
 bun test mods/*/host
 scripts/typecheck --hosts
-scripts/mods validate --no-claude
-scripts/mods generate --check
+MODS_REQUIRE_BUN=1 scripts/mods validate --no-claude
+MODS_REQUIRE_BUN=1 scripts/mods generate --check
 python3 .github/stack/stack-check.py
+python3 scripts/check-plugin-versions.py
 npm ci --ignore-scripts --prefix .github/tools/markdownlint
 .github/tools/markdownlint/node_modules/.bin/markdownlint-cli2
 ```
 
-CI also runs lychee, actionlint, zizmor, and gitleaks.
+This is the pre-push check list. [AGENTS.md](AGENTS.md) repeats the commands and
+[INSTALL.md](INSTALL.md) points here; all three match `.github/workflows/ci.yml`.
+
+- Install the dev tools first with `pip install --require-hashes -r requirements-dev.txt`.
+  The file is a hashed lock and CI installs it the same way; the command that regenerates it is
+  in the file's header.
+- `MODS_REQUIRE_BUN=1` is what CI sets. Without it, `validate` and `generate --check` skip the
+  host bundle check when the Bun in `.bun-version` is missing or another version is installed.
+- The CLI and the tests support Python 3.10; CI runs the tests on 3.10 and 3.12.
+  `.github/stack/stack-check.py` needs Python 3.11 or newer.
+- `scripts/typecheck --hosts` needs bun and the network: it installs the TypeScript compiler and
+  the type packages pinned in `.github/tools/typecheck/` into a temporary directory.
+- `scripts/typecheck` exits 0 when the check passes, 1 when it fails, 2 for a usage or setup error
+  (including missing engine types), and 3 when a required tool is missing.
+- `ci.yml` also runs actionlint, lychee and the integration job. `.github/workflows/security.yml`
+  runs zizmor and gitleaks.
 
 With the pinned Claude CLI, also run
 `scripts/mods validate` and `python3 -m pytest -q -m integration` using a temporary config root.
 After TypeScript changes, run `scripts/typecheck <mod>` and
-`claude plugin test mods/<mod>/claude`. Typechecking requires API types from an authenticated
+`claude plugin test mods/<mod>/claude`; `scripts/typecheck <mod>` also checks a private mod under
+`local/mods/`. Typechecking requires API types from an authenticated
 local session; CI validation/testing does not supply those types. Record that exclusion when
 it cannot be run. Do not install into live user configuration to obtain a test result.
 
@@ -89,9 +95,10 @@ it; do not turn terminal coverage into a claim about Desktop, VS Code or headles
   several mods can share the band.
 - The type check needs the API types the engine lays beside a mod it has loaded
   (`mods/*/claude/.claude-plugin/types`; the engine writes a `.gitignore` containing `*`
-  there, so it stays untracked), so load a mod from this clone once. CI does not run it:
-  `claude plugin validate` and `claude plugin test` do not lay those types (checked on 2.1.296),
-  only a real session does, and that needs a logged-in claude.
+  there, so it stays untracked), so load a mod from this clone once. CI does not run it: the
+  pinned `@anthropic-ai/claude-code` package ships no engine type definitions, and
+  `claude plugin validate` and `claude plugin test` lay none without a login (checked on 2.1.296
+  and 2.1.319). Only a real session lays them, and that needs a logged-in claude.
 - A session loads installed mods from the clone's checked-out branch, so a half-edit can break
   the guard running in that very session. Edit in a `git worktree` and copy the untracked
   `mods/*/claude/.claude-plugin/types` into it so `scripts/typecheck` finds the engine types.
@@ -100,9 +107,10 @@ it; do not turn terminal coverage into a claim about Desktop, VS Code or headles
 
 ## Releases
 
-Run `python3 scripts/check-plugin-versions.py` before pushing. The lint job fetches full
+`python3 scripts/check-plugin-versions.py` is part of the pre-push set. The lint job fetches full
 history and tags and compares each plugin's shipped `claude/`, `codex/` and `opencode/`
-directories against the latest reachable collection tag. Changed plugins must increase their
+directories against the highest `vX.Y.Z` tag in the repository, whether or not the current
+branch contains it. Changed plugins must increase their
 version in every host manifest, keeping them equal, even when only one host changed. New
 plugins need an initial version. Regenerate bundles before checking; source-only, README and
 catalog metadata changes do not count as shipped plugin changes. A missing tag/history is an
@@ -112,8 +120,12 @@ Feature and fix PRs target `develop` and are squash-merged. The version bump fol
 conventional-commit titles since the last tag: `feat` is minor, `fix` and `deps` are patch,
 `!` or `BREAKING CHANGE:` is major; `docs`, `chore`, `ci`, `test`, and `style` alone do not release.
 
-1. On `develop`, bump the collection version and move the Unreleased changelog entries under
-   the new version by PR. Collection tags do not set individual plugin versions.
+1. On `develop`, by PR, move the Unreleased entries in `CHANGELOG.md` under a heading for the new
+   version and add its compare link (and update the Unreleased one) at the bottom of the file. No
+   file holds the collection version: it lives in that changelog heading and in the tag.
+   Collection tags do not set individual plugin versions.
 2. Open a PR from `develop` to `main` and merge it with a merge commit, never a squash. Tag the
    merge on `main` as `v<version>` and push the tag. The release workflow checks the tag is on
-   `main` and publishes notes from the changelog. The v0.x prereleases were tagged on `develop`.
+   `main`, then waits up to 20 minutes for a successful push run of the CI workflow on the tagged
+   commit and fails without one, then publishes notes from the changelog. The v0.x prereleases
+   were tagged on `develop`.

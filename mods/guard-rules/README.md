@@ -34,7 +34,7 @@ fix the command and retry.
   Bash call carries the whole command in its own command line, so `pkill -f 'vite --host'` matches that
   shell and kills it (the tool reports exit 144). Exact (`-x`), anchored (`^...$`) and bracketed (`[v]ite`)
   patterns pass, as do patterns built from a variable and `pgrep -f`, which only reports the shell.
-  `bash -c` scripts and `sudo`, `env` and `rtk` prefixes are looked through. A pattern outside a simple
+  `bash -c` scripts and `sudo`, `env` and `rtk` (a command-prefix wrapper) prefixes are looked through. A pattern outside a simple
   subset (more than one quantifier, a quantified group, a back-reference, `\d`-style escapes, or over 200
   characters) is not run as a regex and is denied as too complex, so a crafted pattern cannot stall the guard.
 
@@ -52,14 +52,14 @@ Removed or empty target variables, `env -i`, a changed `HOME`, and `sudo`/`doas`
 custom targets. An assigned `TF_CLI_ARGS` or `TF_CLI_ARGS_*` also makes normally read-exempt calls count
 as changes, since injected flags can move state. `GIT_COMMON_DIR` overrides make guarded git writes unparsed.
 
-Hooks only; opt-in parser exceptions use Claude Code's permission prompt. Terminal behavior is
-verified. Headless, Desktop and VS Code are untested as surfaces; the one headless probe of the permission
-checks is described below.
+Hooks only; opt-in parser exceptions use Claude Code's permission prompt. The terminal, headless,
+Desktop and VS Code are untested as surfaces; the one headless probe of the permission checks is
+described below.
 Egress: none (no network, no model calls).
 
 ## Compatibility status
 
-- Claude Code: verified on 2.1.296 in the terminal.
+- Claude Code terminal: untested as a surface; no tracked record covers a terminal run.
 - Headless: untested as a surface. One `claude -p` probe on 2.1.312 checked the parser-mode decisions
   without model requests, including bypass mode; see [Quiet a rule](#quiet-a-rule).
 - Desktop and VS Code: untested. Interactive approval of parser exceptions is unverified.
