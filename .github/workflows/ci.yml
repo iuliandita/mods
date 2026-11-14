@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   lint:
@@ -42,7 +42,7 @@ jobs:
           tar -xzf /tmp/actionlint.tar.gz -C "$HOME/.local/bin" actionlint
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: actionlint -color
-      - run: pip install -r requirements-dev.txt
+      - run: pip install --require-hashes -r requirements-dev.txt
       - run: scripts/mods generate --check
       - run: scripts/typecheck --hosts
       - run: scripts/mods validate --no-claude
@@ -69,9 +69,10 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
-      - run: pip install -r requirements-dev.txt
+      - run: pip install --require-hashes -r requirements-dev.txt
       - run: python -m pytest -q -m "not integration"
-      - run: bun test mods/*/host
+      - if: matrix.python-version == '3.12'
+        run: bun test mods/*/host
 
   integration:
     name: integration
@@ -100,7 +101,7 @@ jobs:
       - run: node .github/ci/claude-code/node_modules/@anthropic-ai/claude-code/install.cjs
       - run: echo "$GITHUB_WORKSPACE/.github/ci/claude-code/node_modules/.bin" >> "$GITHUB_PATH"
       - run: claude --version | grep -F "$(node -p "require('./.github/ci/claude-code/package.json').dependencies['@anthropic-ai/claude-code']")"
-      - run: pip install -r requirements-dev.txt
+      - run: pip install --require-hashes -r requirements-dev.txt
       - run: python -m pytest -q -m integration
       - run: scripts/mods validate
 
