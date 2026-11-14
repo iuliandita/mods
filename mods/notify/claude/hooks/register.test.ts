@@ -5,8 +5,10 @@ import { expect, test } from 'claude-code/testing'
 const done = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }) as never
 
 // The engine beneath the mod: `uname -s` and the notifier, recorded. `notifier` is how the command ends.
-function world(on: On, notifier: 'ok' | 'missing' | 'fail' = 'ok', uname = 'Linux\n', block?: string, env: Env = {}) {
+function world(on: On, notifier: 'ok' | 'missing' | 'fail' | 'hang' = 'ok', uname = 'Linux\n', block?: string, env: Env = {}) {
   const seen = { runs: [] as string[][], toasts: [] as string[] }
+  let now = 1_000
+  on('clock.now', () => ({ value: now }))
   on('classic.Stop', () => (block === undefined ? {} : { block }))
   on('classic.Notification', () => ({}))
   on('env.get', (_$, e) => ({ value: env[e.name] }) as never)
@@ -14,6 +16,10 @@ function world(on: On, notifier: 'ok' | 'missing' | 'fail' = 'ok', uname = 'Linu
     const argv = [...(e as { argv: string[] }).argv]
     seen.runs.push(argv)
     if (argv[0] === 'uname') return done(uname)
+    if (notifier === 'hang') {
+      now += (e as { init?: { timeoutMs?: number } }).init?.timeoutMs ?? 0
+      return { deny: 'the command was still running' } as never
+    }
     if (notifier === 'missing') return { deny: `spawn ${argv[0]} ENOENT: no such file or directory` } as never
     return done('', notifier === 'fail' ? 1 : 0)
   })
@@ -69,6 +75,15 @@ test('a missing notifier is one warning toast for the session, and the hook stil
   await $.classic.Stop({ cwd: '/w/r', stop_hook_active: false })
   await $.classic.Stop({ cwd: '/w/r', stop_hook_active: false })
   expect(seen.toasts).toEqual(['notify: warning: notify-send not found: no notification was shown; install it or set mode to off'])
+})
+
+test('a notifier that never answers is waited for once, then delivery stops for the session', async ($, on) => {
+  const seen = world(on, 'hang')
+  await $.classic.Stop({ cwd: '/w/r', stop_hook_active: false })
+  await $.classic.Stop({ cwd: '/w/r', stop_hook_active: false })
+  await $.classic.Notification({ cwd: '/w/r', message: 'm', notification_type: 'permission_prompt' })
+  expect(sent(seen)).toHaveLength(1)
+  expect(seen.toasts).toEqual(['notify: warning: notify-send timed out: no notification was shown; check the desktop notification service'])
 })
 
 test('a notifier that exits non-zero is a warning too', async ($, on) => {
