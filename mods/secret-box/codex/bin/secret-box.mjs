@@ -106,14 +106,14 @@ function quote(s) {
     return s;
   return `'${s.replaceAll("'", "'\\''")}'`;
 }
-function rewriteCommand(wrapper, command, scrub = false) {
-  return `${quote(wrapper)} exec ${scrub ? "--scrub " : ""}-- ${quote(command)}`;
+function rewriteCommand(wrapper, command) {
+  return `${quote(wrapper)} exec --scrub -- ${quote(command)}`;
 }
+var parseMode = (v) => v === "off" || v === "dry" ? v : "on";
 var PATH_FIELDS = new Set(["persistedOutputPath", "rawOutputPath"]);
 var KEEP_ON_FAILURE = new Set([...PATH_FIELDS, "backgroundTaskId", "type"]);
 
 // mods/secret-box/host/core.ts
-var parseMode = (v) => v === "off" || v === "dry" ? v : "on";
 var helperMissing = (helper) => `secret-box: the helper ${helper} was not found, so the command was blocked (fail closed). Reinstall the plugin.`;
 function helperExists(helper) {
   try {
@@ -122,7 +122,6 @@ function helperExists(helper) {
     return false;
   }
 }
-var rewrite = (helper, command) => rewriteCommand(helper, command, true);
 var MESSAGE_ROLES = new Set(["system", "user", "assistant", "tool"]);
 var CONTENT_TYPES = new Set(["text", "reasoning", "media", "tool-call", "tool-result", "compaction", "effort"]);
 
@@ -166,14 +165,14 @@ async function hook(io) {
         hookEventName: "PreToolUse",
         permissionDecision: "allow",
         permissionDecisionReason: "secret-box fills in the placeholders when the command runs",
-        updatedInput: { ...toolInput, command: rewrite(io.helper, command) }
+        updatedInput: { ...toolInput, command: rewriteCommand(io.helper, command) }
       }
     }));
     return 0;
   } catch {
     if (placeholderNames(command).length === 0)
       return 0;
-    return deny(io, "secret-box: the hook failed, so the command was blocked before it ran (fail closed). Set mode to off or dry in ~/.config/iuliandita-mods/secret-box.json, or disable the plugin.");
+    return deny(io, "secret-box: the hook failed, so the command was blocked before it ran (fail closed). The user must check the secret-box install and its options file, ~/.config/iuliandita-mods/secret-box.json.");
   }
 }
 async function main(argv, io) {

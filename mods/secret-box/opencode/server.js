@@ -138,14 +138,15 @@ function quote(s) {
     return s;
   return `'${s.replaceAll("'", "'\\''")}'`;
 }
-function rewriteCommand(wrapper, command, scrub = false) {
-  return `${quote(wrapper)} exec ${scrub ? "--scrub " : ""}-- ${quote(command)}`;
+function rewriteCommand(wrapper, command) {
+  return `${quote(wrapper)} exec --scrub -- ${quote(command)}`;
 }
+var parseMode = (v) => v === "off" || v === "dry" ? v : "on";
+var WITHHELD = "[secret-box: this content was withheld because scrubbing failed]";
 var PATH_FIELDS = new Set(["persistedOutputPath", "rawOutputPath"]);
 var KEEP_ON_FAILURE = new Set([...PATH_FIELDS, "backgroundTaskId", "type"]);
 
 // mods/secret-box/host/core.ts
-var parseMode = (v) => v === "off" || v === "dry" ? v : "on";
 var helperMissing = (helper) => `secret-box: the helper ${helper} was not found, so the command was blocked (fail closed). Reinstall the plugin.`;
 function helperExists(helper) {
   try {
@@ -169,8 +170,6 @@ function request(helper, texts) {
     child.stdin?.end(JSON.stringify(texts));
   });
 }
-var rewrite = (helper, command) => rewriteCommand(helper, command, true);
-var WITHHELD = "[secret-box: this content was withheld because scrubbing failed]";
 var MAX_DEPTH = 24;
 var MESSAGE_ROLES = new Set(["system", "user", "assistant", "tool"]);
 var CONTENT_TYPES = new Set(["text", "reasoning", "media", "tool-call", "tool-result", "compaction", "effort"]);
@@ -234,26 +233,34 @@ function scrubValue(value, scrub) {
       return text(v);
     if (v === null || typeof v !== "object")
       return v;
+    if (ArrayBuffer.isView(v) || v instanceof Map || v instanceof Set || v instanceof URL)
+      return v;
     if (depth > MAX_DEPTH || path.has(v)) {
       changed = true;
       return WITHHELD;
     }
     path.add(v);
     try {
-      if (Array.isArray(v))
-        return v.map((x) => walk(x, depth + 1, path));
+      if (Array.isArray(v)) {
+        const items = v.map((x) => walk(x, depth + 1, path));
+        return items.some((x, i) => x !== v[i]) ? items : v;
+      }
       const entries = v instanceof Error ? Object.getOwnPropertyNames(v).map((key) => [key, Reflect.get(v, key)]) : Object.entries(v);
       if (entries.length === 0)
         return v;
       const out = Object.create(Object.getPrototypeOf(v));
+      let same = true;
       for (const [k, x] of entries) {
         const base = text(k);
         let key = base;
         for (let n = 2;Object.hasOwn(out, key); n++)
           key = `${base}#${n}`;
-        Object.defineProperty(out, key, { value: walk(x, depth + 1, path), enumerable: true, configurable: true, writable: true });
+        const value = walk(x, depth + 1, path);
+        if (key !== k || value !== x)
+          same = false;
+        Object.defineProperty(out, key, { value, enumerable: true, configurable: true, writable: true });
       }
-      return out;
+      return same ? v : out;
     } finally {
       path.delete(v);
     }
@@ -314,7 +321,7 @@ async function setup(ctx, deps) {
       throw new Error(scope);
     if (!helperExists(deps.helper))
       throw new Error(helperMissing(deps.helper));
-    input.command = rewrite(deps.helper, input.command);
+    input.command = rewriteCommand(deps.helper, input.command);
   });
   await ctx.tool.hook("execute.after", async (e) => {
     if (mode() !== "on")

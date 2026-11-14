@@ -126,12 +126,15 @@ secret-box scrub                     filter a JSON array of strings on stdin
 A placeholder for a secret that is not stored makes the command exit 3 with a line naming it and
 nothing runs. A placeholder inside single quotes (`'...'` or `$'...'`, also inside `$(...)` or
 backticks within double quotes) would not expand, so it exits 4 and nothing runs; use double quotes.
+If the stored values cannot be read to build the output filter (a locked keyring, a failing keyring
+tool), `exec` exits 5 with a `fail closed` line and nothing runs. Any other exit status is the
+command's own, or 128 plus the signal number when a signal ended it.
 
 ## Slash command
 
 ```text
 /secret-box           mode, stored secret names, helper path, how to add one
-/secret-box reload    re-read the keyring after adding or removing a secret
+/secret-box reload    refresh the names shown in the status after adding or removing a secret
 ```
 
 The status shows names only, never values. Reload refreshes that status metadata; scrubbing
@@ -211,8 +214,13 @@ They do not restrict direct keyring access or the helper when run outside the ho
 
 This is not a security boundary.
 
-- It catches exact known values and their JSON-escaped (including the ASCII `\uXXXX` form of a non-ASCII value, as `json.dumps` prints it), URL-encoded and base64 forms, not derived ones (a hash, a
+- It catches exact known values and their JSON-escaped (including the ASCII `\uXXXX` form of a non-ASCII value, as `json.dumps` prints it,
+  the `\u0026`-style escapes of `&`, `<`, `>`, U+2028 and U+2029 that HTML-safe encoders such as Go's write, in either hex case, and `\/` for `/`), URL-encoded and base64 forms, not derived ones (a hash, a
   value split across lines, a different encoding, a value with a character changed).
+- Shell-quoted renderings are not caught. `set -x` traces, `export -p`, `declare -p` and `printf %q`
+  print a value in the shell's own quoting, so a value containing a quote, a backslash, a control
+  character or other characters the shell escapes comes out in a form that matches none of the above.
+  Do not trace or dump the environment of a command that uses a placeholder.
 - The child process holds the value in its environment and can print it. The output is then scrubbed
   on the way into the conversation, but only if it matches one of the forms above.
 - A rewritten call's stored `tool_use` keeps the original command text, with placeholders and never

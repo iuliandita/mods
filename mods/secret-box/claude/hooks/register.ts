@@ -2,19 +2,14 @@ import type { EngineInterface as Engine, Register } from 'claude-code'
 import { scopeDenied } from './scopes'
 import { parseReply, scrubBatch, type ScrubReply } from './remote'
 
-import { MIN_LEN, placeholderNames, quote, rewriteCommand, scrubBlocks, scrubToolAnswer, withhold, type Block } from './scrub'
-
-type Mode = 'off' | 'dry' | 'on'
-
-// An unreadable option counts as on, so a typo cannot switch the box off.
-const parseMode = (v: unknown): Mode => (v === 'off' || v === 'dry' ? v : 'on')
+import { MIN_LEN, parseMode, placeholderNames, quote, rewriteCommand, scrubBlocks, scrubToolAnswer, withhold, type Block, type Mode } from './scrub'
 
 function wrapperOf($: Engine): string {
   return `${$.plugin.root}/bin/secret-box`
 }
 
 const LOAD_FAILED = (wrapper: string) =>
-  `secret-box: the stored secrets could not be loaded, so the command was blocked before it ran (fail closed). Check that the keyring backend works and is unlocked (run "${quote(wrapper)} names" in a terminal), or set mode to off or dry in the plugin options. The placeholders were left as written and no value was read.`
+  `secret-box: the stored secrets could not be loaded, so the command was blocked before it ran (fail closed). The user must check that the keyring backend works and is unlocked (run "${quote(wrapper)} names" in a terminal). The placeholders were left as written and no value was read.`
 
 // The engine rejects an $.fs.read over 4 MiB.
 const MAX_SAVED_BYTES = 4 * 1024 * 1024
@@ -56,14 +51,18 @@ function inToolResults(p: string | undefined): boolean {
   return parts.length >= 2 && parts[parts.length - 2] === 'tool-results'
 }
 
-async function warnFile($: Engine, s: State, reason: string): Promise<void> {
-  if (s.fileWarned) return
-  s.fileWarned = true
+async function toast($: Engine, text: string): Promise<void> {
   try {
-    await $.ui.toast(`secret-box: could not scrub the saved output file (${reason}); it may contain a secret`)
+    await $.ui.toast(text)
   } catch {
     // a toast must never surface as an error
   }
+}
+
+async function warnFile($: Engine, s: State, reason: string): Promise<void> {
+  if (s.fileWarned) return
+  s.fileWarned = true
+  await toast($, `secret-box: could not scrub the saved output file (${reason}); it may contain a secret`)
 }
 
 // Rewrites the file a Bash result points at (the saved full output) with known values replaced.
@@ -159,7 +158,7 @@ export const register: Register = (on, options) => {
     const cwd = options.secretScopes === undefined || options.secretScopes === '' ? '' : await $.session.cwd()
     const scope = scopeDenied(options.secretScopes, names, cwd)
     if (s.mode === 'dry') {
-      $.ui.toast(scope ?? `secret-box (dry run): would resolve ${names.join(', ')} at execution time`)
+      await toast($, scope ?? `secret-box (dry run): would resolve ${names.join(', ')} at execution time`)
       return next(e)
     }
     if (scope) return { deny: scope }
@@ -171,7 +170,7 @@ export const register: Register = (on, options) => {
     }
     if (!(await load($, s))) return { deny: LOAD_FAILED(wrapper) }
     // The helper retains the values used by this command while filtering its output.
-    const result = await next({ ...e, command: rewriteCommand(wrapper, e.command, true) })
+    const result = await next({ ...e, command: rewriteCommand(wrapper, e.command) })
     const clean = await scrubAnswer($, result)
     await scrubSavedFile($, s, clean)
     return clean
@@ -181,7 +180,7 @@ export const register: Register = (on, options) => {
       return s.mode === 'on' ? scrubAnswer($, answer) : answer
     }
     if (s.mode !== 'off' && e.tool === 'Bash' && placeholderNames(e.command).length > 0) {
-      return { deny: 'secret-box: the hook failed, so the command was blocked before it ran (fail closed). Check the debug log, or set mode to off or dry in the plugin options. The placeholders were left as written and no value was read.' }
+      return { deny: 'secret-box: the hook failed, so the command was blocked before it ran (fail closed). The user must check the debug log. The placeholders were left as written and no value was read.' }
     }
     return next(e)
   })
@@ -192,7 +191,7 @@ export const register: Register = (on, options) => {
     const r = await scrubBatch((scrub) => scrubBlocks(e.message.content, scrub), (texts) => request($, texts))
     if (r.names.length === 0) return next(e)
     if (s.mode === 'dry') {
-      $.ui.toast(`secret-box (dry run): would replace ${r.names.join(', ')} in a ${e.door} row`)
+      await toast($, `secret-box (dry run): would replace ${r.names.join(', ')} in a ${e.door} row`)
       return next(e)
     }
     return next({ ...e, message: { ...e.message, content: r.content } })
@@ -207,7 +206,7 @@ export const register: Register = (on, options) => {
     const r = (await request($, [e.text])).results[0]!
     if (r.names.length === 0) return next(e)
     if (s.mode === 'dry') {
-      $.ui.toast(`secret-box (dry run): would replace ${r.names.join(', ')} in a sent message`)
+      await toast($, `secret-box (dry run): would replace ${r.names.join(', ')} in a sent message`)
       return next(e)
     }
     return next({ ...e, text: r.text })
