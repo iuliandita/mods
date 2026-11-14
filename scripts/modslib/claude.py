@@ -60,7 +60,7 @@ def _parse(args: tuple[str, ...], text: str, kind: type) -> Any:
 
 
 def _entries(args: tuple[str, ...], text: str, key: str) -> list[dict]:
-    data = _parse(args, text if text.strip() else "[]", list)
+    data = _parse(args, text, list)
     if not all(isinstance(entry, dict) and isinstance(entry.get(key), str) and entry[key]
         for entry in data):
         raise _unexpected(args, text, f"every entry needs a non-empty string {key!r} field")

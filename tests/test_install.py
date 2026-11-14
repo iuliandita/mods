@@ -107,7 +107,21 @@ def test_list_and_doctor_survive_a_claude_that_cannot_run(
     code, payload = list_mods(root)
     assert code == 0 and payload["claude"] == {"found": False, "version": None}
     code, payload = doctor(root)
-    assert code == 3 and payload["claude"]["found"] is False
+    assert code == 1 and payload["claude"]["found"] is False
+    assert "could not run" in payload["errors"][0]
+
+
+@pytest.mark.parametrize(("broken", "code"), [(False, 3), (True, 1)])
+def test_doctor_exits_3_only_when_a_missing_claude_is_the_sole_error(
+    no_claude: None, tmp_path: Path, broken: bool, code: int
+) -> None:
+    root = _repo(tmp_path)
+    if broken:
+        write_mod(root, "bad", kind="widget")
+    got, payload = doctor(root)
+    assert got == code and payload["claude"] == {"found": False, "version": None}
+    assert "claude CLI not found" in payload["errors"][0]
+    assert len(payload["errors"]) == (2 if broken else 1)
 
 
 @pytest.mark.parametrize("platform,backend", [("linux", "secret-tool"), ("darwin", "security")])

@@ -5,8 +5,10 @@ from pathlib import Path
 
 import pytest
 from conftest import write_mod
+from modslib import generate as generate_module
 from modslib.catalog import CatalogError
 from modslib.generate import generate
+from test_hosts import add_hosts
 
 
 def test_generate_writes_then_check_is_clean(tmp_path: Path) -> None:
@@ -117,3 +119,18 @@ def test_generate_injects_the_block_and_check_flags_drift(tmp_path: Path) -> Non
     register.write_text(register.read_text().replace("const a = 1", "const a = 2"))
     assert generate(tmp_path, check=True) == [register]
     assert "const a = 2" in register.read_text()
+
+
+def test_check_reports_the_skipped_bundle_check_unless_bun_is_required(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    add_hosts(write_mod(tmp_path, "alpha", hosts=["codex"]), "codex")
+    (tmp_path / ".bun-version").write_text("1.4.3\n")
+    generate(tmp_path, bundles=False)
+    monkeypatch.setattr(generate_module.shutil, "which", lambda name: None)
+    monkeypatch.delenv("MODS_REQUIRE_BUN", raising=False)
+    skipped: list[str] = []
+    assert generate(tmp_path, check=True, skipped=skipped) == []
+    assert len(skipped) == 1 and "host bundle check skipped" in skipped[0] and "bun 1.4.3" in skipped[0]
+    skipped.clear()
+    assert generate(tmp_path, check=True, bundles=False, skipped=skipped) == [] and skipped == []

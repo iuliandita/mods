@@ -225,18 +225,32 @@ What an agent can rely on:
   (a list of strings: empty when `ok` is true, non-empty when false). Exit codes: 0 done, 1 failed, 2 usage
   error (unknown command or flag), 3 a required tool (claude, or the pinned bun) is missing. Usage,
   `--root`, I/O, and `generate` catalog errors carry only these two keys.
+- Exit 3 means the missing tool is the only thing wrong. `doctor` and `validate` keep everything
+  else they found: when the claude CLI is missing and another error or problem is reported with
+  it, they exit 1 and list both. A claude CLI that is present but fails (it cannot run, times
+  out) is exit 1.
 - Each command adds its own keys: `list` adds `claude` and `mods`; `install` adds `installed`
   and `uninstall` adds `uninstalled` (the plugin ids done so far, also on failure), plus `manual`
   and `skipped` when retired mods are involved; `doctor`
-  adds `claude`, `mods`, `notes`, and `source` (the pinned stable source, `iuliandita/mods#main`,
+  adds `claude`, `mods`, `codex_hooks` (one `{"mod", "event", "status", "enabled"}` object per
+  installed Codex hook of this collection), `notes`, and `source` (the pinned stable source,
+  `iuliandita/mods#main`,
   ready for `--source`; `mods.json` carries the same value as `stable_source`); `validate` adds `problems` (same strings as
   `errors`); `generate` adds `written`, and `generate --check` adds `stale`.
-- `claude` is always `{"found": bool, "version": string|null}`. `doctor` exits 1 with `ok` false
-  when it is not found; `list` still succeeds and reports each `installed` as null. When claude
+- `generate --check` and `validate` add `skipped` (a list of strings) when the pinned bun is
+  missing or has another version and `MODS_REQUIRE_BUN` is not `1`: the host bundles were not
+  checked, the rest was, and the exit code is not affected. Without `--json` the same text is a
+  `note:` line on stderr. With `MODS_REQUIRE_BUN=1` the same condition is a failure instead (3
+  when bun is missing, 1 for another version).
+- `claude` is always `{"found": bool, "version": string|null}`; `found` is false when the claude
+  CLI is missing or does not run. `doctor` then has `ok` false and exits by the rule above;
+  `list` still succeeds and reports each `installed` as null. When claude
   is found but the installed-plugin read fails, `list` exits 1 with `ok` false, a non-empty
   `errors`, and `installed` null. `installed` means installed at any scope, unless `list --scope`
   is given and claude reports a scope per plugin (a plugin without one counts at any scope).
 - `validate --no-claude` skips the checks that need the claude CLI.
+- Without `--json`, an `install` or `uninstall` that fails part way prints the ids it finished
+  on stdout as `completed before the failure: <ids>`, and the error on stderr.
 
 Mods run unsandboxed with the user's permissions. The `/plugin` slash command is unavailable in
 the Desktop Code tab, but a terminal install at user scope loads in Desktop sessions too.
