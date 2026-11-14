@@ -7,12 +7,13 @@ fix the command and retry.
   lines, claude.ai session links, Claude Code links, or robot-emoji lines in `git commit`, `git merge`,
   `git revert`, annotated `git tag`, `gh pr`, `gh issue` and `gh release` commands, and the
   equivalent `glab` (`mr`, `issue`, `release`), `tea` (`pulls`, `issues`, `releases`) and `fj`
-  (`pr`, `issue`, `release`) commands (heredoc bodies included). A body file named in a `gh` or
+  (`pr`, `issue`, `release`) commands (heredoc bodies included). The verbs that carry text are covered,
+  including the `new` alias of `create` and a `close` or `reopen` with a comment. A body file named in a `gh` or
   `glab` call (`-F`, `--body-file`, `--notes-file`, `--description-file`) is read and scanned too.
   Both raw text and decoded argument words are scanned, including adjacent quotes, ANSI-C escapes and backslash splits.
 - **protected branches** (default `develop,main`): no `git commit`, `merge`, `cherry-pick`,
   `revert`, `am` or `rebase` while on one, and no `git push` that targets one (`origin main`,
-  `HEAD:main`, `--all`, the matching refspec `:`, a wildcard destination, an implicit push from
+  `HEAD:main`, `--all`, `--branches`, the matching refspec `:`, a wildcard destination, an implicit push from
   `develop`). An implicit push also honors `push.default` (`matching` counts as `--all`,
   `upstream` checks the upstream branch) and configured `remote.<name>.push` refspecs, which are
   read for every remote and also apply to a push that names only a source. The first commit of
@@ -52,13 +53,15 @@ custom targets. An assigned `TF_CLI_ARGS` or `TF_CLI_ARGS_*` also makes normally
 as changes, since injected flags can move state. `GIT_COMMON_DIR` overrides make guarded git writes unparsed.
 
 Hooks only; opt-in parser exceptions use Claude Code's permission prompt. Terminal behavior is
-verified, along with the headless permission checks described below; Desktop and VS Code remain untested.
+verified. Headless, Desktop and VS Code are untested as surfaces; the one headless probe of the permission
+checks is described below.
 Egress: none (no network, no model calls).
 
 ## Compatibility status
 
 - Claude Code: verified on 2.1.296 in the terminal.
-- Claude Code 2.1.312: headless parser-mode decisions checked without model requests, including bypass mode.
+- Headless: untested as a surface. One `claude -p` probe on 2.1.312 checked the parser-mode decisions
+  without model requests, including bypass mode; see [Quiet a rule](#quiet-a-rule).
 - Desktop and VS Code: untested. Interactive approval of parser exceptions is unverified.
 - Codex CLI 0.162.1 and OpenCode 2.0.29: a protected-branch block and the `unprotectedRepos`
   exemption were run on each; see [Codex and OpenCode](#codex-and-opencode).

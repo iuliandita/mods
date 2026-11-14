@@ -48,7 +48,8 @@ export async function identityViolations(call: GitCall, cfg: Config, env: Env, c
   }
   const probe = probeEnv(call.assigns)
   if (probe === null) {
-    return [{ rule: 'unparsed', mode: cfg.identity, message: 'unparsed: GIT_CONFIG_COUNT is not a literal number up to 32, so the identity git would use cannot be checked. Use -c user.email=... instead.' }]
+    if (cfg.unparsed === 'off') return []
+    return [{ rule: 'unparsed', mode: cfg.unparsed === 'dry' && cfg.identity === 'on' ? 'dry' : cfg.identity, message: 'unparsed: GIT_CONFIG_COUNT is not a literal number up to 32, so the identity git would use cannot be checked. Use -c user.email=... instead.' }]
   }
   if (probe === 'other') {
     return add('identity: this command passes git config through GIT_CONFIG_PARAMETERS or an include.path in GIT_CONFIG_KEY_n, so the identity cannot be checked. Use -c user.email=... instead.')

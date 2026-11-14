@@ -199,6 +199,7 @@ test('context: a store that exists but cannot be read denies instead of reading 
   const env = nodeEnv(repo, () => loadClasses(storeFile))
   const kube = await checkCommand('kubectl delete pod x --context dev-box', loadConfig(configFile), env)
   expect(kube.deny).toContain('the guard failed')
+  expect(kube.deny).not.toMatch(/to off|disable the plugin/i)
   writeFileSync(storeFile, JSON.stringify({ 'dev-box': 'protected' }))
   expect((await checkCommand('kubectl delete pod x --context dev-box', loadConfig(configFile), env)).deny).toContain('dev-box')
   writeFileSync(storeFile, '{}')

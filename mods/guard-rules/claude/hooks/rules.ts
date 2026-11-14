@@ -45,14 +45,15 @@ export interface Env {
 
 export type Verdict = { enforced: Violation[]; dry: Violation[] }
 
+// `new` is an alias of `create`; `close` and `reopen` take a comment (`--comment`, fj `--with-msg`).
 const GH_MESSAGE: Record<string, Set<string>> = {
-  pr: new Set(['create', 'edit', 'comment', 'review', 'merge']),
-  issue: new Set(['create', 'edit', 'comment']),
-  release: new Set(['create', 'edit']),
+  pr: new Set(['create', 'new', 'edit', 'comment', 'review', 'merge', 'close', 'reopen']),
+  issue: new Set(['create', 'new', 'edit', 'comment', 'close', 'reopen']),
+  release: new Set(['create', 'new', 'edit']),
 }
-const GLAB_VERBS = new Set(['create', 'update', 'note', 'edit', 'merge'])
+const GLAB_VERBS = new Set(['create', 'new', 'update', 'note', 'edit', 'merge'])
 const TEA_VERBS = new Set(['create', 'edit', 'comment'])
-const FJ_VERBS = new Set(['create', 'edit', 'comment', 'merge'])
+const FJ_VERBS = new Set(['create', 'edit', 'comment', 'merge', 'close'])
 const FORGE_MESSAGE: Record<GhCall['cli'], Record<string, Set<string>>> = {
   gh: GH_MESSAGE,
   glab: { mr: GLAB_VERBS, issue: GLAB_VERBS, release: GLAB_VERBS },
@@ -96,7 +97,7 @@ export function parseConfig(options: Readonly<Record<string, unknown>>): Config 
     .split(',')
     .map((b) => b.trim())
     .filter(Boolean)
-  if (!branches.length) errors.push('protectedBranches must name at least one branch (set modeProtectedBranch to off to turn the rule off)')
+  if (!branches.length) errors.push('protectedBranches must name at least one branch')
   let identityRules: IdentityRule[] = []
   const raw = String(options.identityRules ?? '').trim()
   if (raw) {
@@ -285,7 +286,7 @@ export async function evaluate(command: string, cfg: Config, rawEnv: Env): Promi
       rule: 'lookup',
       mode: lookupMode,
       message:
-        'lookup: git could not be run to check the branch or identity (it failed or timed out), so the command was blocked. Retry it; if this keeps happening, set the rule modes to off in the plugin options.',
+        'lookup: git could not be run to check the branch or identity (it failed or timed out), so the command was blocked. Retry it; if it keeps failing, tell the user that git does not run in the command\'s directory.',
     })
   }
   if (runLookupFailed && cfg.context !== 'off') {
@@ -293,7 +294,7 @@ export async function evaluate(command: string, cfg: Config, rawEnv: Env): Promi
       rule: 'lookup',
       mode: cfg.context,
       message:
-        'lookup: the current kubectl context or terraform workspace could not be read (the command failed or timed out), so the command was blocked. Retry it, or name the environment in the command (--context, --kube-context, TF_WORKSPACE); if this keeps happening, set modeContext to off in the plugin options.',
+        'lookup: the current kubectl context or terraform workspace could not be read (the command failed or timed out), so the command was blocked. Retry it, or name the environment in the command (--context, --kube-context, TF_WORKSPACE); if it keeps failing, tell the user that kubectl or terraform does not answer.',
     })
   }
 
