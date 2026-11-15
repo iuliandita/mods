@@ -42,6 +42,16 @@
       "enabled": false
     },
     {
+      "description": "Newer Node types would let the hosts type-check against APIs the oldest documented Node lacks.",
+      "matchDepNames": [
+        "@types/node"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "enabled": false
+    },
+    {
       "matchManagers": [
         "pip_requirements"
       ],
