@@ -2,6 +2,33 @@
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-11-15
+
+The leftovers from the v1.1.2 review. Four plugins have a patch release in their Claude Code, Codex, and OpenCode manifests: `guard-rules` 1.1.2, `notify` 1.0.3, `delegation-board` 1.0.2, `statusline` 1.0.2. `secret-box` stays at 1.0.1.
+
+Codex users: the `guard-rules` and `notify` plugins changed, so trust their hooks again in `/hooks` after the update. `scripts/mods doctor` reports hooks that are still untrusted.
+
+### Changed
+
+- `notify` no longer offers a `t3` option on Claude Code, where it was never read. Codex and OpenCode still read it from `notify.json` (#225).
+- `guard-rules` judges only the directory of a `cd` that a later commit depends on when a pipeline sits between them (`cd X && a | b && git commit`); the `;` forms and a piped `cd` still judge both. The value of `git rebase -x` is no longer read as a branch (#224).
+
+### Fixed
+
+- `guard-rules` follows `git branch -m`/`-M` of the current branch and `git worktree add` like a switch, so a commit after renaming onto a protected name, or inside a just-added worktree of a protected branch, is denied (#224).
+- `guard-rules` judges `git send-pack` like a push with explicit refspecs; without refs or with `--stdin` it is denied (#224).
+- The `guard-rules` self-kill rule also denies killing the pids of a `pgrep -f` whose pattern matches the command itself: `kill $(pgrep -f X)` and `pgrep -f X | xargs kill` (#224).
+- On Codex and OpenCode, `guard-rules` answers with a deny that names the cause when the account has no passwd entry, instead of an uncaught error (#224).
+- `delegation-board`: `/board clear` also drops `unknown` rows, such as the engine's own forks, which could never settle (#225).
+- `statusline` cancels its refresh timer when the session ends; a `/clear` or a resume keeps it (#225).
+- `guard-rules/docs/limits.md` matches the code again: the lookup timeout on Codex and OpenCode, missing wrappers and context switchers, and entries for what stays uncovered (#224).
+
+### CI and tooling
+
+- The runners are on `ubuntu-26.04`. Node stays at 22 in CI, the oldest Node the hosts document, and Renovate no longer proposes Node or `@types/node` majors (#227).
+- Dependency updates: TypeScript 5.9.3 for the host typecheck, zizmor 1.32.0.
+- The secret-box and version tests share their helpers (#226).
+
 ## [1.1.2] - 2026-11-14
 
 Fixes from a full review of the repository, including an independent review. Every plugin has a patch release in its Claude Code, Codex, and OpenCode manifests: `guard-rules` 1.1.1, `notify` 1.0.2, `secret-box` 1.0.1, `statusline` 1.0.1, `delegation-board` 1.0.1.
@@ -283,7 +310,8 @@ First collection prerelease. Individual plugin versions remain independent of th
   timer afterwards; `delegation-board` resets on `/clear` and prints a text table when its pane
   is not placed (Claude Desktop).
 
-[Unreleased]: https://github.com/iuliandita/mods/compare/v1.1.2...develop
+[Unreleased]: https://github.com/iuliandita/mods/compare/v1.1.3...develop
+[1.1.3]: https://github.com/iuliandita/mods/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/iuliandita/mods/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/iuliandita/mods/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/iuliandita/mods/compare/v1.0.1...v1.1.0
