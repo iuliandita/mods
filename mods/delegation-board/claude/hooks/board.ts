@@ -6,7 +6,7 @@ export const MAX_ROWS = 40
 export const DESC_MAX = 60
 export const EFFORT_TTL_MS = 10 * 60 * 1000
 export const MAX_MISSES = 3
-export const USAGE = 'delegation-board: /board toggles the pane, /board clear drops finished rows, /board status prints the summary as text.'
+export const USAGE = 'delegation-board: /board toggles the pane, /board clear drops finished and unknown rows, /board status prints the summary as text.'
 
 const STATES: readonly string[] = ['pending', 'running', 'waiting', 'idle', 'completed', 'failed', 'killed', 'unknown']
 const FINISHED: readonly string[] = ['completed', 'failed', 'killed']
@@ -228,7 +228,8 @@ export function sanitizeRows(value: unknown): Row[] {
   return keep(out)
 }
 
-export const clearFinished = (rows: Row[]): Row[] => rows.filter((r) => !isSettled(r))
+// An unknown row with no end time (an engine fork, say) is never polled, so it would never settle and never clear.
+export const clearFinished = (rows: Row[]): Row[] => rows.filter((r) => !isSettled(r) && r.state !== 'unknown')
 
 // Live rows first (oldest start first, so rows stay put), then the newest settled; a child sits directly
 // after its parent. Orphans and cycles keep the flat order.

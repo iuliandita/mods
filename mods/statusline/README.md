@@ -170,7 +170,8 @@ and the API part (none timed yet). Desktop runs Claude Code with the login shell
 - `placeholders`: `on` (default) or `off`. See Loading.
 - `theme`: `auto` (default), `dark`, `light`, `neutral` or `noctalia`.
 - `refreshSeconds`: 5 to 3600 (default 30). Each finished turn refreshes too. A stored value
-  takes effect at the first settings read.
+  takes effect at the first settings read. The timer is cancelled when the session ends; a
+  `/clear` or a resume keeps it.
 - `ctxWindow`: `auto` (default) or `full`. See "The context window".
 
 Options are set in the `/config` menu or in `settings.json` under

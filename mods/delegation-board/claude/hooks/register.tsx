@@ -157,7 +157,7 @@ export const register: Register = (on, options) => {
     if (arg === 'clear') {
       s.rows = clearFinished(s.rows)
       await publish($, s)
-      return { text: 'delegation-board: finished rows cleared; the totals now cover the rows left.' }
+      return { text: 'delegation-board: finished and unknown rows cleared; the totals now cover the rows left.' }
     }
     if (arg !== '') return { text: USAGE }
     const pane = (await $.ui.panes()).find((p) => p.id === PANE)
