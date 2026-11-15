@@ -97,7 +97,7 @@ test('status merge keeps waiting and the first finished poll; sorting and the 40
   expect(mergeStatus(merged, [{ id: 'a', status: 'bogus' }], 90)[0]?.state).toBe('waiting')
 
   expect(sortRows([done('old', 10), at('w', 5, 'waiting'), done('new', 20), at('r', 4)]).map((r) => r.id)).toEqual(['r', 'w', 'new', 'old'])
-  expect(clearFinished([at('r', 4), done('old', 10), { ...at('gone', 1, 'unknown'), endedAt: 30 }, at('fork', 2, 'unknown')]).map((r) => r.id)).toEqual(['r', 'fork'])
+  expect(clearFinished([at('r', 4), done('old', 10), { ...at('gone', 1, 'unknown'), endedAt: 30 }, at('fork', 2, 'unknown')]).map((r) => r.id)).toEqual(['r'])
 
   let rows: Row[] = []
   for (let i = 0; i < 45; i++) rows = addSpawn(rows, at(`x${i}`, i))
@@ -284,6 +284,16 @@ test('/clear empties the board and lets the next first spawn open the pane again
   await clock.advance(1000)
   expect(calls.open).toBe(2)
   expect((await drawn($))[0]).toBe('1 agents: 1 running, 0 waiting, 0 done, 0 failed')
+})
+
+test('/board clear drops the unknown row of an agent the list never names, and keeps the live row', async ($, on) => {
+  const { clock } = world(on)
+  await $.agent.spawn(spawnInput('live'))
+  await $.turn.complete(turn('fork-1', usage(7, 3)))
+  await clock.advance(1000)
+  expect((await $.command.run(commandInput('clear'))).text).toBe('delegation-board: finished and unknown rows cleared; the totals now cover the rows left.')
+  expect(await drawn($)).toEqual(['1 agents: 1 running, 0 waiting, 0 done, 0 failed', 'running    Explore  claude-sonnet-x  -  1s  0/0  live', 'Tokens 0/0'])
+  expect((await $.command.run(commandInput('bogus'))).text).toContain('/board clear drops finished and unknown rows')
 })
 
 test('/board prints the table as text when the pane is not placed', async ($, on) => {

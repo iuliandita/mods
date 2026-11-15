@@ -81,9 +81,9 @@ set `events` to `finish` to avoid that.
 - `sound`: `off` (default) or `on`. On macOS the notification plays the `Glass` sound. On Linux the
   mod sets the `sound-name` hint, which only some notification servers honor.
 
-Claude Code takes `mode`, `events`, `sound` and `state` as plugin options. Its `t3` plugin
-option is accepted and has no effect, because Claude Code never reads the database.
-Codex and OpenCode read the same names from
+Claude Code takes `mode`, `events`, `sound` and `state` as plugin options. It has no `t3`
+option, because Claude Code never reads the database.
+Codex and OpenCode read these names and `t3` from
 `~/.config/iuliandita-mods/notify.json`, a JSON object with string values, for example
 `{"events": "finish", "sound": "on"}`. The path is fixed under your account's home, and a repository
 cannot change it. A file that cannot be read gives the defaults and one warning line.
