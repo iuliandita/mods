@@ -646,6 +646,46 @@ export const ROWS: Row[] = [
     'D:identity',
     { options: RULES, probe: (envs) => envs.length > 0 && envs.every((e) => e?.GIT_CONFIG_COUNT === '1' && e.GIT_CONFIG_KEY_0 === 'user.email' && !('GIT_CONFIG_KEY_1' in e)) },
   ],
+  // #224: the current branch renamed onto a protected name.
+  ['git switch -c tmp main && git branch -M main && git commit -m x', 'D:protected-branch'],
+  ['git branch -m main && git commit -m x', 'D:protected-branch'],
+  ['git branch --move --force main; git commit -m x', 'D:protected-branch'],
+  ['git branch -m feature/x main && git commit -m x', 'D:protected-branch'],
+  ['git branch -M "$B" && git commit -m x', 'D:protected-branch'],
+  ['git branch -m other main && git commit -m x', 'A'],
+  ['git branch -m topic && git commit -m x', 'A', { world: { branch: 'main' } }],
+  ['git branch -m topic; git commit -m x', 'D:protected-branch', { world: { branch: 'main' } }],
+  // #224: a worktree of a protected branch added and entered.
+  ['git worktree add ../m main && cd ../m && git commit -m x', 'D:protected-branch'],
+  ['git worktree add ../m main && git -C ../m commit -m x', 'D:protected-branch'],
+  ['git worktree add ../m main && cd ../m/src && git commit -m x', 'D:protected-branch'],
+  ['git worktree add -f ../m main; cd ../m && git commit -m x', 'D:protected-branch'],
+  ['git worktree add ../main && cd ../main && git commit -m x', 'D:protected-branch'],
+  ['git worktree add -B main ../m && cd ../m && git commit -m x', 'D:protected-branch'],
+  ['git worktree add ../m "$B" && cd ../m && git commit -m x', 'D:protected-branch'],
+  ['git worktree add ../m main && cd ../m && git push', 'D:protected-branch'],
+  ['git worktree add -b topic ../m main && cd ../m && git commit -m x', 'A'],
+  ['git worktree add --detach ../m main && cd ../m && git commit -m x', 'A'],
+  ['git worktree add ../m main && git commit -m x', 'A'],
+  // #224: send-pack updates remote branches like push.
+  ['git send-pack origin main', 'D:protected-branch'],
+  ['git send-pack origin HEAD:refs/heads/main', 'D:protected-branch'],
+  ['git send-pack --all origin', 'D:protected-branch'],
+  ['git send-pack origin', 'D:protected-branch'],
+  ['git send-pack --stdin origin', 'D:protected-branch'],
+  ['git send-pack origin "$B"', 'U'],
+  ['cd "$D" && git send-pack origin feature/x', 'D:lookup'],
+  ['git send-pack origin feature/x', 'A'],
+  // #224: a pipeline between a directory change and a commit keeps the change certain; `;` does not.
+  ['cd /h/other && echo a | cat && git commit -m x', 'A', { world: { branches: { '/h/personal/repo': 'main', '/h/other': 'feature/x' } } }],
+  ['cd /h/other; echo a | cat && git commit -m x', 'D:protected-branch', { world: { branches: { '/h/personal/repo': 'main', '/h/other': 'feature/x' } } }],
+  ['cd /h/other | cat && git commit -m x', 'D:protected-branch', { world: { branches: { '/h/personal/repo': 'main', '/h/other': 'feature/x' } } }],
+  ['git switch feature/x | cat && git commit -m x', 'D:protected-branch', { world: { branch: 'main' } }],
+  // #224: a literal `$` in a rebase --exec command is not a branch.
+  [`git rebase -x 'echo $HOME' origin/main`, 'A'],
+  [`git rebase --exec 'test -n "$CI"' origin/main`, 'A'],
+  ['git rebase -x "$CMD" origin/main', 'D:protected-branch'],
+  [`git rebase --onto '$BASE' origin/main`, 'D:protected-branch'],
 ]
 
 // Rows expected to mismatch today; each build step removes the rows it fixes.

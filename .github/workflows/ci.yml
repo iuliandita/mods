@@ -15,7 +15,7 @@ concurrency:
 jobs:
   lint:
     name: lint
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     env:
       MODS_REQUIRE_BUN: "1"
@@ -51,7 +51,7 @@ jobs:
 
   test:
     name: test
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     env:
       MODS_REQUIRE_BUN: "1"
@@ -76,7 +76,7 @@ jobs:
 
   integration:
     name: integration
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     env:
       MODS_REQUIRE_CLAUDE: "1"
@@ -107,7 +107,7 @@ jobs:
 
   markdown:
     name: markdown
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -124,7 +124,7 @@ jobs:
 
   links:
     name: links
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

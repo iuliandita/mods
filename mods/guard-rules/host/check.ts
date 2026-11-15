@@ -8,6 +8,10 @@ export type Check = { deny?: string; notice?: string }
 const FAILED =
   'guard-rules: the guard failed, so the command was blocked (fail closed). Ask the user to check the options file (~/.config/iuliandita-mods/guard-rules.json) and the host log.'
 
+// A failure before the rules run (the account's home or the guard's own files cannot be found) is a deny that says why.
+export const failure = (e: unknown): string =>
+  `guard-rules: the guard failed, so the call was blocked (fail closed): ${e instanceof Error ? e.message : String(e)}. Ask the user to check the options file (~/.config/iuliandita-mods/guard-rules.json) and the host log.`
+
 // Best effort: a command that runs the CLI's `context` subcommand with anything but `list` is left for the user to
 // type. The model could still spell it past this filter, so it is not a boundary.
 const SELF_CLASSIFY = /guard-rules\S*\s+context\s+(?!list\b)\S/

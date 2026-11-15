@@ -1,4 +1,4 @@
-import { COMMIT_SUBS, createFollower, protectedBranchViolations } from './branch'
+import { COMMIT_SUBS, createFollower, protectedBranchViolations, PUSH_SUBS } from './branch'
 import { contextViolations, followSwitch, isMutating, newContextState, stepContext, type Classes } from './context'
 import { annotates, identityViolations } from './identity'
 import { selfKillViolations } from './selfkill'
@@ -150,7 +150,7 @@ function isGuarded(call: Call, cfg: Config): boolean {
   if (call.kind === 'gh') return isMessageCall(call)
   if (call.kind === 'infra') return cfg.context !== 'off' && isMutating(call)
   if (call.sub === 'tag') return annotates(call)
-  return COMMIT_SUBS.has(call.sub) || call.sub === 'push'
+  return COMMIT_SUBS.has(call.sub) || PUSH_SUBS.has(call.sub)
 }
 
 function attributionViolations(text: string, cfg: Config, where = 'the command'): Violation[] {

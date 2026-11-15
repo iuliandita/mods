@@ -16,7 +16,10 @@ fix the command and retry.
   `HEAD:main`, `--all`, `--branches`, the matching refspec `:`, a wildcard destination, an implicit push from
   `develop`). An implicit push also honors `push.default` (`matching` counts as `--all`,
   `upstream` checks the upstream branch) and configured `remote.<name>.push` refspecs, which are
-  read for every remote and also apply to a push that names only a source. The first commit of
+  read for every remote and also apply to a push that names only a source. `git send-pack` is judged
+  like a push with explicit refspecs. A branch renamed onto a protected name (`git branch -M main`) or a
+  worktree of a protected branch added and entered earlier in the same command counts as being on that
+  branch. The first commit of
   an empty repository, a detached HEAD, `git merge --ff-only`, `git push --tags` and a bare
   `--abort` or `--quit` of `merge`, `cherry-pick`, `revert`, `am` or `rebase` are allowed.
 - **identity** (off until configured): a repository under a configured path prefix must commit as
@@ -33,7 +36,9 @@ fix the command and retry.
 - **selfkill**: no `pkill -f` whose pattern matches the command that contains it. The shell that runs a
   Bash call carries the whole command in its own command line, so `pkill -f 'vite --host'` matches that
   shell and kills it (the tool reports exit 144). Exact (`-x`), anchored (`^...$`) and bracketed (`[v]ite`)
-  patterns pass, as do patterns built from a variable and `pgrep -f`, which only reports the shell.
+  patterns pass, as do patterns built from a variable. `pgrep -f` alone only reports the shell and passes;
+  killing what it prints (`kill $(pgrep -f X)`, `pgrep -f X | xargs kill`) is denied like `pkill -f X`.
+  The shapes that are not followed are in [docs/limits.md](docs/limits.md#other-limits).
   `bash -c` scripts and `sudo`, `env` and `rtk` (a command-prefix wrapper) prefixes are looked through. A pattern outside a simple
   subset (more than one quantifier, a quantified group, a back-reference, `\d`-style escapes, or over 200
   characters) is not run as a regex and is denied as too complex, so a crafted pattern cannot stall the guard.
@@ -94,7 +99,7 @@ settings, never in a repository.
 | `modeProtectedBranch` | `on` | same |
 | `modeIdentity` | `on` | same; does nothing until `identityRules` is set |
 | `modeContext` | `on` | same; covers `kubectl`, `helm`, `terraform` and `tofu` |
-| `modeSelfKill` | `on` | same; covers `pkill -f` patterns that match the shell running the command |
+| `modeSelfKill` | `on` | same; covers `pkill -f` patterns that match the shell running the command, and killing the pids of such a `pgrep -f` |
 | `modeUnparsed` | `on` | `on` keeps inherited modes, `dry` reports instead of denying unparsed commands, `off` disables only parser findings; `ask` requests permission for enforced parser findings on Claude Code. Codex and OpenCode treat `ask` as `on` |
 
 Invalid options deny git and GitHub writes until fixed, so a typo cannot silently turn a rule off.
@@ -167,7 +172,7 @@ Identity does nothing until `identityRules` is set. Change options in your user 
 | `modeIdentity` | `on`, `dry`, `off` | Controls identity checks once configured |
 | `identityRules` | JSON array, or empty | Sets path/email pairs; empty disables identity checks |
 | `modeContext` | `on`, `dry`, `off` | Controls mutations on protected or unknown infra environments |
-| `modeSelfKill` | `on`, `dry`, `off` | Controls `pkill -f` patterns that match the shell running the command |
+| `modeSelfKill` | `on`, `dry`, `off` | Controls `pkill -f` patterns that match the shell running the command, and killing the pids of such a `pgrep -f` |
 | `modeUnparsed` | `on`, `dry`, `off`, `ask` | Caps unparsed findings; `ask` uses Claude Code permission approval and falls back to `on` on other hosts |
 | `protectedContexts`, `relaxedContexts` | Comma-separated names or globs | Changes environment matching; protected matches win |
 | `/guard-context <name> protected\|relaxed` | One classification | Records a machine-local classification that overrides patterns |

@@ -1,7 +1,6 @@
 import { expect, mock, test } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import * as os from 'node:os'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { Data, SessionInfo } from '../../../host-lib/tui'
@@ -125,7 +124,7 @@ test('setup claims the panel slot, draws only its own panel, and adds the /board
 })
 
 test('mode off in the user options file draws a notice and does not read the sessions; anything else stays on', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'delegation-board-'))
+  const dir = mkdtempSync(join(os.tmpdir(), 'delegation-board-'))
   const file = join(dir, 'delegation-board.json')
   try {
     const panel = async () => {
@@ -180,7 +179,7 @@ test('a first draw that throws gives the host an empty node', async () => {
   const cleanup = await setup(
     { renderer: {}, data: d, keymap: { layer: () => {} }, ui: { panel: { open: () => true, close: () => {}, current: () => undefined }, slot: (c) => (claims.push(c as never), () => {}) } },
     (content) => ({ content }),
-    join(tmpdir(), 'delegation-board-absent.json'),
+    join(os.tmpdir(), 'delegation-board-absent.json'),
   )
   expect(claims[0]!.render({ name: 'iuliandita.delegation-board', sessionID: 'root' }).content).toBe('')
   cleanup()

@@ -1,6 +1,7 @@
-import { afterAll, beforeAll, expect, spyOn, test } from 'bun:test'
+import { afterAll, beforeAll, expect, mock, spyOn, test } from 'bun:test'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import * as os from 'node:os'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -8,6 +9,8 @@ import { checkCommand, checkTool } from './check'
 import { main, type Io } from './cli'
 import { configPath, loadClasses, loadConfig, nodeEnv, run } from './env'
 import { setup } from './opencode'
+
+const realOs = { ...os }
 
 let root: string
 let repo: string
@@ -212,6 +215,7 @@ test('selfkill: a pkill -f pattern that matches the shell is denied on the host 
   const command = "pkill -f 'vite --host 127.0.0.1'"
   expect((await checkCommand(command, loadConfig(configFile), env)).deny).toContain('pkill -x')
   expect((await checkCommand("pkill -f '^vite --host'", loadConfig(configFile), env)).deny).toBeUndefined()
+  expect((await checkCommand("kill $(pgrep -f 'vite --host')", loadConfig(configFile), env)).deny).toContain('pgrep -f')
   writeConfig('{"modeSelfKill":"off"}')
   expect((await checkCommand(command, loadConfig(configFile), env)).deny).toBeUndefined()
   rmSync(configFile, { force: true })
@@ -257,6 +261,44 @@ test('opencode: the shell tool is judged, a relative workdir is resolved from th
   writeConfig(JSON.stringify({ unprotectedRepos: other }))
   await hook({ tool: 'shell', input: { command: 'git commit -m x', workdir: '../vault-old' } })
   writeConfig('{}')
+})
+
+test('an account without a password database entry is denied with the reason on both hosts, never an uncaught error', async () => {
+  const savedHome = process.env.HOME
+  mock.module('node:os', () => ({
+    ...realOs,
+    userInfo: () => {
+      throw new Error('no passwd entry')
+    },
+  }))
+  try {
+    let hook: (e: { tool: string; input: unknown }) => Promise<void> | void = () => {}
+    await setup({ location: { directory: repo }, tool: { hook: async (_name, cb) => void (hook = cb) } })
+    const codex = async (stdin: string) => {
+      const o = io(stdin)
+      o.config = undefined
+      o.store = undefined
+      expect(await main(['hook'], o)).toBe(0)
+      return JSON.parse(o.stdout).hookSpecificOutput as { permissionDecision: string; permissionDecisionReason: string }
+    }
+    const edit = call('', repo, 'Write', { file_path: 'a.txt', content: 'x' })
+    // HOME still names a home: the options cannot be located, so git writes and file edits are denied.
+    expect((await codex(call('git commit -m x'))).permissionDecisionReason).toContain('no home directory entry')
+    expect((await codex(edit)).permissionDecisionReason).toMatch(/fail closed.*no home directory entry/)
+    await expect(Promise.resolve(hook({ tool: 'shell', input: { command: 'git commit -m x' } }))).rejects.toThrow('no home directory entry')
+    await expect(Promise.resolve(hook({ tool: 'edit', input: { filePath: 'a.txt' } }))).rejects.toThrow(/fail closed.*no home directory entry/)
+    delete process.env.HOME
+    for (const stdin of [call('git commit -m x'), call('git status'), edit]) {
+      const decision = await codex(stdin)
+      expect(decision.permissionDecision).toBe('deny')
+      expect(decision.permissionDecisionReason).toMatch(/fail closed.*no home directory entry/)
+    }
+    await expect(Promise.resolve(hook({ tool: 'shell', input: { command: 'git status' } }))).rejects.toThrow(/fail closed.*no home directory entry/)
+  } finally {
+    if (savedHome !== undefined) process.env.HOME = savedHome
+    mock.module('node:os', () => realOs)
+  }
+  expect(loadConfig(configFile).error).toBeUndefined()
 })
 
 // The committed Codex bundle, under plain Node. It reads the user's real options file, so only the cases that no

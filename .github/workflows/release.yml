@@ -14,7 +14,7 @@ concurrency:
 jobs:
   publish:
     name: publish
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # covers the 20-minute wait for CI in require-green-ci.sh
     timeout-minutes: 30
     permissions:

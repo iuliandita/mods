@@ -162,6 +162,11 @@ test('an unknown command is a usage error', async () => {
   expect(seen.err[0]).toStartWith('notify: error: unknown command')
 })
 
+test('the Claude manifest offers only the options the Claude hooks read: t3 is for Codex and OpenCode', () => {
+  const manifest = JSON.parse(readFileSync(join(import.meta.dir, '../claude/.claude-plugin/plugin.json'), 'utf8'))
+  expect(Object.keys(manifest.userConfig)).toEqual(['mode', 'events', 'sound', 'state'])
+})
+
 test('the node runner resolves an exit code and rejects only when the program is missing', async () => {
   expect(await nodeRunner(['true'])).toEqual({ exitCode: 0 })
   expect(await nodeRunner(['false'])).toEqual({ exitCode: 1 })

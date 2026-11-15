@@ -590,6 +590,15 @@ export const register: Register = (on, options) => {
     return result
   })
 
+  // A /clear or a resume goes on in the same process and no session.start follows it, so the timer stays.
+  on('session.end', async (_$, e, next) => {
+    if (e.reason !== 'clear' && e.reason !== 'resume') {
+      s.timer?.cancel()
+      s.timer = null
+    }
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
   on('classic.SessionStart', async ($, e, next) => {
     try {
       // /clear and /resume switch to another transcript, and the API time this mod timed belonged to the one

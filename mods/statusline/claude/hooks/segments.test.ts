@@ -686,6 +686,21 @@ test('a stored refreshSeconds sets the refresh interval', async ($, on) => {
   expect(seen.settingsReads - before).toBeGreaterThanOrEqual(8)
 })
 
+test('the refresh timer ends with the session; a /clear keeps it, since the process goes on', async ($, on) => {
+  const { clock, seen } = engine(on)
+  on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
+  await started($, clock)
+  await clock.advance(1_000)
+  await $.session.end({ reason: 'clear', sessionId: 'sid', resume: {} } as never)
+  let before = seen.settingsReads
+  await clock.advance(61_000)
+  expect(seen.settingsReads).toBeGreaterThan(before)
+  await $.session.end({ reason: 'prompt_input_exit', sessionId: 'sid', resume: {} } as never)
+  before = seen.settingsReads
+  await clock.advance(120_000)
+  expect(seen.settingsReads).toBe(before)
+})
+
 test('a stored mode: off stops the band and every process after the first settings read', async ($, on) => {
   const { clock, runs, seen } = engine(on, { kube: 'ok', remote: 'https://github.com/owner/repo.git', stored: { [STORED_KEY]: { options: { mode: 'off' } } } })
   await started($, clock)

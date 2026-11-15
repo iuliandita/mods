@@ -1,6 +1,6 @@
 {
   "name": "guard-rules",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Blocks AI attribution in commits and PRs, direct commits to protected branches, commits under the wrong git identity, and mutating kubectl, helm and terraform calls on protected or unclassified environments, and pkill -f patterns that match the shell running the command.",
   "author": { "name": "iuliandita" },
   "userConfig": {
@@ -72,7 +72,7 @@
     "modeSelfKill": {
       "type": "string",
       "title": "Self-kill rule mode",
-      "description": "off, dry (report only) or on. Covers pkill -f patterns that match the shell running the command.",
+      "description": "off, dry (report only) or on. Covers pkill -f patterns that match the shell running the command, and killing the pids of such a pgrep -f.",
       "options": ["off", "dry", "on"],
       "default": "on"
     }

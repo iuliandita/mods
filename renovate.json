@@ -29,6 +29,29 @@
       "semanticCommitScope": "ci"
     },
     {
+      "description": "Node 22 is the oldest Node the hosts document; CI keeps testing on it.",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchDepNames": [
+        "node"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Newer Node types would let the hosts type-check against APIs the oldest documented Node lacks.",
+      "matchDepNames": [
+        "@types/node"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "enabled": false
+    },
+    {
       "matchManagers": [
         "pip_requirements"
       ],
