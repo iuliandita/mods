@@ -1,6 +1,4 @@
 import base64
-import importlib.machinery
-import importlib.util
 import json
 import os
 import random
@@ -14,6 +12,8 @@ from pathlib import Path
 from urllib.parse import quote
 
 import pytest
+
+from secret_box_entry import load_helper as load_module
 
 ROOT = Path(__file__).resolve().parent.parent
 BIN = ROOT / "mods/secret-box/claude/bin/secret-box"
@@ -32,14 +32,6 @@ SAMPLES = [
     "a&b<c>d/e f g-ü",
     " nbsp　wide-trim﻿",
 ]
-
-
-def load_module():
-    loader = importlib.machinery.SourceFileLoader("secret_box", str(BIN))
-    spec = importlib.util.spec_from_loader("secret_box", loader)
-    mod = importlib.util.module_from_spec(spec)
-    loader.exec_module(mod)
-    return mod
 
 
 def run(tmp_path, *args, secrets=None, backend=None):
