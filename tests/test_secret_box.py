@@ -1,5 +1,3 @@
-import importlib.machinery
-import importlib.util
 import json
 import os
 import re
@@ -10,17 +8,11 @@ from pathlib import Path
 
 import pytest
 
+from secret_box_entry import load_helper as load_module
+
 ROOT = Path(__file__).resolve().parent.parent
 BIN = ROOT / "mods/secret-box/claude/bin/secret-box"
 ENTRY = ROOT / "tests/secret_box_entry.py"
-
-
-def load_module():
-    loader = importlib.machinery.SourceFileLoader("secret_box", str(BIN))
-    spec = importlib.util.spec_from_loader("secret_box", loader)
-    mod = importlib.util.module_from_spec(spec)
-    loader.exec_module(mod)
-    return mod
 
 
 def run(tmp_path, *args, secrets=None, stdin=None):

@@ -16,12 +16,22 @@ def git(root: Path, *args: str) -> None:
     subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
 
 
+def commit(root: Path, message: str) -> None:
+    git(root, "add", ".")
+    git(root, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", message)
+
+
+def set_version(manifest: Path, version: str) -> None:
+    data = json.loads(manifest.read_text())
+    data["version"] = version
+    manifest.write_text(json.dumps(data))
+
+
 @pytest.fixture
 def tagged(tmp_path: Path) -> Path:
     write_mod(tmp_path, "alpha")
     git(tmp_path, "init", "-q")
-    git(tmp_path, "add", ".")
-    git(tmp_path, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "initial")
+    commit(tmp_path, "initial")
     git(tmp_path, "tag", "v0.1.0")
     return tmp_path
 
@@ -49,12 +59,9 @@ def test_shipped_changes_require_a_bump(tagged: Path, change: str) -> None:
 
 def test_bump_passes_and_latest_tag_resets_baseline(tagged: Path) -> None:
     manifest = tagged / "mods/alpha/claude/.claude-plugin/plugin.json"
-    data = json.loads(manifest.read_text())
-    data["version"] = "0.1.1"
-    manifest.write_text(json.dumps(data))
+    set_version(manifest, "0.1.1")
     assert check_versions(tagged) == []
-    git(tagged, "add", ".")
-    git(tagged, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "bump")
+    commit(tagged, "bump")
     git(tagged, "tag", "v0.2.0")
     (manifest.parent.parent / "hooks/register.ts").write_text("changed again\n")
     assert "v0.2.0" in check_versions(tagged)[0]
@@ -64,17 +71,6 @@ def test_missing_history_fails(tmp_path: Path) -> None:
     git(tmp_path, "init", "-q")
     with pytest.raises(CatalogError):
         check_versions(tmp_path)
-
-
-def commit(root: Path, message: str) -> None:
-    git(root, "add", ".")
-    git(root, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", message)
-
-
-def set_version(manifest: Path, version: str) -> None:
-    data = json.loads(manifest.read_text())
-    data["version"] = version
-    manifest.write_text(json.dumps(data))
 
 
 def test_baseline_is_the_highest_tag_even_when_not_an_ancestor(tagged: Path) -> None:
