@@ -45,6 +45,32 @@ test('selfkill: exact, anchored, bracketed, dynamic and non-pkill forms pass', a
   for (const command of allowed) expect(await rules(command), command).toEqual([])
 })
 
+test('selfkill: killing the pids of a pgrep -f pattern that matches the shell is denied, other pgrep uses pass', async () => {
+  const denied = [
+    `kill $(pgrep -f 'vite --host')`,
+    `kill -9 $(pgrep -f "wrangler dev")`,
+    'kill `pgrep -f vite`',
+    `sudo kill -TERM $(pgrep -fi 'astro preview')`,
+    `pgrep -f 'vite --host' | xargs kill`,
+    `pgrep -d ' ' -f vite | xargs -r kill -9`,
+    `bash -c "pgrep -f 'bun run dev' | xargs kill"`,
+  ]
+  for (const command of denied) expect(await rules(command), command).toEqual(['selfkill'])
+  const allowed = [
+    `kill $(pgrep -x vite)`,
+    `kill $(pgrep -f '[v]ite --host')`,
+    `pgrep -f '^bun run dev$' | xargs kill`,
+    `pgrep -f vite | wc -l`,
+    `pgrep -f vite; kill 123`,
+    'kill $(pgrep -f "$PATTERN")',
+    'kill $(cat app.pid)',
+  ]
+  for (const command of allowed) expect(await rules(command), command).toEqual([])
+  const v = (await evaluate(denied[0]!, parseConfig({}), env)).enforced[0]!
+  expect(v.message).toContain('pgrep -f')
+  expect(await rules(denied[0]!, { modeSelfKill: 'off' })).toEqual([])
+})
+
 test('selfkill: a pattern that could backtrack badly is denied without being run', async () => {
   const hostile = [
     `pkill -f '(a+)+$'`,

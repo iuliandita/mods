@@ -17,8 +17,9 @@ case (`GIT`, found on a case-insensitive file system) is unparsed.
   Anything else (`$X`, `${...}`, `$[...]`, `$(...)`, backticks, `$((...))`, unquoted `*?[`, unquoted
   `{a,b}` or `{1..3}`) is dynamic. `${...}` and `$[...]` are read as one piece up to their closing bracket,
   and the substitutions inside them are parsed. A `$NAME`, `${...}`, `$(...)` or backtick that stays as
-  literal text in a push remote or refspec, or in a `switch`, `checkout` or `rebase` operand (single-quoted,
-  or escaped for a later shell), also counts as dynamic.
+  literal text in a `push` or `send-pack` remote or refspec, or in a `switch`, `checkout` or `rebase` operand
+  (single-quoted, or escaped for a later shell), also counts as dynamic, so a branch or refspec with a literal
+  `$` in its name is unparsed or unknown. The command of `rebase -x`/`--exec` is exempt: it names no branch.
 - Connectors `&& || ; | |& &` and newlines; `( )`, `{ }`, `!`, `if`/`while`/`until`/`for` with their keywords,
   `[[ ]]`, `test` and `[`; comments, redirections and assignment prefixes.
 - Builtins: `export` (`-n` removes the export), `unset [-v|-f|-n]`, `declare`/`typeset`/`local`/`readonly` with only
@@ -26,7 +27,8 @@ case (`GIT`, found on a case-insensitive file system) is unparsed.
   `popd [-n] [+N|-N]`. A plain assignment, or `declare` without `-x`, reaches later calls only when the name was
   exported earlier in the command; otherwise both the new and the old value are possible.
 - Wrappers: `env` (including `-S`, `-u`, `-i`, `-C`; `-P`/`--path` is unparsed), `command`, `exec`, `sudo`, `doas`, `nice`, `ionice`,
-  `time`, `timeout`, `stdbuf`, `chronic`, `setsid`, `rtk` (a command-prefix wrapper), with their value-taking options.
+  `time`, `timeout`, `stdbuf`, `chronic`, `setsid`, `nohup`, `builtin`, `rtk` (a command-prefix wrapper), with
+  their value-taking options.
 - Inline scripts with a literal script: `bash -c`/`sh -c` (and zsh, dash, ksh), `eval`, `secret-box exec [--scrub] --`.
 - `$(...)`, backticks and process substitutions `<(...)`/`>(...)` are parsed as their own calls (nesting up to 4),
   and so are the substitutions in the body of an unquoted heredoc. A quoted heredoc runs no substitutions;
@@ -44,8 +46,8 @@ These constructs make the whole command unparsed when a parsed call or its text 
 `helm`, `terraform` or `tofu` anywhere (in any case, so `$GIT` counts):
 
 - a dynamic command word after unwrapping (`$GIT push`, `"$(which git)" push`, `${G:-git} commit`);
-- a dynamic word in a slot that decides the call: the git subcommand, a `-C` or `-c` value, a push remote or
-  refspec, a gh/glab/tea/fj area or verb, a kubectl/helm/terraform verb, `--context`, `--kube-context` or
+- a dynamic word in a slot that decides the call: the git subcommand, a `-C` or `-c` value, a `push` or
+  `send-pack` remote or refspec, a gh/glab/tea/fj area or verb, a kubectl/helm/terraform verb, `--context`, `--kube-context` or
   `--kubeconfig`;
 - a dynamic script for `eval` or `secret-box exec`; a shell reading its script from stdin (`| sh`, `<<<`, a heredoc,
   or `/dev/stdin`, `/dev/fd/0` or `/proc/self/fd/0` as the script file);
@@ -143,7 +145,8 @@ separately, use a file-reading tool, or run the command yourself.
   `pushd`, `popd`, `cd -`, `env -C DIR`, `sudo -D DIR`), variables set by `export`, `declare -x` and friends or a
   statement of only assignments (`unset` removes one; a prefix on the call wins), the branch per repository, the
   kube context per kubeconfig and the terraform workspace per directory. A change counts as certain only for later
-  calls joined to it by `&&` (or `then`); after `;`, `||`, a newline or any other connector, or when the change is
+  calls joined to it by `&&` (or `then`), also across a pipeline between them (`cd X && a | b && git commit`);
+  after `;`, `||`, a newline or any other connector, or when the change itself is
   negated (`!`), piped, backgrounded (`&`), in a loop, in `$(...)`, or (for the directory and variables) in a
   `( ... )` subshell, every value it could have is checked and a write is denied if any one is protected or
   unknown. A loop body is checked a second time for the back edge; a relative `cd` or `git switch -` inside a loop
@@ -159,8 +162,11 @@ separately, use a file-reading tool, or run the command yourself.
   and `cd -P` let the OS resolve `..` after any symlink, so the guard probes that path as written; terraform there
   counts as `(custom target)`.
 - It fails closed: if the guard itself errors, the command is blocked and the reason says so and what the user
-  should check. A git lookup that fails or times out (10 s) denies the command, while a non-repository or a detached
-  HEAD is allowed.
+  should check. A git lookup that fails or times out (10 s on Claude Code, 5 s on Codex and OpenCode) denies the
+  command, while a non-repository or a detached HEAD is allowed. On Codex and OpenCode an account without a
+  password database entry (a container run under an arbitrary uid) cannot locate the options file: guarded
+  writes, file-editing tools on Codex and every tool but the shell on OpenCode are denied with that reason, and
+  with `HOME` unset as well every shell call is.
 - Whenever a command contains a message-bearing call, the whole command text and decoded argument words are scanned. A fixture or `grep`
   containing a trailer in the same command as a commit can be denied; split the command.
 - Branch switches are parsed getopt style (`-bmain`, `-qb main`, `--create=x`, `--orphan x`); for `git switch` the
@@ -170,6 +176,21 @@ separately, use a file-reading tool, or run the command yourself.
   local branch may create one from a remote (DWIM), so both the old and the named branch are possible.
 - `git rebase <upstream> <branch>` (and `--root <branch>`) is denied when `<branch>` is protected, and later calls
   are judged on `<branch>`.
+- `git branch -m|-M|--move [<old>] <new>` is followed like a switch when it renames the current branch (always
+  with one name; with two, when `<old>` is the branch the command is on). A name that is not literal is unknown.
+- `git worktree add [-b|-B <new>] <path> [<commit-ish>]` is followed: later calls in `<path>` or below it are
+  judged on `<new>`, else on `<commit-ish>` (a name that is not a branch detaches in git, and is then not
+  protected here either), else on the last part of `<path>`; `--detach` is detached, and an option the guard does
+  not know or a word that is not literal is unknown. A `<path>` that is not literal is not followed, and neither
+  are `git worktree move` or a directory reached through a symlink.
+- `git send-pack` is judged like a push with explicit refspecs. It reads no push configuration: without refs it
+  updates every matching branch and is denied, as is `--stdin`, which hides the refs.
+- Self-kill covers `pkill -f PATTERN`, `kill ... $(pgrep -f PATTERN)` (or backticks) and
+  `pgrep -f PATTERN | xargs ... kill`, each also through `bash -c` and the wrappers above. Not followed: pids kept
+  in a variable or file first (`p=$(pgrep -f X); kill $p`), another stage between `pgrep` and `xargs`
+  (`pgrep -f X | head -1 | xargs kill`), `xargs` running a shell that kills, loops over the output
+  (`for p in $(pgrep -f X)`, `| while read`), `pgrep -v`, `killall`, `pkill`/`pgrep` without `-f` (they match the
+  process name only), and a pattern built from a variable.
 - Push destinations: `refs/heads/` and `heads/` are stripped; any other `refs/` destination except `refs/tags/`
   counts as a wildcard. For `git push`, the first positional is always the repository, also with `--repo` (git
   itself reads `git push --repo=origin main` as a push to a remote named `main`). A long option the guard does not
@@ -190,8 +211,8 @@ separately, use a file-reading tool, or run the command yourself.
   string, only `${NAME}` expands); a string env would reject, or one built from a variable, is unparsed when the
   command names a tool. A command word that is not a plain name or path (`"git push" origin main`) counts as one of
   its own words.
-- A checkout, switch or rebase operand built from a variable, substitution or secret placeholder goes to a branch the
-  guard cannot tell: a later commit or push counts as on a protected branch, and such a rebase is denied.
+- A checkout, switch, rebase, `branch -m` or `worktree add` operand built from a variable, substitution or secret
+  placeholder goes to a branch the guard cannot tell: a later commit or push counts as on a protected branch, and such a rebase is denied.
   `git symbolic-ref HEAD refs/heads/X` is followed like a switch (any other ref or a non-literal one is unknown) and
   `git update-ref --no-deref HEAD` detaches. A secret placeholder in a push refspec or `git -C` value is unparsed.
 - An earlier `git config` write in the same command (any form but a read) makes later identity checks deny and makes
@@ -211,8 +232,9 @@ separately, use a file-reading tool, or run the command yourself.
   switch the context or workspace without being a guarded tool (`kubectx`, `kubens` with arguments, `aws eks
   update-kubeconfig`, `gcloud ... get-credentials` or `container clusters create|create-auto`,
   `az aks|fleet|aksarc get-credentials` or `connectedk8s proxy`, `doctl ... kubeconfig save` or `cluster create`
-  (including documented aliases), `oc login|project|new-project` or config writes, `kind export kubeconfig`,
-  `minikube update-context`, `k3d kubeconfig merge|write`, `eksctl create cluster` or `utils write-kubeconfig`,
+  (including documented aliases), `oc login|project|new-project` or config writes, `kind export kubeconfig` or
+  `create cluster`, `minikube update-context|start|profile`, `k3d kubeconfig merge|write` or `cluster create`,
+  `eksctl create cluster` or `utils write-kubeconfig`,
   `tsh kube login`, `vcluster connect|create`, `talosctl kubeconfig`, `scw k8s kubeconfig install`,
   `ibmcloud ks cluster config`, `civo kubernetes config`) and writes to a kubeconfig or
   `.terraform/environment` (a redirect, `cp`, `mv`, `tee`, `sed -i` and similar): after one, later mutating kube or
@@ -225,14 +247,17 @@ separately, use a file-reading tool, or run the command yourself.
   placeholder makes both kube context and Terraform workspace lookups unknown; variables are not resolved.
 - Not handled: `rm .terraform/environment`, kubeconfig writers outside that list (a script editing the file,
   `terragrunt`), `oc` and other tools that act on the cluster themselves,
-  `git branch -m` renaming the current branch to a protected name, `git update-ref HEAD <rev>` without
+  `git update-ref HEAD <rev>` without
   `--no-deref`, `git branch -f main HEAD`, `git fetch . feature:main`, `git reset --hard` while on a protected
   branch, `git remote add/set-url` earlier in a command,
-  a command word built from fragments when the text names no tool (`a=gi; b=t; $a$b push`), a `cd` inside `bash -c` leaking out, `printf ... | git commit -F -`, `git commit -F file` message
-  files, `gh api`, a script file run by a shell or `source` (`bash script.sh`, `. ./x.sh`), `fish -c`, `csh -c` or
-  `tcsh -c` scripts, `git pull` creating a merge commit, git aliases (`-c alias.x=...` or from your git config),
-  `git worktree add` followed by a commit in the new worktree, `git tag -u`, assignments right after a wrapper
-  (`sudo FOO=1 git ...`), and push configuration set only through `GIT_CONFIG_*` variables.
+  a command word built from fragments when the text names no tool (`a=gi; b=t; $a$b push`),
+  `printf ... | git commit -F -`, `git commit -F file` message
+  files, `gh api`, a script file run by a shell or `source` (`bash script.sh`, `. ./x.sh`), `git pull` creating a
+  merge commit, git aliases (`-c alias.x=...` or from your git config), `git tag -u`, and push configuration set
+  only through `GIT_CONFIG_*` variables.
+- Stricter than git: a `cd` inside `bash -c` counts for the calls after it, although it does not leave that
+  shell; assignments right after a wrapper (`sudo FOO=1 git ...`) and `fish -c`, `csh -c` or `tcsh -c` scripts
+  that name a tool are unparsed.
 - Body files not read: stdin (`-F -`), a path built from a variable, a file the guard cannot read (it is skipped),
   and a file that an earlier part of the same command writes other than by a heredoc in the command text.
 

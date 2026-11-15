@@ -804,3 +804,153 @@ test('deny reasons name what to fix, never the switch that turns a rule off', as
   expect(invalid).toHaveLength(1)
   for (const v of [...lookups, ...invalid]) expect(v.message).not.toMatch(/to off|disable the plugin/i)
 })
+
+test('attribution: the Claude-Session trailer, the session and product links and a robot line are each denied by name', async () => {
+  const cases: [message: string, name: string][] = [
+    ['fix: x\n\nClaude-Session: abc', 'a Claude-Session trailer'],
+    ['fix: x, see https://claude.ai/code/session_01ab', 'a claude.ai session link'],
+    ['fix: x, made at https://claude.com/claude-code', 'a Claude Code link'],
+    [`fix: x\n\n${ROBOT} automated`, 'a robot-emoji line'],
+  ]
+  for (const [message, name] of cases) {
+    const v = (await evaluate(heredoc(message), cfg(), fakeEnv())).enforced
+    expect(v.map((x) => x.rule), message).toEqual(['attribution'])
+    expect(v[0]!.message).toContain(name)
+  }
+  expect((await evaluate(heredoc('fix: robot arm session handling for claude.ai links'), cfg(), fakeEnv())).enforced).toEqual([])
+})
+
+test('protected branch and identity: cherry-pick, revert and am count as commits, and stopping one does not', async () => {
+  const rules = cfg({ identityRules: IDENTITIES })
+  for (const sub of ['cherry-pick abc', 'revert abc', 'am 0001.patch']) {
+    expect((await evaluate(`git ${sub}`, cfg(), fakeEnv({ branch: 'develop' }))).enforced.map((x) => x.rule), sub).toEqual(['protected-branch'])
+    expect((await evaluate(`git ${sub}`, cfg(), fakeEnv())).enforced, sub).toEqual([])
+    expect((await evaluate(`git ${sub}`, rules, fakeEnv({ email: 'me@work.example' }))).enforced.map((x) => x.rule), sub).toEqual(['identity'])
+  }
+  for (const sub of ['cherry-pick --abort', 'revert --quit', 'am --abort']) {
+    expect((await evaluate(`git ${sub}`, rules, fakeEnv({ branch: 'develop', email: 'me@work.example' }))).enforced, sub).toEqual([])
+  }
+})
+
+test('attribution: issue, review and merge messages on gh, glab, tea and fj are scanned, reads are not', async () => {
+  const denied = [
+    `gh issue create --title t --body ${TRAILER}`,
+    `gh issue comment 1 --body ${TRAILER}`,
+    `gh pr review 1 --approve --body ${TRAILER}`,
+    `gh pr merge 1 --squash --body ${TRAILER}`,
+    `glab issue note 1 -m ${TRAILER}`,
+    `tea pulls create --description ${TRAILER}`,
+    `tea issues comment 1 ${TRAILER}`,
+    `fj pr create --body ${TRAILER}`,
+    `fj issue comment 1 ${TRAILER}`,
+    `git merge feature -m ${TRAILER}`,
+  ]
+  for (const command of denied) expect((await evaluate(command, cfg(), fakeEnv())).enforced.map((x) => x.rule), command).toEqual(['attribution'])
+  const allowed = [`gh pr list --search ${TRAILER}`, `gh search issues ${TRAILER}`, `glab mr list --search ${TRAILER}`, `tea pulls list ${TRAILER}`, `git log --grep ${TRAILER}`]
+  for (const command of allowed) expect((await evaluate(command, cfg(), fakeEnv())).enforced, command).toEqual([])
+})
+
+test('protected branch: protectedBranches entries are globs, and other pattern characters match literally', async () => {
+  const c = cfg({ protectedBranches: 'release/*, v1.x' })
+  for (const branch of ['release/2.0', 'v1.x']) {
+    expect((await evaluate('git commit -m x', c, fakeEnv({ branch }))).enforced.map((x) => x.rule), branch).toEqual(['protected-branch'])
+    expect((await evaluate(`git push origin HEAD:${branch}`, c, fakeEnv())).enforced.map((x) => x.rule), branch).toEqual(['protected-branch'])
+  }
+  for (const branch of ['main', 'releases', 'v1ax', 'hotfix/release/2.0']) {
+    expect((await evaluate('git commit -m x', c, fakeEnv({ branch }))).enforced, branch).toEqual([])
+  }
+})
+
+test('flow: more than 8 possible branches for one repository count as unknown', async () => {
+  const switches = (n: number) => Array.from({ length: n }, (_, i) => `git switch -c b${i}`).join('; ')
+  expect((await evaluate(`${switches(3)}; git commit -m x`, cfg(), fakeEnv())).enforced).toEqual([])
+  const many = (await evaluate(`${switches(9)}; git commit -m x`, cfg(), fakeEnv())).enforced
+  expect(many.map((x) => x.rule)).toEqual(['protected-branch'])
+  expect(many[0]!.message).toContain('cannot tell')
+})
+
+test('context: helm uninstall and rollback and terraform destroy and state rm are changes, their dry runs and state reads are not', async () => {
+  const prod = () => fakeEnv({ context: 'prod-eu', workspace: 'prod' })
+  const relaxed = () => fakeEnv({ context: 'dev-1', workspace: 'dev' })
+  for (const command of ['helm uninstall r', 'helm rollback r 2', 'terraform destroy', 'terraform state rm aws_instance.a', 'tofu destroy -auto-approve', 'tofu state mv a b']) {
+    expect((await evaluate(command, cfg(), prod())).enforced.map((x) => x.rule), command).toEqual(['context'])
+    expect((await evaluate(command, cfg(), relaxed())).enforced, command).toEqual([])
+  }
+  for (const command of ['helm uninstall r --dry-run', 'helm rollback r 2 --dry-run=client', 'terraform state list', 'terraform state show aws_instance.a', 'tofu state pull']) {
+    expect((await evaluate(command, cfg(), prod())).enforced, command).toEqual([])
+  }
+  // terraform takes no --dry-run, and `none` is not a dry run.
+  for (const command of ['terraform destroy --dry-run', 'helm uninstall r --dry-run=none']) {
+    expect((await evaluate(command, cfg(), prod())).enforced.map((x) => x.rule), command).toEqual(['context'])
+  }
+})
+
+test('identity: git tag -s and -a use the identity, a lightweight tag does not, and user.useConfigOnly reaches the probe', async () => {
+  const c = cfg({ identityRules: IDENTITIES })
+  const wrong = () => fakeEnv({ email: 'me@work.example' })
+  for (const command of ['git tag -s v1 -m x', 'git tag --sign v1 -m x', 'git tag -a v1 -m x', 'git tag -sm x v1']) {
+    expect((await evaluate(command, c, wrong())).enforced.map((x) => x.rule), command).toEqual(['identity'])
+    expect((await evaluate(command, c, fakeEnv())).enforced, command).toEqual([])
+  }
+  for (const command of ['git tag v1', 'git tag -d v1', 'git tag -l "v*"']) expect((await evaluate(command, c, wrong())).enforced, command).toEqual([])
+  // Git refuses to guess an identity under user.useConfigOnly, so the probe must run with the key to see that.
+  const strict = fakeEnv()
+  const git = strict.git
+  const refused: string[] = []
+  strict.git = async (dir, args, env) => {
+    if (!args.includes('user.useConfigOnly=true') || !args.includes('var')) return git(dir, args, env)
+    refused.push(args.join(' '))
+    return { ok: false, out: '' }
+  }
+  const v = (await evaluate('git -c user.useConfigOnly=true -c core.pager=cat commit -m x', c, strict)).enforced
+  expect(v.map((x) => x.rule)).toEqual(['identity'])
+  expect(v[0]!.message).toContain('an unset identity')
+  expect(refused).toEqual(['-c user.useConfigOnly=true var GIT_AUTHOR_IDENT', '-c user.useConfigOnly=true var GIT_COMMITTER_IDENT'])
+  expect((await evaluate('git -c user.useConfigOnly=false commit -m x', c, strict)).enforced).toEqual([])
+})
+
+test('unparsed: substitutions nested deeper than 4 are not followed, so a write inside is unparsed', async () => {
+  const nested = (depth: number, inner: string) => 'echo ' + '$(echo '.repeat(depth - 1) + `$(${inner})` + ')'.repeat(depth - 1)
+  const at4 = (await evaluate(nested(4, 'git push origin main'), cfg(), fakeEnv())).enforced
+  expect(at4.map((x) => x.rule)).toEqual(['protected-branch'])
+  for (const depth of [5, 6]) {
+    const v = (await evaluate(nested(depth, 'git push origin main'), cfg(), fakeEnv())).enforced
+    expect(v.map((x) => x.rule), String(depth)).toContain('unparsed')
+    expect(v.find((x) => x.rule === 'unparsed')!.message, String(depth)).toContain('nesting deeper than 4')
+    const infra = (await evaluate(nested(depth, 'kubectl delete ns x'), cfg(), fakeEnv({ context: 'dev-1' }))).enforced
+    expect(infra.map((x) => x.rule), String(depth)).toEqual(['unparsed'])
+  }
+  // Without a tool word the nesting itself is not a finding.
+  expect((await evaluate(nested(6, 'date'), cfg(), fakeEnv())).enforced).toEqual([])
+})
+
+test('unprotectedRepos: git send-pack to a protected branch is exempt in a listed repository only', async () => {
+  const c = cfg({ unprotectedRepos: '~/notes' })
+  const at = (toplevel: string) => fakeEnv({ toplevel })
+  for (const command of ['git send-pack origin main', 'git send-pack origin HEAD:refs/heads/develop', 'git send-pack --all origin', 'git send-pack origin']) {
+    expect((await evaluate(command, c, at('/h/notes'))).enforced, command).toEqual([])
+    expect((await evaluate(command, c, at('/h/notes-old'))).enforced.map((x) => x.rule), command).toEqual(['protected-branch'])
+    expect((await evaluate(command, cfg(), at('/h/notes'))).enforced.map((x) => x.rule), command).toEqual(['protected-branch'])
+  }
+  // A destination the guard cannot read stays unparsed: the exemption covers the branch rule only.
+  expect((await evaluate('git send-pack origin "$B"', c, at('/h/notes'))).enforced.map((x) => x.rule)).toEqual(['unparsed'])
+})
+
+test('modeIdentity and modeContext in dry report their findings, lookups and unparsed calls without denying', async () => {
+  const split = async (command: string, options: Record<string, string>, e: Env) => {
+    const v = await evaluate(command, cfg(options), e)
+    return [v.enforced.map((x) => x.rule), v.dry.map((x) => x.rule)]
+  }
+  const identity = { identityRules: IDENTITIES, modeIdentity: 'dry' }
+  expect(await split('git commit -m x', identity, fakeEnv({ email: 'me@work.example' }))).toEqual([[], ['identity']])
+  expect(await split('git init && git commit -m x', identity, fakeEnv())).toEqual([[], ['identity']])
+  // The other git rules keep their own mode beside a dry identity.
+  expect(await split('git commit -m x', identity, fakeEnv({ branch: 'main', email: 'me@work.example' }))).toEqual([['protected-branch'], ['identity']])
+  const context = { modeContext: 'dry' }
+  expect(await split('kubectl apply -f a', context, fakeEnv({ context: 'prod-eu' }))).toEqual([[], ['context']])
+  expect(await split('terraform destroy', context, fakeEnv({ workspace: 'prod' }))).toEqual([[], ['context']])
+  expect(await split('kubectl apply -f a', context, fakeEnv({ context: 'scratch' }))).toEqual([[], ['context']])
+  expect(await split('kubectl delete ns x', context, broken())).toEqual([[], ['lookup']])
+  expect(await split('xargs kubectl delete ns', context, fakeEnv())).toEqual([[], ['unparsed']])
+  expect(await split('kubectl apply -f a && git commit -m x', context, fakeEnv({ context: 'prod-eu', branch: 'main' }))).toEqual([['protected-branch'], ['context']])
+})

@@ -98,7 +98,8 @@ const GIT_FLAGS = new Set([
 const GIT_OPAQUE = new Set(['--git-dir', '--work-tree', '--namespace', '--config-env', '--bare'])
 const GIT_OPAQUE_ENV = ['GIT_DIR', 'GIT_COMMON_DIR', 'GIT_WORK_TREE', 'GIT_NAMESPACE']
 const PUSH_OPTION_VALUE = new Set(['-o', '--push-option'])
-const BRANCH_OPERAND_SUBS = new Set(['push', 'switch', 'checkout', 'rebase'])
+const BRANCH_OPERAND_SUBS = new Set(['push', 'send-pack', 'switch', 'checkout', 'rebase'])
+const REBASE_EXEC = new Set(['-x', '--exec'])
 const VARIABLE = /\$[A-Za-z_0-9{([@*#?!]|`/
 
 // Reports a word the shell expands in a slot that decides what a call does.
@@ -153,10 +154,14 @@ export function parseGit(s: Simple, argv: string[], dyn0: boolean[], dir0: strin
   // A reference that reached an operand as literal text (escaped or single-quoted) may still be expanded by a
   // shell the guard does not see, and no branch or remote is named that way on purpose.
   const refers = (j: number) => !argv[j]!.startsWith('-') && VARIABLE.test(argv[j]!)
-  if (BRANCH_OPERAND_SUBS.has(sub)) for (let j = i + 1; j < argv.length; j++) if (refers(j)) dyn[j] = true
+  if (BRANCH_OPERAND_SUBS.has(sub)) for (let j = i + 1; j < argv.length; j++) {
+    // The command of `rebase --exec` is text for a later shell, not a branch.
+    if (sub === 'rebase' && REBASE_EXEC.has(argv[j]!)) j++
+    else if (refers(j)) dyn[j] = true
+  }
   // The remote and refspecs decide what a push updates. A secret placeholder as the remote is a URL with a token,
   // which names no branch; one in a refspec hides the destination.
-  for (let j = i + 1, positional = 0; sub === 'push' && j < argv.length; j++) {
+  for (let j = i + 1, positional = 0; (sub === 'push' || sub === 'send-pack') && j < argv.length; j++) {
     const a = argv[j]!
     if (PUSH_OPTION_VALUE.has(a)) {
       j++
