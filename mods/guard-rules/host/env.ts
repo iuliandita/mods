@@ -10,18 +10,31 @@ export { killAll, run, type RunResult }
 
 export const configPath = (): string => optionsPath('guard-rules')
 
-// The directories holding every mod's options and stored state.
-export const guardDirs = ownDirs
+// The password database has no entry for some accounts (a container run under an arbitrary uid), and the lookup
+// then throws an error that names no cause a user can act on.
+function account<T>(read: () => T): T {
+  try {
+    return read()
+  } catch {
+    throw new Error('the account has no home directory entry, so the guard cannot locate its options and stored classes')
+  }
+}
 
-export const storePath = (): string => join(dataDir(), 'guard-rules', 'contexts.json')
+// The directories holding every mod's options and stored state.
+export const guardDirs = (): string[] => account(ownDirs)
+
+export const storePath = (): string => account(() => join(dataDir(), 'guard-rules', 'contexts.json'))
+
+export const userHome = (): string => process.env.HOME || account(accountHome)
 
 export const ASK_UNSUPPORTED = 'guard-rules: warning: modeUnparsed=ask is supported only on Claude Code; this host treats it as on (deny).'
 
 // Codex starts a process per hook. An exclusive marker keeps the notice to one per account's data directory.
-export function warnAskOnce(warn: (message: string) => void, store = storePath()): void {
+export function warnAskOnce(warn: (message: string) => void, store?: string): void {
   try {
-    mkdirSync(dirname(store), { recursive: true, mode: 0o700 })
-    writeFileSync(join(dirname(store), 'ask-notice'), '', { flag: 'wx', mode: 0o600 })
+    const dir = dirname(store ?? storePath())
+    mkdirSync(dir, { recursive: true, mode: 0o700 })
+    writeFileSync(join(dir, 'ask-notice'), '', { flag: 'wx', mode: 0o600 })
   } catch (e) {
     if (e instanceof Error && 'code' in e && e.code === 'EEXIST') return
     warn(`${ASK_UNSUPPORTED} The warning marker could not be saved, so this notice may repeat.`)
@@ -32,7 +45,7 @@ export function warnAskOnce(warn: (message: string) => void, store = storePath()
 
 // The Claude plugin's option names and string values. A missing file is the defaults; a file that cannot be read as
 // an object makes the config invalid, which denies git and forge writes until it is fixed.
-export function loadConfig(path = configPath()): Config {
+export function loadConfig(path?: string): Config {
   const loaded = loadOptions('guard-rules', path)
   return loaded.error ? { ...parseConfig({}), error: loaded.error } : parseConfig(loaded.options)
 }
@@ -72,7 +85,7 @@ export function saveClasses(classes: Classes, path = storePath()): void {
 export function nodeEnv(cwd: string, classes: () => Classes = loadClasses): Env {
   return {
     cwd,
-    home: process.env.HOME || accountHome(),
+    home: userHome(),
     git: (dir, args, vars) => run(dir, ['git', '-C', dir, ...args], vars),
     run,
     contexts: async () => classes(),

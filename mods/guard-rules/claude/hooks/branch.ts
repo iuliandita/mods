@@ -1,6 +1,7 @@
 import { createTracker, REAL, UNKNOWN, type Possible } from './flow'
 import { pushMessages } from './push'
 import type { Config, Env, Violation } from './rules'
+import { basename } from './paths'
 import { resolvePath, type GitCall } from './shell'
 import type { ConfigTaint } from './state'
 
@@ -8,7 +9,9 @@ export const COMMIT_SUBS = new Set(['commit', 'merge', 'cherry-pick', 'revert', 
 
 const STOP_SUBS = new Set(['merge', 'cherry-pick', 'revert', 'am', 'rebase'])
 
-const FOLLOWED_SUBS = new Set(['checkout', 'switch', 'rebase', 'symbolic-ref', 'update-ref'])
+export const PUSH_SUBS = new Set(['push', 'send-pack'])
+
+const FOLLOWED_SUBS = new Set(['checkout', 'switch', 'rebase', 'symbolic-ref', 'update-ref', 'branch', 'worktree'])
 
 function globToRegExp(glob: string): RegExp {
   const body = glob.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')
@@ -43,6 +46,12 @@ export type Follower = { branchOf(dir: string): Promise<Branch[]>; track(call: G
 export function createFollower(env: Env): Follower {
   const repos = createTracker<Exclude<Followed, typeof REAL | typeof UNKNOWN>>((f) => ('detached' in f ? '\0detached' : `${f.cur}\0${f.prev ?? '\0'}`))
   const roots = new Map<string, string>()
+  // Worktrees the command adds: git cannot be asked about a directory that does not exist yet.
+  const added: string[] = []
+  const addedTree = (dir: string): string | undefined => {
+    const full = resolvePath('/', dir, env.home)
+    return added.find((tree) => full === tree || full.startsWith(tree + '/'))
+  }
   const real = new Map<string, Promise<Branch>>()
   const currentOf = (dir: string): Promise<Branch> => {
     let b = real.get(dir)
@@ -51,7 +60,7 @@ export function createFollower(env: Env): Follower {
   }
 
   const rootOf = async (dir: string): Promise<string> => {
-    let root = roots.get(dir)
+    let root = addedTree(dir) ?? roots.get(dir)
     if (root === undefined) {
       const top = await env.git(dir, ['rev-parse', '--show-toplevel'])
       root = top.ok && top.out ? top.out : dir
@@ -80,6 +89,18 @@ export function createFollower(env: Env): Follower {
       if (head === 'detach') return [{ detached: true }]
       return head === UNKNOWN ? [UNKNOWN] : to(dir, before, head)
     }
+    if (call.sub === 'branch') {
+      const move = renameTarget(call)
+      if (move === undefined) return undefined
+      if (move === UNKNOWN) return [UNKNOWN]
+      if (move.from === undefined) return to(dir, before, move.to)
+      // Renaming a named branch moves HEAD only when that branch is the current one.
+      const current = before.includes(REAL) ? (await currentOf(dir)).name : null
+      return before.map((f) => {
+        if (f === REAL) return current === move.from ? { cur: move.to } : REAL
+        return f !== UNKNOWN && 'cur' in f && f.cur === move.from ? { cur: move.to, prev: f.prev } : f
+      })
+    }
     const target = switchTarget(call)
     if (target === undefined) return undefined
     if (target === 'detach') return [{ detached: true }]
@@ -104,7 +125,7 @@ export function createFollower(env: Env): Follower {
           if (f === REAL) return currentOf(dir)
           if (f === UNKNOWN) return { name: null, born: true, unknown: true }
           if ('detached' in f) return { name: null, born: true }
-          return { name: f.cur, born: (await env.git(dir, ['rev-parse', '--verify', '--quiet', 'HEAD'])).ok }
+          return { name: f.cur, born: addedTree(dir) !== undefined || (await env.git(dir, ['rev-parse', '--verify', '--quiet', 'HEAD'])).ok }
         }),
       )
     },
@@ -113,6 +134,16 @@ export function createFollower(env: Env): Follower {
 
     async track(call) {
       if (!FOLLOWED_SUBS.has(call.sub)) return
+      if (call.sub === 'worktree') {
+        const tree = worktreeAdd(call)
+        if (tree === undefined) return
+        const path = resolvePath('/', resolvePath(call.dir, tree.path, env.home), env.home)
+        added.push(path)
+        repos.set(path, [tree.branch === 'detach' ? { detached: true } : tree.branch === UNKNOWN ? UNKNOWN : { cur: tree.branch }], call.flow)
+        return
+      }
+      // A `git branch` that renames nothing costs no lookup.
+      if (call.sub === 'branch' && renameTarget(call) === undefined) return
       const root = await rootOf(call.dir)
       const next = await after(call, repos.get(root))
       if (next) repos.set(root, next, call.flow)
@@ -208,6 +239,53 @@ function rebaseBranch(call: GitCall): string | typeof UNKNOWN | undefined {
   return args.includes('--root') ? positional[0] : positional[1]
 }
 
+// `git branch -m|-M [<old>] <new>` (`--move`): the new name and, when given, the branch renamed; UNKNOWN when a
+// word is not literal; undefined when the call does not rename.
+function renameTarget(call: GitCall): { from?: string; to: string } | typeof UNKNOWN | undefined {
+  const dashAt = call.args.indexOf('--')
+  const options = call.args.slice(0, dashAt === -1 ? undefined : dashAt)
+  if (!options.some((a) => a === '--move' || /^-[A-Za-z]*[mM]/.test(a))) return undefined
+  if (call.dynArgs?.some(Boolean)) return UNKNOWN
+  const names = call.args.filter((a, i) => (dashAt !== -1 && i > dashAt) || !a.startsWith('-'))
+  if (names.length === 1) return { to: names[0]! }
+  return names.length === 2 ? { from: names[0]!, to: names[1]! } : undefined
+}
+
+const WORKTREE_BOOL = new Set([
+  '-f', '--force', '--checkout', '--no-checkout', '--lock', '--orphan', '--track', '--no-track', '--guess-remote', '--no-guess-remote', '-q', '--quiet',
+  '--relative-paths', '--no-relative-paths',
+])
+
+// The path and branch of `git worktree add [-b|-B <new>] <path> [<commit-ish>]`: the new branch, else the
+// commit-ish (a branch name is checked out), else the last part of the path. The branch is UNKNOWN when a word is
+// not literal or an option is not known; undefined when the call adds no worktree or its path is not literal.
+function worktreeAdd(call: GitCall): { path: string; branch: string | 'detach' | typeof UNKNOWN } | undefined {
+  const { args } = call
+  if (args[0] !== 'add' || call.dynArgs?.[0]) return undefined
+  const positional: number[] = []
+  let branch: string | undefined
+  let detach = false
+  let unknown = call.dynArgs?.some(Boolean) ?? false
+  for (let i = 1; i < args.length; i++) {
+    const a = args[i]!
+    if (a === '--') {
+      for (let j = i + 1; j < args.length; j++) positional.push(j)
+      break
+    }
+    if (a === '-b' || a === '-B') branch = args[++i]
+    else if (/^-[bB]./.test(a)) branch = a.slice(2)
+    else if (a === '--reason') i++
+    else if (a === '-d' || a === '--detach') detach = true
+    else if (!a.startsWith('-')) positional.push(i)
+    else if (!WORKTREE_BOOL.has(a) && !a.startsWith('--reason=')) unknown = true
+  }
+  const at = positional[0]
+  if (at === undefined || call.dynArgs?.[at]) return undefined
+  const path = args[at]!
+  const commit = positional[1] === undefined ? undefined : args[positional[1]]
+  return { path, branch: unknown ? UNKNOWN : detach ? 'detach' : (branch ?? commit ?? basename(path)) }
+}
+
 // Where `git symbolic-ref HEAD <ref>` or `git update-ref --no-deref HEAD <rev>` points HEAD: a branch, 'detach',
 // UNKNOWN (a ref outside refs/heads/, a deleted HEAD, or a word that is not literal), or undefined when HEAD stays.
 function headWrite(call: GitCall): string | 'detach' | typeof UNKNOWN | undefined {
@@ -243,7 +321,7 @@ export async function protectedBranchViolations(call: GitCall, cfg: Config, env:
   const hint = 'Work on a feature branch and land it by pull request; for an intentional direct change, ask the user to run it themselves with the ! prefix.'
   const add = (message: string) => out.push({ rule: 'protected-branch', mode: cfg.protectedBranch, message })
   const fastForward = call.sub === 'merge' && fastForwardOnly(call.args)
-  const unknown = `protected-branch: an earlier "git switch", "git checkout", "git rebase" or "git symbolic-ref" in this command (such as "git switch -", a branch built from a variable, or an option the guard does not know) goes to a branch the guard cannot tell, so git ${call.sub} counts as on a protected branch. Run the switch on its own first. ${hint}`
+  const unknown = `protected-branch: an earlier "git switch", "git checkout", "git rebase", "git symbolic-ref", "git branch -m" or "git worktree add" in this command (such as "git switch -", a branch built from a variable, or an option the guard does not know) goes to a branch the guard cannot tell, so git ${call.sub} counts as on a protected branch. Run the switch on its own first. ${hint}`
   const rewritten = call.sub === 'rebase' && !stops(call) ? rebaseBranch(call) : undefined
   if (rewritten === UNKNOWN) {
     add(`protected-branch: git rebase names a branch built from a variable, substitution or secret placeholder, so it counts as rewriting a protected branch. ${hint}`)
@@ -254,7 +332,7 @@ export async function protectedBranchViolations(call: GitCall, cfg: Config, env:
     const b = branches.find((x) => x.name && x.born && isProtected(x.name, cfg))
     if (b) add(`protected-branch: git ${call.sub} on protected branch "${b.name}". ${hint}`)
     else if (branches.some((x) => x.unknown)) add(unknown)
-  } else if (call.sub === 'push') {
+  } else if (PUSH_SUBS.has(call.sub)) {
     for (const message of await pushMessages(call, env, follow, (n) => isProtected(n, cfg), hint, unknown, taint)) add(message)
   }
   // Looked up only once the rule would deny, so a clean call costs no extra git run.

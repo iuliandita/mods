@@ -90,9 +90,13 @@ export async function pushMessages(
 ): Promise<string[]> {
   const out: string[] = []
   const t = pushTargets(call.args)
+  // send-pack reads no push configuration: without refs it updates every matching branch, and `--stdin` hides them.
+  const sendPack = call.sub === 'send-pack'
+  if (sendPack && call.args.includes('--stdin')) t.all ||= 'with refs read from --stdin'
+  else if (sendPack && t.implicit) t.all ||= 'without refs (every matching branch)'
   let known: Branch[] | undefined
   const cur = async () => (known ??= await follow.branchOf(call.dir)).map((b) => b.name)
-  if (!t.all && (t.implicit || t.sourceOnly)) {
+  if (!sendPack && !t.all && (t.implicit || t.sourceOnly)) {
     const conf = await pushConfig(call, env)
     // The configuration read above predates the command, so an earlier write in it leaves the destination unknown.
     const upstreamMode = t.implicit && !conf.specs.length && (conf.mode === 'upstream' || conf.mode === 'tracking')
@@ -116,14 +120,14 @@ export async function pushMessages(
   }
   const wildcard = t.names.find(wildcardOf)
   if (t.all) {
-    out.push(`protected-branch: git push ${t.all} would update protected branches. ${hint}`)
+    out.push(`protected-branch: git ${call.sub} ${t.all} would update protected branches. ${hint}`)
   } else if (wildcard !== undefined) {
-    out.push(`protected-branch: git push to the wildcard destination "${wildcard}" would update protected branches. ${hint}`)
+    out.push(`protected-branch: git ${call.sub} to the wildcard destination "${wildcard}" would update protected branches. ${hint}`)
   } else {
     const current = t.implicit || t.names.includes('@current') ? await cur() : []
     const targets = t.names.flatMap((n) => (n === '@current' ? current : [n])).concat(t.implicit ? current : [])
     const hit = targets.find((n): n is string => n !== null && isProtected(n))
-    if (hit) out.push(`protected-branch: git push to protected branch "${hit}". ${hint}`)
+    if (hit) out.push(`protected-branch: git ${call.sub} to protected branch "${hit}". ${hint}`)
     else if (known?.some((b) => b.unknown)) out.push(unknown)
   }
 

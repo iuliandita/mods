@@ -1,14 +1,16 @@
-import { tokenize, MAX_DEPTH } from './lex'
+import { tokenize, MAX_DEPTH, type Simple } from './lex'
 import { basename } from './paths'
 import type { Mode, Violation } from './rules'
 import { SHELLS, shellScript, unwrap } from './wrappers'
 
 // `pkill -f` matches every process's full command line, and the shell that runs the command carries the whole
 // command text in its own. A pattern that matches that text kills the shell (the tool reports exit 144).
-const VALUE_SHORT = new Set(['g', 'G', 'P', 's', 't', 'u', 'U', 'F'])
-const VALUE_LONG = new Set(['--pgroup', '--group', '--parent', '--session', '--terminal', '--euid', '--uid', '--pidfile', '--signal', '--ns', '--nslist'])
+// `pgrep -f` prints that shell's pid the same way, so killing what it prints is the same accident.
+const VALUE_SHORT = new Set(['g', 'G', 'P', 's', 't', 'u', 'U', 'F', 'd'])
+const VALUE_LONG = new Set(['--pgroup', '--group', '--parent', '--session', '--terminal', '--euid', '--uid', '--pidfile', '--signal', '--ns', '--nslist', '--delimiter'])
+const SINGLE_PIPE = /(?:^|[^|])\|(?:[^|]|$)/
 
-export const SELF_KILL_HINT = /\bpkill\b/
+export const SELF_KILL_HINT = /\bp(?:kill|grep)\b/
 
 // What the pkill command line holds: the option letters seen and the pattern (undefined when it is not a literal word).
 function parsePkill(argv: string[], dyn: boolean[]): { full: boolean; exact: boolean; ignoreCase: boolean; pattern?: string } | null {
@@ -98,10 +100,25 @@ function check(pattern: string, ignoreCase: boolean, texts: string[]): Hit | nul
   return texts.some((t) => (re ? re.test(t) : t.includes(pattern))) ? 'match' : null
 }
 
-function scan(script: string, whole: string, depth: number, out: Map<string, Hit>): void {
+const headOf = (cmd: Simple | undefined): string[] => (cmd ? unwrap(cmd).argv : [])
+
+// The pids a `pgrep` prints are killed when it runs in a substitution of a `kill` command, or pipes into `xargs kill`.
+function killsOutput(cmds: Simple[], idx: number): boolean {
+  let next = idx + 1
+  while (cmds[next]?.op === '$(') next++
+  const after = cmds[next]
+  if (cmds[idx]!.op === '$(') return basename(headOf(after)[0] ?? '') === 'kill'
+  if (!after || !SINGLE_PIPE.test(after.op)) return false
+  const argv = headOf(after)
+  return basename(argv[0] ?? '') === 'xargs' && argv.slice(1).some((a) => basename(a) === 'kill')
+}
+
+type Found = { tool: string; pattern: string; hit: Hit }
+
+function scan(script: string, whole: string, depth: number, out: Found[]): void {
   if (depth > MAX_DEPTH) return
   const parsed = tokenize(script)
-  for (const cmd of parsed.cmds) {
+  for (const [idx, cmd] of parsed.cmds.entries()) {
     const u = unwrap(cmd)
     if (!u.argv.length) continue
     const head = basename(u.argv[0]!)
@@ -110,12 +127,12 @@ function scan(script: string, whole: string, depth: number, out: Map<string, Hit
       if (s.ok && s.script !== undefined) scan(s.script, whole, depth + 1, out)
       continue
     }
-    if (head !== 'pkill') continue
+    if (head !== 'pkill' && !(head === 'pgrep' && killsOutput(parsed.cmds, idx))) continue
     const p = parsePkill(u.argv, u.dyn)
     if (!p || !p.full || p.exact || p.pattern === undefined) continue
     // The shell's command line is the shell name, `-c`, then the command text.
     const hit = check(p.pattern, p.ignoreCase, [`sh -c ${whole}`, `sh -c ${script}`])
-    if (hit) out.set(p.pattern, hit)
+    if (hit) out.push({ tool: head, pattern: p.pattern, hit })
   }
 }
 
@@ -124,14 +141,14 @@ const SAFE_FORMS =
 
 export function selfKillViolations(command: string, mode: Mode): Violation[] {
   if (mode === 'off' || !SELF_KILL_HINT.test(command)) return []
-  const hits = new Map<string, Hit>()
+  const hits: Found[] = []
   scan(command, command, 0, hits)
-  return [...hits].map(([pattern, hit]) => ({
+  return hits.map(({ tool, pattern, hit }) => ({
     rule: 'selfkill',
     mode,
     message:
       hit === 'match'
-        ? `selfkill: \`pkill -f ${JSON.stringify(pattern)}\` also matches the shell running this command, so it would kill that shell (exit 144). ${SAFE_FORMS}`
-        : `selfkill: the pattern of \`pkill -f ${JSON.stringify(pattern.length > 60 ? `${pattern.slice(0, 60)}...` : pattern)}\` is too complex to check against the shell running this command, which it may kill (exit 144). ${SAFE_FORMS}`,
+        ? `selfkill: \`${tool} -f ${JSON.stringify(pattern)}\` also matches the shell running this command, so ${tool === 'pkill' ? 'it' : 'killing the pids it prints'} would kill that shell (exit 144). ${SAFE_FORMS}`
+        : `selfkill: the pattern of \`${tool} -f ${JSON.stringify(pattern.length > 60 ? `${pattern.slice(0, 60)}...` : pattern)}\` is too complex to check against the shell running this command, which ${tool === 'pkill' ? 'it' : 'killing the pids it prints'} may kill (exit 144). ${SAFE_FORMS}`,
   }))
 }

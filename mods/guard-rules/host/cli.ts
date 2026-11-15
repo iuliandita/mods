@@ -1,9 +1,8 @@
-import { userInfo } from 'node:os'
 import { resolve } from 'node:path'
 
 import { applyGuardCommand, parseGuardCommand } from '../claude/hooks/context'
-import { checkCommand, checkTool, type Check } from './check'
-import { killAll, loadClasses, loadConfig, nodeEnv, saveClasses, warnAskOnce } from './env'
+import { checkCommand, checkTool, failure, type Check } from './check'
+import { killAll, loadClasses, loadConfig, nodeEnv, saveClasses, userHome, warnAskOnce } from './env'
 
 // Codex names its patch tool apply_patch and also matches it as Edit and Write.
 const FILE_TOOLS = new Set(['apply_patch', 'Edit', 'Write'])
@@ -32,6 +31,15 @@ async function withDeadline(work: Promise<Check>, ms: number): Promise<Check> {
   }
 }
 
+// A check that throws before the rules run still answers with the documented deny.
+function guarded<T extends Check | Promise<Check>>(check: () => T): T | Check {
+  try {
+    return check()
+  } catch (e) {
+    return { deny: failure(e) }
+  }
+}
+
 function emit(io: Io, result: Check): void {
   if (result.deny) {
     io.out(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: result.deny } }))
@@ -56,7 +64,7 @@ async function hook(io: Io): Promise<number> {
       io.err('guard-rules: a file edit without a directory cannot be checked, so it was blocked (fail closed).')
       return 2
     }
-    emit(io, checkTool(input.tool_input, input.cwd, process.env.HOME || userInfo().homedir))
+    emit(io, guarded(() => checkTool(input.tool_input, input.cwd as string, userHome())))
     return 0
   }
   if (input.tool_name !== 'Bash') return 0
@@ -65,10 +73,11 @@ async function hook(io: Io): Promise<number> {
     io.err('guard-rules: a Bash call without a command or a directory cannot be checked, so it was blocked (fail closed).')
     return 2
   }
+  const command = toolInput.command
   const cwd = typeof toolInput.workdir === 'string' && toolInput.workdir !== '' ? resolve(input.cwd, toolInput.workdir) : input.cwd
   const cfg = loadConfig(io.config)
   if (cfg.unparsed === 'ask') warnAskOnce(io.err, io.store)
-  const result = await withDeadline(checkCommand(toolInput.command, cfg, nodeEnv(cwd, () => loadClasses(io.store))), io.deadlineMs ?? DEADLINE_MS)
+  const result = await guarded(() => withDeadline(checkCommand(command, cfg, nodeEnv(cwd, () => loadClasses(io.store))), io.deadlineMs ?? DEADLINE_MS))
   emit(io, result)
   return 0
 }

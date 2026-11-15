@@ -804,3 +804,67 @@ test('deny reasons name what to fix, never the switch that turns a rule off', as
   expect(invalid).toHaveLength(1)
   for (const v of [...lookups, ...invalid]) expect(v.message).not.toMatch(/to off|disable the plugin/i)
 })
+
+test('attribution: the Claude-Session trailer, the session and product links and a robot line are each denied by name', async () => {
+  const cases: [message: string, name: string][] = [
+    ['fix: x\n\nClaude-Session: abc', 'a Claude-Session trailer'],
+    ['fix: x, see https://claude.ai/code/session_01ab', 'a claude.ai session link'],
+    ['fix: x, made at https://claude.com/claude-code', 'a Claude Code link'],
+    [`fix: x\n\n${ROBOT} automated`, 'a robot-emoji line'],
+  ]
+  for (const [message, name] of cases) {
+    const v = (await evaluate(heredoc(message), cfg(), fakeEnv())).enforced
+    expect(v.map((x) => x.rule), message).toEqual(['attribution'])
+    expect(v[0]!.message).toContain(name)
+  }
+  expect((await evaluate(heredoc('fix: robot arm session handling for claude.ai links'), cfg(), fakeEnv())).enforced).toEqual([])
+})
+
+test('protected branch and identity: cherry-pick, revert and am count as commits, and stopping one does not', async () => {
+  const rules = cfg({ identityRules: IDENTITIES })
+  for (const sub of ['cherry-pick abc', 'revert abc', 'am 0001.patch']) {
+    expect((await evaluate(`git ${sub}`, cfg(), fakeEnv({ branch: 'develop' }))).enforced.map((x) => x.rule), sub).toEqual(['protected-branch'])
+    expect((await evaluate(`git ${sub}`, cfg(), fakeEnv())).enforced, sub).toEqual([])
+    expect((await evaluate(`git ${sub}`, rules, fakeEnv({ email: 'me@work.example' }))).enforced.map((x) => x.rule), sub).toEqual(['identity'])
+  }
+  for (const sub of ['cherry-pick --abort', 'revert --quit', 'am --abort']) {
+    expect((await evaluate(`git ${sub}`, rules, fakeEnv({ branch: 'develop', email: 'me@work.example' }))).enforced, sub).toEqual([])
+  }
+})
+
+test('attribution: issue, review and merge messages on gh, glab, tea and fj are scanned, reads are not', async () => {
+  const denied = [
+    `gh issue create --title t --body ${TRAILER}`,
+    `gh issue comment 1 --body ${TRAILER}`,
+    `gh pr review 1 --approve --body ${TRAILER}`,
+    `gh pr merge 1 --squash --body ${TRAILER}`,
+    `glab issue note 1 -m ${TRAILER}`,
+    `tea pulls create --description ${TRAILER}`,
+    `tea issues comment 1 ${TRAILER}`,
+    `fj pr create --body ${TRAILER}`,
+    `fj issue comment 1 ${TRAILER}`,
+    `git merge feature -m ${TRAILER}`,
+  ]
+  for (const command of denied) expect((await evaluate(command, cfg(), fakeEnv())).enforced.map((x) => x.rule), command).toEqual(['attribution'])
+  const allowed = [`gh pr list --search ${TRAILER}`, `gh search issues ${TRAILER}`, `glab mr list --search ${TRAILER}`, `tea pulls list ${TRAILER}`, `git log --grep ${TRAILER}`]
+  for (const command of allowed) expect((await evaluate(command, cfg(), fakeEnv())).enforced, command).toEqual([])
+})
+
+test('protected branch: protectedBranches entries are globs, and other pattern characters match literally', async () => {
+  const c = cfg({ protectedBranches: 'release/*, v1.x' })
+  for (const branch of ['release/2.0', 'v1.x']) {
+    expect((await evaluate('git commit -m x', c, fakeEnv({ branch }))).enforced.map((x) => x.rule), branch).toEqual(['protected-branch'])
+    expect((await evaluate(`git push origin HEAD:${branch}`, c, fakeEnv())).enforced.map((x) => x.rule), branch).toEqual(['protected-branch'])
+  }
+  for (const branch of ['main', 'releases', 'v1ax', 'hotfix/release/2.0']) {
+    expect((await evaluate('git commit -m x', c, fakeEnv({ branch }))).enforced, branch).toEqual([])
+  }
+})
+
+test('flow: more than 8 possible branches for one repository count as unknown', async () => {
+  const switches = (n: number) => Array.from({ length: n }, (_, i) => `git switch -c b${i}`).join('; ')
+  expect((await evaluate(`${switches(3)}; git commit -m x`, cfg(), fakeEnv())).enforced).toEqual([])
+  const many = (await evaluate(`${switches(9)}; git commit -m x`, cfg(), fakeEnv())).enforced
+  expect(many.map((x) => x.rule)).toEqual(['protected-branch'])
+  expect(many[0]!.message).toContain('cannot tell')
+})

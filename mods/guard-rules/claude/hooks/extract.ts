@@ -133,8 +133,9 @@ function mark(w: Walk, why: string): void {
 // Follows the connector before `cmd`: a new chain at anything but `&&` (and `then`), and the subshell depth.
 function advance(w: Walk, cmd: Simple): void {
   const raw = cmd.argv[0]
-  // `then` runs only when the condition succeeded, so it continues the condition's chain like `&&`.
-  if (cmd.op !== '&&' && cmd.op !== '$(' && raw !== 'then' && !w.joinNext) w.chain++
+  // `then` runs only when the condition succeeded, so it continues the condition's chain like `&&`. A pipeline
+  // stage runs whenever the stage before it started, so it stays in that chain too.
+  if (cmd.op !== '&&' && cmd.op !== '|' && cmd.op !== '|&' && cmd.op !== '$(' && raw !== 'then' && !w.joinNext) w.chain++
   w.joinNext = raw === 'then' && cmd.argv.length === 1
   if (cmd.op !== '$(') for (const ch of cmd.op) w.depth = Math.max(0, w.depth + (ch === '(' ? 1 : ch === ')' ? -1 : 0))
 }
