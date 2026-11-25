@@ -40,6 +40,20 @@ A dynamic value in an argument only makes that value unknown: `git log -n "$N"`,
 an unknown variable is unparsed. A guarded git write after an unresolved directory change fails
 the parsed lookup check, independently of `modeUnparsed`.
 
+`ssh [options] host command...` with a literal command and known options is followed like `bash -c`, and the host
+name is not scanned. The repository and branch it acts on are remote, so they cannot be looked up: a read
+(`ssh host git -C /srv/repo status`, `ssh host 'which git'`) passes, and a commit, push, forge message or
+kubectl, helm or terraform change is unparsed. These keep the whole-text scan below instead: input fed to ssh (a
+pipe, heredoc or here-string), ssh inside a substitution (`$(ssh host git status)`), a dynamic host, option or
+command word, an unknown option, a command that starts with `-`, and a `ProxyCommand`, `LocalCommand`,
+`KnownHostsCommand` or `RemoteCommand` option, which ssh expands `%h` and `%r` in to the host and user words.
+For every command, ssh or not (`scp`, `rsync -e`), a word naming one of those options is also read with its quotes
+and backslashes removed. ssh runs the value through a shell, so a variable, substitution, glob or brace in it is
+unparsed, and so is a percent token that is not an argument or `host:port` piece (`g%h`, `"g"%h`, `%L`, a token that
+starts the value or follows `;`) or that appears next to a `HostName`, `User` or `-l` override. ssh config files are
+not read. Input given to an enclosing group or loop (`{ ssh host; } <<< '...'`) is not carried to the ssh
+inside it, so that form is a known gap.
+
 ### When a command is unparsed
 
 These constructs make the whole command unparsed when a parsed call or its text names `git`, `gh`, `glab`, `tea`, `fj`, `kubectl`,

@@ -1622,6 +1622,13 @@ var OPAQUE_TOOLS = new Set(["git", "gh", "glab", "tea", "fj", "kubectl", "helm",
 var TEXT_HEADS = new Set(["echo", "printf", "man", "which", "type", "grep", "rg", "cat"]);
 var DATA_HEADS = new Set(["ls", "mkdir", "rmdir", "touch", "cp", "mv", "rm", "head", "tail", "wc", "tee", "curl", "basename", "dirname", "realpath", "readlink", "file", "stat", "du", "df", "cut", "uniq", "diff", "cmp"]);
 var INPUT_EXECUTORS = new Set(["xargs", ...SHELLS, "awk", "gawk", "mawk", "perl", "ruby", "node", "env", "parallel", "watch", "script", "ssh", "php", "lua", "tclsh", "at", "crontab", "batch"]);
+var SSH_VALUE_OPTS = new Set("BbcDEeFIiJLlmOopQRSWw");
+var SSH_FLAG_OPTS = new Set("46AaCfGgKkMNnqsTtVvXxYy");
+var SSH_COMMAND_OPTS = /^[\s="']*(?:proxycommand|localcommand|knownhostscommand|remotecommand)\b/i;
+var SSH_COMMAND_WORD = /(?:proxy|local|knownhosts|remote)command/i;
+var SSH_SAFE_TOKEN = /(?<=[\s:])%[hnrp%](?=$|[\s:])/g;
+var SSH_TOKEN_COMMAND = /(?:^|[=;&|({`'"]|\$\()\s*%[A-Za-z%]/;
+var SSH_ALIAS = /^-l|(?:^|[\s'"=-])(?:hostname|user)\s*=/i;
 var SED_FLAGS = new Set(["-n", "--quiet", "--silent", "-E", "-r", "--regexp-extended"]);
 var STRUCTURES = {
   case: "a case statement",
@@ -1951,10 +1958,75 @@ function pipedWords(w, s) {
   }
   return words;
 }
+function followSsh(w, s) {
+  if (SINGLE_PIPE.test(s.cmd.op) || s.cmd.op === "$(" || s.cmd.input?.length)
+    return false;
+  const { argv, dyn } = s;
+  const local = [];
+  let i = 1;
+  for (;i < argv.length; i++) {
+    const a = argv[i];
+    if (dyn[i])
+      return false;
+    if (a === "--") {
+      i++;
+      break;
+    }
+    if (!a.startsWith("-") || a === "-")
+      break;
+    if (SSH_VALUE_OPTS.has(a[1])) {
+      const value = a.length > 2 ? a.slice(2) : argv[++i];
+      if (value === undefined || dyn[i])
+        return false;
+      if (a[1] === "o") {
+        if (SSH_COMMAND_OPTS.test(value))
+          return false;
+        local.push(value);
+      }
+    } else if (![...a.slice(1)].every((c) => SSH_FLAG_OPTS.has(c)))
+      return false;
+  }
+  const words = argv.slice(i + 1);
+  if (argv[i] === undefined || dyn[i] || words[0]?.startsWith("-") || dyn.slice(i + 1).some(Boolean))
+    return false;
+  const tools = toolWords(local.join(" "), { shells: true });
+  if (tools.length)
+    w.local.push({ why: `ssh with ${tools.join(", ")} among its options`, tools });
+  if (!words.length)
+    return true;
+  const inner = extractCalls(words.join(" "), "/", "/");
+  for (const why of inner.opaque)
+    mark(w, why);
+  w.local.push(...inner.local);
+  w.remote.push(...inner.calls, ...inner.remote);
+  return true;
+}
+function sshCommandOptions(w, s) {
+  const aliased = s.argv.some((a) => SSH_ALIAS.test(a));
+  for (const a of s.argv) {
+    if (!SSH_COMMAND_WORD.test(a))
+      continue;
+    const bare = a.replace(/["'\\]/g, "");
+    const tools = toolWords(bare, { shells: true });
+    if (tools.length)
+      w.local.push({ why: `a command option naming ${tools.join(", ")}`, tools });
+    const globbed = bare.split(/[\s;&|()=]+/).flatMap((piece) => mayName(piece, [...OPAQUE_TOOLS]));
+    if (globbed.length)
+      w.local.push({ why: "a command option with a glob or brace that may name a tool", tools: globbed });
+    if (/[$`]/.test(bare))
+      w.local.push({ why: "a command option with a variable or substitution", tools: [...TOOLS] });
+    if (/%[A-Za-z]/.test(a.replace(SSH_SAFE_TOKEN, "")) || SSH_TOKEN_COMMAND.test(a) || aliased && /%[hnr]/.test(a)) {
+      w.local.push({ why: "a command option that builds a word from a percent token", tools: [...TOOLS] });
+    }
+  }
+}
 function markOpaque(w, s) {
+  sshCommandOptions(w, s);
   if (s.u.clear || s.u.unset.has("PATH"))
     mark(w, "a cleared PATH for an unmodeled command");
   const bare = s.argv[0] === s.name;
+  if (bare && s.name === "ssh" && followSsh(w, s))
+    return;
   const executableOption = s.name === "rg" ? s.argv.some((a) => a === "--pre" || a.startsWith("--pre=")) : s.name === "man" && s.argv.slice(1).some((a) => /^-[^-]*[PH]|^--(?:pager|html)(?:=|$)/.test(a));
   if (bare && (FLOW_HEADS.has(s.name) || TEXT_HEADS.has(s.name) && !executableOption))
     return;
@@ -1984,6 +2056,7 @@ function extractCalls(src, startDir, home) {
   const w = {
     queue: [...first.cmds],
     calls: [],
+    remote: [],
     st: newProcState(startDir, home),
     opaque: [],
     local: [],
@@ -2064,7 +2137,7 @@ function extractCalls(src, startDir, home) {
     else
       markOpaque(w, s);
   }
-  return { calls: w.calls, ok: !w.opaque.length && !w.local.length, opaque: w.opaque, local: w.local };
+  return { calls: w.calls, ok: !w.opaque.length && !w.local.length && !w.remote.length, opaque: w.opaque, local: w.local, remote: w.remote };
 }
 // mods/guard-rules/claude/hooks/context.ts
 var KUBECTL_READ = new Set([
@@ -3384,6 +3457,9 @@ function bodyFiles(call, home) {
   }
   return out;
 }
+function toolOf(call) {
+  return call.kind === "infra" ? call.tool : call.kind === "gh" ? call.cli : "git";
+}
 function strictest(modes) {
   return modes.includes("on") ? "on" : modes.includes("dry") ? "dry" : "off";
 }
@@ -3397,9 +3473,12 @@ function unparsedViolations(command, parsed, guarded, cfg) {
     const why = parsed.opaque[0];
     for (const t of toolWords(plain, { anyCase: true }))
       tools.set(t, why);
-    for (const call of parsed.calls)
-      tools.set(call.kind === "infra" ? call.tool : call.kind === "gh" ? call.cli : "git", why);
+    for (const call of [...parsed.calls, ...parsed.remote])
+      tools.set(toolOf(call), why);
   }
+  for (const call of parsed.remote)
+    if (isGuarded(call, cfg) && !tools.has(toolOf(call)))
+      tools.set(toolOf(call), "ssh running a write on a host the guard cannot check");
   for (const l of parsed.local)
     for (const t of l.tools)
       if (!tools.has(t))

@@ -175,6 +175,10 @@ function bodyFiles(call: GhCall, home: string): string[] {
   return out
 }
 
+function toolOf(call: Call): string {
+  return call.kind === 'infra' ? call.tool : call.kind === 'gh' ? call.cli : 'git'
+}
+
 function strictest(modes: Mode[]): Mode {
   return modes.includes('on') ? 'on' : modes.includes('dry') ? 'dry' : 'off'
 }
@@ -192,8 +196,10 @@ function unparsedViolations(command: string, parsed: Parsed, guarded: Call[], cf
   if (parsed.opaque.length) {
     const why = parsed.opaque[0]!
     for (const t of toolWords(plain, { anyCase: true })) tools.set(t, why)
-    for (const call of parsed.calls) tools.set(call.kind === 'infra' ? call.tool : call.kind === 'gh' ? call.cli : 'git', why)
+    for (const call of [...parsed.calls, ...parsed.remote]) tools.set(toolOf(call), why)
   }
+  // A write run over ssh acts on a repository the guard cannot look up; a read does not.
+  for (const call of parsed.remote) if (isGuarded(call, cfg) && !tools.has(toolOf(call))) tools.set(toolOf(call), 'ssh running a write on a host the guard cannot check')
   for (const l of parsed.local) for (const t of l.tools) if (!tools.has(t)) tools.set(t, l.why)
   const call = guarded.find((c): c is GitCall => c.kind === 'git' && c.opaque !== undefined)
   if (call && !tools.has('git')) tools.set('git', call.opaque!)
