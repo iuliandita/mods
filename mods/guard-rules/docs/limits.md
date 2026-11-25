@@ -43,8 +43,10 @@ the parsed lookup check, independently of `modeUnparsed`.
 `ssh [options] host command...` with a literal command and known options is followed like `bash -c`, and the host
 name is not scanned. The repository and branch it acts on are remote, so they cannot be looked up: a read
 (`ssh host git -C /srv/repo status`, `ssh host 'which git'`) passes, and a commit, push, forge message or
-kubectl, helm or terraform change is unparsed. Input fed to ssh (a pipe, heredoc or here-string), a dynamic host,
-option or command word, an unknown option, or a command that starts with `-` keeps the whole-text scan below.
+kubectl, helm or terraform change is unparsed. Input fed to ssh (a pipe, heredoc or here-string), ssh inside a
+substitution (`$(ssh host git status)`), a dynamic host, option or command word, an unknown option, a
+`ProxyCommand`, `LocalCommand` or `KnownHostsCommand` option (ssh expands `%h` and `%r` in them to the host and
+user words), or a command that starts with `-` keeps the whole-text scan below.
 
 ### When a command is unparsed
 

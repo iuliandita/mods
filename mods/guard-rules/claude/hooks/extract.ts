@@ -22,6 +22,7 @@ const INPUT_EXECUTORS = new Set(['xargs', ...SHELLS, 'awk', 'gawk', 'mawk', 'per
 // ssh options that take a value, and its single-letter flags that do not.
 const SSH_VALUE_OPTS = new Set('BbcDEeFIiJLlmOopQRSWw')
 const SSH_FLAG_OPTS = new Set('46AaCfGgKkMNnqsTtVvXxYy')
+const SSH_COMMAND_OPTS = /^\s*(?:proxycommand|localcommand|knownhostscommand)\b/i
 const SED_FLAGS = new Set(['-n', '--quiet', '--silent', '-E', '-r', '--regexp-extended'])
 // Shell constructs the guard does not follow: code defined here and run later, or a branch it does not model.
 const STRUCTURES: Record<string, string> = {
@@ -392,7 +393,8 @@ function pipedWords(w: Walk, s: Step): string[] {
 // unparsed and a read passes. Input fed to ssh, a dynamic or unknown option, or a dynamic word keeps the whole-text scan.
 // The host is a name, not a word to scan; only `-o` values can run a local command (ProxyCommand, LocalCommand).
 function followSsh(w: Walk, s: Step): boolean {
-  if (SINGLE_PIPE.test(s.cmd.op) || s.cmd.input?.length) return false
+  // A substitution (`tee >(ssh host)`) may be fed by the enclosing command's pipe, so it keeps the scan too.
+  if (SINGLE_PIPE.test(s.cmd.op) || s.cmd.op === '$(' || s.cmd.input?.length) return false
   const { argv, dyn } = s
   const local: string[] = []
   let i = 1
@@ -407,7 +409,11 @@ function followSsh(w: Walk, s: Step): boolean {
     if (SSH_VALUE_OPTS.has(a[1]!)) {
       const value = a.length > 2 ? a.slice(2) : argv[++i]
       if (value === undefined || dyn[i]) return false
-      if (a[1] === 'o') local.push(value)
+      // These run a local command, and ssh expands `%h`/`%r` in it to the host or user word that is not scanned here.
+      if (a[1] === 'o') {
+        if (SSH_COMMAND_OPTS.test(value)) return false
+        local.push(value)
+      }
     } else if (![...a.slice(1)].every((c) => SSH_FLAG_OPTS.has(c))) return false
   }
   const words = argv.slice(i + 1)

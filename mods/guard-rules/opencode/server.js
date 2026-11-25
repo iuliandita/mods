@@ -1781,6 +1781,7 @@ var DATA_HEADS = new Set(["ls", "mkdir", "rmdir", "touch", "cp", "mv", "rm", "he
 var INPUT_EXECUTORS = new Set(["xargs", ...SHELLS, "awk", "gawk", "mawk", "perl", "ruby", "node", "env", "parallel", "watch", "script", "ssh", "php", "lua", "tclsh", "at", "crontab", "batch"]);
 var SSH_VALUE_OPTS = new Set("BbcDEeFIiJLlmOopQRSWw");
 var SSH_FLAG_OPTS = new Set("46AaCfGgKkMNnqsTtVvXxYy");
+var SSH_COMMAND_OPTS = /^\s*(?:proxycommand|localcommand|knownhostscommand)\b/i;
 var SED_FLAGS = new Set(["-n", "--quiet", "--silent", "-E", "-r", "--regexp-extended"]);
 var STRUCTURES = {
   case: "a case statement",
@@ -2111,7 +2112,7 @@ function pipedWords(w, s) {
   return words;
 }
 function followSsh(w, s) {
-  if (SINGLE_PIPE.test(s.cmd.op) || s.cmd.input?.length)
+  if (SINGLE_PIPE.test(s.cmd.op) || s.cmd.op === "$(" || s.cmd.input?.length)
     return false;
   const { argv, dyn } = s;
   const local = [];
@@ -2130,8 +2131,11 @@ function followSsh(w, s) {
       const value = a.length > 2 ? a.slice(2) : argv[++i];
       if (value === undefined || dyn[i])
         return false;
-      if (a[1] === "o")
+      if (a[1] === "o") {
+        if (SSH_COMMAND_OPTS.test(value))
+          return false;
         local.push(value);
+      }
     } else if (![...a.slice(1)].every((c) => SSH_FLAG_OPTS.has(c)))
       return false;
   }
@@ -3397,7 +3401,7 @@ function unparsedViolations(command, parsed, guarded, cfg) {
     const why = parsed.opaque[0];
     for (const t of toolWords(plain, { anyCase: true }))
       tools.set(t, why);
-    for (const call of parsed.calls)
+    for (const call of [...parsed.calls, ...parsed.remote])
       tools.set(toolOf(call), why);
   }
   for (const call of parsed.remote)
