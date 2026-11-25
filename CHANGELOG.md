@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## [1.1.4] - 2026-11-25
+
+A patch for `guard-rules` 1.1.3 in its Claude Code, Codex, and OpenCode manifests. The other plugins are unchanged.
+
+Codex users: the `guard-rules` plugin changed, so trust its hook again in `/hooks` after the update. `scripts/mods doctor` reports hooks that are still untrusted.
+
+### Fixed
+
+- `guard-rules` follows a literal `ssh host command` like `bash -c`, so a read such as `ssh host git -C /srv/repo status` or `ssh host 'which git'` is no longer denied as unparsed. A remote commit, push, forge message, or kubectl, helm or terraform change is still unparsed, since the remote repository and branch cannot be looked up. Input fed to ssh, ssh inside a substitution, dynamic words and unknown options keep the whole-text scan (#242, #243).
+- An independent review of that change found three commands it let through that the guard had denied before: a `ProxyCommand` whose `%h` expands to the unscanned host word, `ssh` inside a process substitution fed by a pipe, and a remote call after an unparsed construct. All three are denied again (#244, #245).
+- `guard-rules` reads the `ProxyCommand`, `LocalCommand`, `KnownHostsCommand` and `RemoteCommand` option of any command (`ssh`, `scp`, `rsync -e`) with its quotes removed. A variable, substitution, glob or brace in the value is unparsed, and so is a percent token that can build a tool name from the host or user word, such as `g%h` or `"g"%h`. `-W %h:%p` and `nc %h %p` still pass (#246, #248).
+
+### Known gaps
+
+- Input given to an enclosing group or loop is not carried to the ssh inside it: `{ ssh host; } <<< '...'` passes (#247).
+- Option text in an assignment (`RSYNC_RSH`) or in `git -c core.sshCommand`, a percent-escaped user in an `ssh://` destination, an attached or spaced `HostName` override, and a differently cased tool name in an option value pass (#249). The guard stays a check against accidents.
+
 ## [1.1.3] - 2026-11-15
 
 The leftovers from the v1.1.2 review. Four plugins have a patch release in their Claude Code, Codex, and OpenCode manifests: `guard-rules` 1.1.2, `notify` 1.0.3, `delegation-board` 1.0.2, `statusline` 1.0.2. `secret-box` stays at 1.0.1.
@@ -310,7 +327,8 @@ First collection prerelease. Individual plugin versions remain independent of th
   timer afterwards; `delegation-board` resets on `/clear` and prints a text table when its pane
   is not placed (Claude Desktop).
 
-[Unreleased]: https://github.com/iuliandita/mods/compare/v1.1.3...develop
+[Unreleased]: https://github.com/iuliandita/mods/compare/v1.1.4...develop
+[1.1.4]: https://github.com/iuliandita/mods/compare/v1.1.3...v1.1.4
 [1.1.3]: https://github.com/iuliandita/mods/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/iuliandita/mods/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/iuliandita/mods/compare/v1.1.0...v1.1.1
