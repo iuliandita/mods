@@ -46,7 +46,9 @@ name is not scanned. The repository and branch it acts on are remote, so they ca
 kubectl, helm or terraform change is unparsed. Input fed to ssh (a pipe, heredoc or here-string), ssh inside a
 substitution (`$(ssh host git status)`), a dynamic host, option or command word, an unknown option, a
 `ProxyCommand`, `LocalCommand` or `KnownHostsCommand` option (ssh expands `%h` and `%r` in them to the host and
-user words), or a command that starts with `-` keeps the whole-text scan below.
+user words; a token touching a word character there, as in `g%h`, is unparsed), or a command that starts with `-`
+keeps the whole-text scan below. Input given to an enclosing group or loop (`{ ssh host; } <<< '...'`) is not
+carried to the ssh inside it, so that form is a known gap.
 
 ### When a command is unparsed
 

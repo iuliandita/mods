@@ -22,7 +22,9 @@ const INPUT_EXECUTORS = new Set(['xargs', ...SHELLS, 'awk', 'gawk', 'mawk', 'per
 // ssh options that take a value, and its single-letter flags that do not.
 const SSH_VALUE_OPTS = new Set('BbcDEeFIiJLlmOopQRSWw')
 const SSH_FLAG_OPTS = new Set('46AaCfGgKkMNnqsTtVvXxYy')
-const SSH_COMMAND_OPTS = /^\s*(?:proxycommand|localcommand|knownhostscommand)\b/i
+const SSH_COMMAND_OPTS = /^[\s="']*(?:proxycommand|localcommand|knownhostscommand|remotecommand)\b/i
+// A `%h`, `%n` or `%r` token touching a word character can build a tool name from the host or user word.
+const SSH_TOKEN_WORD = /[\w.-]%|%[A-Za-z%][\w.-]/
 const SED_FLAGS = new Set(['-n', '--quiet', '--silent', '-E', '-r', '--regexp-extended'])
 // Shell constructs the guard does not follow: code defined here and run later, or a branch it does not model.
 const STRUCTURES: Record<string, string> = {
@@ -411,7 +413,10 @@ function followSsh(w: Walk, s: Step): boolean {
       if (value === undefined || dyn[i]) return false
       // These run a local command, and ssh expands `%h`/`%r` in it to the host or user word that is not scanned here.
       if (a[1] === 'o') {
-        if (SSH_COMMAND_OPTS.test(value)) return false
+        if (SSH_COMMAND_OPTS.test(value)) {
+          if (SSH_TOKEN_WORD.test(value)) w.local.push({ why: 'an ssh command option that builds a word from a percent token', tools: [...TOOLS] })
+          return false
+        }
         local.push(value)
       }
     } else if (![...a.slice(1)].every((c) => SSH_FLAG_OPTS.has(c))) return false
