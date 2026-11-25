@@ -25,8 +25,12 @@ const SSH_FLAG_OPTS = new Set('46AaCfGgKkMNnqsTtVvXxYy')
 const SSH_COMMAND_OPTS = /^[\s="']*(?:proxycommand|localcommand|knownhostscommand|remotecommand)\b/i
 // Any word that names one of those options, at any position: `-o X`, `-oX`, before or after the host.
 const SSH_COMMAND_WORD = /(?:proxy|local|knownhosts|remote)command/i
-// A token is safe as a whole word or `host:port` piece; anything else (`g%h`, `"g"%h`, `%L`) can build a word.
-const SSH_SAFE_TOKEN = /(?<=^|[\s:=])%[hnrp%](?=$|[\s:])/g
+// A token is safe as an argument or `host:port` piece; anything else (`g%h`, `"g"%h`, `%L`) can build a word.
+const SSH_SAFE_TOKEN = /(?<=[\s:])%[hnrp%](?=$|[\s:])/g
+// A token that starts the value or follows a separator is the command word itself, so the host or user word runs.
+const SSH_TOKEN_COMMAND = /(?:^|[=;&|({`'"]|\$\()\s*%[A-Za-z%]/
+// HostName, User and -l change what the tokens expand to.
+const SSH_ALIAS = /^-l|(?:^|[\s'"=-])(?:hostname|user)\s*=/i
 const SED_FLAGS = new Set(['-n', '--quiet', '--silent', '-E', '-r', '--regexp-extended'])
 // Shell constructs the guard does not follow: code defined here and run later, or a branch it does not model.
 const STRUCTURES: Record<string, string> = {
@@ -433,20 +437,28 @@ function followSsh(w: Walk, s: Step): boolean {
   return true
 }
 
-// ssh runs the value of ProxyCommand, LocalCommand, KnownHostsCommand and RemoteCommand after its own quote handling and
-// after expanding `%h`, `%n` and `%r` to the host or user word, so quotes and tokens can build a tool name that the
-// words never show. This runs for every ssh command, whatever follows the options.
+// ssh runs the value of ProxyCommand, LocalCommand, KnownHostsCommand and RemoteCommand through a shell, after its own
+// quote handling and after expanding `%h`, `%n` and `%r` to the host or user word, so quotes, tokens, variables and
+// globs can build a tool name that the words never show. This runs for every command that carries such an option
+// word (`ssh`, `scp`, `rsync -e`, ...), wherever the word sits.
 function sshCommandOptions(w: Walk, s: Step): void {
+  const aliased = s.argv.some((a) => SSH_ALIAS.test(a))
   for (const a of s.argv) {
     if (!SSH_COMMAND_WORD.test(a)) continue
-    const tools = toolWords(a.replace(/["'\\]/g, ''), { shells: true })
-    if (tools.length) w.local.push({ why: `ssh with ${tools.join(', ')} in a command option`, tools })
-    if (/%[A-Za-z]/.test(a.replace(SSH_SAFE_TOKEN, ''))) w.local.push({ why: 'an ssh command option that builds a word from a percent token', tools: [...TOOLS] })
+    const bare = a.replace(/["'\\]/g, '')
+    const tools = toolWords(bare, { shells: true })
+    if (tools.length) w.local.push({ why: `a command option naming ${tools.join(', ')}`, tools })
+    const globbed = bare.split(/[\s;&|()=]+/).flatMap((piece) => mayName(piece, [...OPAQUE_TOOLS]))
+    if (globbed.length) w.local.push({ why: 'a command option with a glob or brace that may name a tool', tools: globbed })
+    if (/[$`]/.test(bare)) w.local.push({ why: 'a command option with a variable or substitution', tools: [...TOOLS] })
+    if (/%[A-Za-z]/.test(a.replace(SSH_SAFE_TOKEN, '')) || SSH_TOKEN_COMMAND.test(a) || (aliased && /%[hnr]/.test(a))) {
+      w.local.push({ why: 'a command option that builds a word from a percent token', tools: [...TOOLS] })
+    }
   }
 }
 
 function markOpaque(w: Walk, s: Step): void {
-  if (s.name === 'ssh') sshCommandOptions(w, s)
+  sshCommandOptions(w, s)
   if (s.u.clear || s.u.unset.has('PATH')) mark(w, 'a cleared PATH for an unmodeled command')
   const bare = s.argv[0] === s.name
   if (bare && s.name === 'ssh' && followSsh(w, s)) return

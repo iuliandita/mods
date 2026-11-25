@@ -295,6 +295,19 @@ export const ROWS: Row[] = [
   ["ssh -o 'ProxyCommand=g\\it push origin main' x", 'U'],
   ["ssh -o 'ProxyCommand=%hit' x", 'U'],
   ["ssh -o 'ProxyCommand=nc %h %p' host git push origin main", 'U'],
+  // ssh runs the value through the local shell, so variables, substitutions and globs are live; scp and rsync -e forward the option.
+  ["ssh -o 'ProxyCommand=g$(echo it) push origin main' x", 'U'],
+  ["ssh -o 'ProxyCommand=$X push origin main' x", 'U'],
+  ["ssh -o 'ProxyCommand=/usr/bin/gi? push origin main' x", 'U'],
+  ["scp -o 'ProxyCommand=g%h push origin main' it:f .", 'U'],
+  ['rsync -e "ssh -o \'ProxyCommand=g%h push origin main\'" it:f .', 'U'],
+  // A token that is the command word, or that follows a HostName, User or -l override, runs the host or user word.
+  ["ssh -o 'HostName=gi%n' -o 'ProxyCommand=%h push origin main' t", 'U'],
+  ["ssh -o 'ProxyCommand=true; %h push origin main' x", 'U'],
+  ["ssh -o 'HostName=git' -o 'ProxyCommand=env %h push origin main' x", 'U'],
+  ["ssh -l git -o 'ProxyCommand=env %r push origin main' x", 'U'],
+  ["ssh -o ProxyCommand='nc -X 5 -x proxy:1080 %h %p' host uptime", 'A'],
+  ["scp -o 'ProxyCommand=nc %h %p' f host:g", 'A'],
   // #247: input given to an enclosing group or loop is not carried to the ssh inside it.
   ["{ ssh localhost; } <<< 'git push origin main'", 'U'],
   ['echo git push origin main | while read x; do ssh localhost; done', 'U'],
