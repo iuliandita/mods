@@ -196,7 +196,7 @@ function unparsedViolations(command: string, parsed: Parsed, guarded: Call[], cf
   if (parsed.opaque.length) {
     const why = parsed.opaque[0]!
     for (const t of toolWords(plain, { anyCase: true })) tools.set(t, why)
-    for (const call of parsed.calls) tools.set(toolOf(call), why)
+    for (const call of [...parsed.calls, ...parsed.remote]) tools.set(toolOf(call), why)
   }
   // A write run over ssh acts on a repository the guard cannot look up; a read does not.
   for (const call of parsed.remote) if (isGuarded(call, cfg) && !tools.has(toolOf(call))) tools.set(toolOf(call), 'ssh running a write on a host the guard cannot check')
