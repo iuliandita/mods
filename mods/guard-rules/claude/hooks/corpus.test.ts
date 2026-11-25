@@ -286,6 +286,15 @@ export const ROWS: Row[] = [
   ["ssh -o 'RemoteCommand=git push origin main' host", 'U'],
   ["ssh -o '=ProxyCommand %h push origin main' git", 'U'],
   ["ssh -o 'ProxyCommand=nc %h %p' host uptime", 'A'],
+  // The option may follow an unknown flag or the host, ssh may be path-qualified, and ssh parses the quotes and `%` in the value itself.
+  ["ssh -Z -o 'ProxyCommand=g%h push origin main' it", 'U'],
+  ["ssh it -o 'ProxyCommand=g%h push origin main'", 'U'],
+  ["/usr/bin/ssh -o 'ProxyCommand=g%h push origin main' it", 'U'],
+  ["ssh -o 'ProxyCommand=\"g\"%h push origin main' it", 'U'],
+  ["ssh -o 'ProxyCommand=g\"\"it push origin main' x", 'U'],
+  ["ssh -o 'ProxyCommand=g\\it push origin main' x", 'U'],
+  ["ssh -o 'ProxyCommand=%hit' x", 'U'],
+  ["ssh -o 'ProxyCommand=nc %h %p' host git push origin main", 'U'],
   // #247: input given to an enclosing group or loop is not carried to the ssh inside it.
   ["{ ssh localhost; } <<< 'git push origin main'", 'U'],
   ['echo git push origin main | while read x; do ssh localhost; done', 'U'],

@@ -1782,7 +1782,8 @@ var INPUT_EXECUTORS = new Set(["xargs", ...SHELLS, "awk", "gawk", "mawk", "perl"
 var SSH_VALUE_OPTS = new Set("BbcDEeFIiJLlmOopQRSWw");
 var SSH_FLAG_OPTS = new Set("46AaCfGgKkMNnqsTtVvXxYy");
 var SSH_COMMAND_OPTS = /^[\s="']*(?:proxycommand|localcommand|knownhostscommand|remotecommand)\b/i;
-var SSH_TOKEN_WORD = /[\w.-]%|%[A-Za-z%][\w.-]/;
+var SSH_COMMAND_WORD = /(?:proxy|local|knownhosts|remote)command/i;
+var SSH_SAFE_TOKEN = /(?<=^|[\s:=])%[hnrp%](?=$|[\s:])/g;
 var SED_FLAGS = new Set(["-n", "--quiet", "--silent", "-E", "-r", "--regexp-extended"]);
 var STRUCTURES = {
   case: "a case statement",
@@ -2133,11 +2134,8 @@ function followSsh(w, s) {
       if (value === undefined || dyn[i])
         return false;
       if (a[1] === "o") {
-        if (SSH_COMMAND_OPTS.test(value)) {
-          if (SSH_TOKEN_WORD.test(value))
-            w.local.push({ why: "an ssh command option that builds a word from a percent token", tools: [...TOOLS] });
+        if (SSH_COMMAND_OPTS.test(value))
           return false;
-        }
         local.push(value);
       }
     } else if (![...a.slice(1)].every((c) => SSH_FLAG_OPTS.has(c)))
@@ -2158,7 +2156,20 @@ function followSsh(w, s) {
   w.remote.push(...inner.calls, ...inner.remote);
   return true;
 }
+function sshCommandOptions(w, s) {
+  for (const a of s.argv) {
+    if (!SSH_COMMAND_WORD.test(a))
+      continue;
+    const tools = toolWords(a.replace(/["'\\]/g, ""), { shells: true });
+    if (tools.length)
+      w.local.push({ why: `ssh with ${tools.join(", ")} in a command option`, tools });
+    if (/%[A-Za-z]/.test(a.replace(SSH_SAFE_TOKEN, "")))
+      w.local.push({ why: "an ssh command option that builds a word from a percent token", tools: [...TOOLS] });
+  }
+}
 function markOpaque(w, s) {
+  if (s.name === "ssh")
+    sshCommandOptions(w, s);
   if (s.u.clear || s.u.unset.has("PATH"))
     mark(w, "a cleared PATH for an unmodeled command");
   const bare = s.argv[0] === s.name;
