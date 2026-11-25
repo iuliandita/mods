@@ -40,6 +40,12 @@ A dynamic value in an argument only makes that value unknown: `git log -n "$N"`,
 an unknown variable is unparsed. A guarded git write after an unresolved directory change fails
 the parsed lookup check, independently of `modeUnparsed`.
 
+`ssh [options] host command...` with a literal command and known options is followed like `bash -c`, and the host
+name is not scanned. The repository and branch it acts on are remote, so they cannot be looked up: a read
+(`ssh host git -C /srv/repo status`, `ssh host 'which git'`) passes, and a commit, push, forge message or
+kubectl, helm or terraform change is unparsed. Input fed to ssh (a pipe, heredoc or here-string), a dynamic host,
+option or command word, an unknown option, or a command that starts with `-` keeps the whole-text scan below.
+
 ### When a command is unparsed
 
 These constructs make the whole command unparsed when a parsed call or its text names `git`, `gh`, `glab`, `tea`, `fj`, `kubectl`,
