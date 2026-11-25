@@ -9,7 +9,8 @@ import { SHELLS, shellScript, unwrap } from './wrappers'
 // `opaque` lists constructs the guard does not model anywhere in the command (unparsed when the text names a
 // tool); `local` lists commands it does not model that name a tool among their own words (unparsed by themselves).
 export type Local = { why: string; tools: string[] }
-export type Parsed = { calls: Call[]; ok: boolean; opaque: string[]; local: Local[] }
+// `remote` holds the calls of a literal `ssh host command`, which act on a repository the guard cannot look up.
+export type Parsed = { calls: Call[]; ok: boolean; opaque: string[]; local: Local[]; remote: Call[] }
 
 // A command the guard does not look through that names one of these later runs it in a way the guard cannot follow
 // (xargs, flock, `find -exec`, `direnv exec`, `su -c '...'`), unless the head only prints or searches text.
@@ -18,6 +19,9 @@ const OPAQUE_TOOLS = new Set(['git', 'gh', 'glab', 'tea', 'fj', 'kubectl', 'helm
 const TEXT_HEADS = new Set(['echo', 'printf', 'man', 'which', 'type', 'grep', 'rg', 'cat'])
 const DATA_HEADS = new Set(['ls', 'mkdir', 'rmdir', 'touch', 'cp', 'mv', 'rm', 'head', 'tail', 'wc', 'tee', 'curl', 'basename', 'dirname', 'realpath', 'readlink', 'file', 'stat', 'du', 'df', 'cut', 'uniq', 'diff', 'cmp'])
 const INPUT_EXECUTORS = new Set(['xargs', ...SHELLS, 'awk', 'gawk', 'mawk', 'perl', 'ruby', 'node', 'env', 'parallel', 'watch', 'script', 'ssh', 'php', 'lua', 'tclsh', 'at', 'crontab', 'batch'])
+// ssh options that take a value, and its single-letter flags that do not.
+const SSH_VALUE_OPTS = new Set('BbcDEeFIiJLlmOopQRSWw')
+const SSH_FLAG_OPTS = new Set('46AaCfGgKkMNnqsTtVvXxYy')
 const SED_FLAGS = new Set(['-n', '--quiet', '--silent', '-E', '-r', '--regexp-extended'])
 // Shell constructs the guard does not follow: code defined here and run later, or a branch it does not model.
 const STRUCTURES: Record<string, string> = {
@@ -92,6 +96,7 @@ const WORKSPACE_FILE = /(?:^|\/)\.terraform(?:\/environment)?\/?$/
 type Walk = {
   queue: Simple[]
   calls: Call[]
+  remote: Call[]
   st: ProcState
   opaque: string[]
   local: Local[]
@@ -382,9 +387,46 @@ function pipedWords(w: Walk, s: Step): string[] {
   return words
 }
 
+// `ssh [options] host command...` runs the command on the host. A literal command is followed like `bash -c`, but its
+// calls go to `remote`, not `calls`: they act on a repository and branch the guard cannot look up, so a write there is
+// unparsed and a read passes. Input fed to ssh, a dynamic or unknown option, or a dynamic word keeps the whole-text scan.
+// The host is a name, not a word to scan; only `-o` values can run a local command (ProxyCommand, LocalCommand).
+function followSsh(w: Walk, s: Step): boolean {
+  if (SINGLE_PIPE.test(s.cmd.op) || s.cmd.input?.length) return false
+  const { argv, dyn } = s
+  const local: string[] = []
+  let i = 1
+  for (; i < argv.length; i++) {
+    const a = argv[i]!
+    if (dyn[i]) return false
+    if (a === '--') {
+      i++
+      break
+    }
+    if (!a.startsWith('-') || a === '-') break
+    if (SSH_VALUE_OPTS.has(a[1]!)) {
+      const value = a.length > 2 ? a.slice(2) : argv[++i]
+      if (value === undefined || dyn[i]) return false
+      if (a[1] === 'o') local.push(value)
+    } else if (![...a.slice(1)].every((c) => SSH_FLAG_OPTS.has(c))) return false
+  }
+  const words = argv.slice(i + 1)
+  // OpenSSH reads options after the host too, so a leading `-` is not yet the command.
+  if (argv[i] === undefined || dyn[i] || words[0]?.startsWith('-') || dyn.slice(i + 1).some(Boolean)) return false
+  const tools = toolWords(local.join(' '), { shells: true })
+  if (tools.length) w.local.push({ why: `ssh with ${tools.join(', ')} among its options`, tools })
+  if (!words.length) return true
+  const inner = extractCalls(words.join(' '), '/', '/')
+  for (const why of inner.opaque) mark(w, why)
+  w.local.push(...inner.local)
+  w.remote.push(...inner.calls, ...inner.remote)
+  return true
+}
+
 function markOpaque(w: Walk, s: Step): void {
   if (s.u.clear || s.u.unset.has('PATH')) mark(w, 'a cleared PATH for an unmodeled command')
   const bare = s.argv[0] === s.name
+  if (bare && s.name === 'ssh' && followSsh(w, s)) return
   const executableOption = s.name === 'rg' ? s.argv.some((a) => a === '--pre' || a.startsWith('--pre='))
     : s.name === 'man' && s.argv.slice(1).some((a) => /^-[^-]*[PH]|^--(?:pager|html)(?:=|$)/.test(a))
   if (bare && (FLOW_HEADS.has(s.name) || (TEXT_HEADS.has(s.name) && !executableOption))) return
@@ -409,7 +451,7 @@ function markOpaque(w: Walk, s: Step): void {
 export function extractCalls(src: string, startDir: string, home: string): Parsed {
   const first = tokenize(src)
   const w: Walk = {
-    queue: [...first.cmds], calls: [], st: newProcState(startDir, home), opaque: [], local: [], chain: 0, joinNext: false, depth: 0, loops: [],
+    queue: [...first.cmds], calls: [], remote: [], st: newProcState(startDir, home), opaque: [], local: [], chain: 0, joinNext: false, depth: 0, loops: [],
     kube: false, workspace: false, written: new Set(),
   }
   if (!first.ok) mark(w, 'a quote or substitution that does not close, or nesting deeper than 4')
@@ -467,5 +509,5 @@ export function extractCalls(src: string, startDir: string, home: string): Parse
     else if (SHELLS.has(s.name) || s.name === 'eval' || s.name === 'secret-box') inlineScript(w, s)
     else markOpaque(w, s)
   }
-  return { calls: w.calls, ok: !w.opaque.length && !w.local.length, opaque: w.opaque, local: w.local }
+  return { calls: w.calls, ok: !w.opaque.length && !w.local.length && !w.remote.length, opaque: w.opaque, local: w.local, remote: w.remote }
 }
