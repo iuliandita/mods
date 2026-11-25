@@ -1624,7 +1624,11 @@ var DATA_HEADS = new Set(["ls", "mkdir", "rmdir", "touch", "cp", "mv", "rm", "he
 var INPUT_EXECUTORS = new Set(["xargs", ...SHELLS, "awk", "gawk", "mawk", "perl", "ruby", "node", "env", "parallel", "watch", "script", "ssh", "php", "lua", "tclsh", "at", "crontab", "batch"]);
 var SSH_VALUE_OPTS = new Set("BbcDEeFIiJLlmOopQRSWw");
 var SSH_FLAG_OPTS = new Set("46AaCfGgKkMNnqsTtVvXxYy");
-var SSH_COMMAND_OPTS = /^\s*(?:proxycommand|localcommand|knownhostscommand)\b/i;
+var SSH_COMMAND_OPTS = /^[\s="']*(?:proxycommand|localcommand|knownhostscommand|remotecommand)\b/i;
+var SSH_COMMAND_WORD = /(?:proxy|local|knownhosts|remote)command/i;
+var SSH_SAFE_TOKEN = /(?<=[\s:])%[hnrp%](?=$|[\s:])/g;
+var SSH_TOKEN_COMMAND = /(?:^|[=;&|({`'"]|\$\()\s*%[A-Za-z%]/;
+var SSH_ALIAS = /^-l|(?:^|[\s'"=-])(?:hostname|user)\s*=/i;
 var SED_FLAGS = new Set(["-n", "--quiet", "--silent", "-E", "-r", "--regexp-extended"]);
 var STRUCTURES = {
   case: "a case statement",
@@ -1997,7 +2001,27 @@ function followSsh(w, s) {
   w.remote.push(...inner.calls, ...inner.remote);
   return true;
 }
+function sshCommandOptions(w, s) {
+  const aliased = s.argv.some((a) => SSH_ALIAS.test(a));
+  for (const a of s.argv) {
+    if (!SSH_COMMAND_WORD.test(a))
+      continue;
+    const bare = a.replace(/["'\\]/g, "");
+    const tools = toolWords(bare, { shells: true });
+    if (tools.length)
+      w.local.push({ why: `a command option naming ${tools.join(", ")}`, tools });
+    const globbed = bare.split(/[\s;&|()=]+/).flatMap((piece) => mayName(piece, [...OPAQUE_TOOLS]));
+    if (globbed.length)
+      w.local.push({ why: "a command option with a glob or brace that may name a tool", tools: globbed });
+    if (/[$`]/.test(bare))
+      w.local.push({ why: "a command option with a variable or substitution", tools: [...TOOLS] });
+    if (/%[A-Za-z]/.test(a.replace(SSH_SAFE_TOKEN, "")) || SSH_TOKEN_COMMAND.test(a) || aliased && /%[hnr]/.test(a)) {
+      w.local.push({ why: "a command option that builds a word from a percent token", tools: [...TOOLS] });
+    }
+  }
+}
 function markOpaque(w, s) {
+  sshCommandOptions(w, s);
   if (s.u.clear || s.u.unset.has("PATH"))
     mark(w, "a cleared PATH for an unmodeled command");
   const bare = s.argv[0] === s.name;

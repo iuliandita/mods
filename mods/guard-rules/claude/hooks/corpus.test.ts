@@ -280,6 +280,37 @@ export const ROWS: Row[] = [
   ["source x; ssh host $'\\x67it' status", 'U'],
   ['ssh -o ProxyCommand="ssh -W %h:%p jump" host uptime', 'A'],
   ["ssh -o 'ControlPath=~/.ssh/cm-%r@%h' host git status", 'A'],
+  // #246: a percent token next to a word character builds a tool name from the host word; the option name may start with `=`.
+  ["ssh -o 'ProxyCommand=g%h push origin main' it", 'U'],
+  ["ssh -o 'RemoteCommand=g%h push origin main' it", 'U'],
+  ["ssh -o 'RemoteCommand=git push origin main' host", 'U'],
+  ["ssh -o '=ProxyCommand %h push origin main' git", 'U'],
+  ["ssh -o 'ProxyCommand=nc %h %p' host uptime", 'A'],
+  // The option may follow an unknown flag or the host, ssh may be path-qualified, and ssh parses the quotes and `%` in the value itself.
+  ["ssh -Z -o 'ProxyCommand=g%h push origin main' it", 'U'],
+  ["ssh it -o 'ProxyCommand=g%h push origin main'", 'U'],
+  ["/usr/bin/ssh -o 'ProxyCommand=g%h push origin main' it", 'U'],
+  ["ssh -o 'ProxyCommand=\"g\"%h push origin main' it", 'U'],
+  ["ssh -o 'ProxyCommand=g\"\"it push origin main' x", 'U'],
+  ["ssh -o 'ProxyCommand=g\\it push origin main' x", 'U'],
+  ["ssh -o 'ProxyCommand=%hit' x", 'U'],
+  ["ssh -o 'ProxyCommand=nc %h %p' host git push origin main", 'U'],
+  // ssh runs the value through the local shell, so variables, substitutions and globs are live; scp and rsync -e forward the option.
+  ["ssh -o 'ProxyCommand=g$(echo it) push origin main' x", 'U'],
+  ["ssh -o 'ProxyCommand=$X push origin main' x", 'U'],
+  ["ssh -o 'ProxyCommand=/usr/bin/gi? push origin main' x", 'U'],
+  ["scp -o 'ProxyCommand=g%h push origin main' it:f .", 'U'],
+  ['rsync -e "ssh -o \'ProxyCommand=g%h push origin main\'" it:f .', 'U'],
+  // A token that is the command word, or that follows a HostName, User or -l override, runs the host or user word.
+  ["ssh -o 'HostName=gi%n' -o 'ProxyCommand=%h push origin main' t", 'U'],
+  ["ssh -o 'ProxyCommand=true; %h push origin main' x", 'U'],
+  ["ssh -o 'HostName=git' -o 'ProxyCommand=env %h push origin main' x", 'U'],
+  ["ssh -l git -o 'ProxyCommand=env %r push origin main' x", 'U'],
+  ["ssh -o ProxyCommand='nc -X 5 -x proxy:1080 %h %p' host uptime", 'A'],
+  ["scp -o 'ProxyCommand=nc %h %p' f host:g", 'A'],
+  // #247: input given to an enclosing group or loop is not carried to the ssh inside it.
+  ["{ ssh localhost; } <<< 'git push origin main'", 'U'],
+  ['echo git push origin main | while read x; do ssh localhost; done', 'U'],
   ['echo PATH=$PATH', 'A'],
   ['grep -rn PATH= .', 'A'],
   [`printf 'PATH is %s\\n' "$PATH"`, 'A'],
@@ -727,6 +758,8 @@ export const ROWS: Row[] = [
 // Rows expected to mismatch today; each build step removes the rows it fixes.
 export const KNOWN_GAPS = new Set<string>([
   "U printf '%s%s push origin main' gi t | xargs env",
+  "U { ssh localhost; } <<< 'git push origin main'",
+  'U echo git push origin main | while read x; do ssh localhost; done',
 ])
 
 export async function verdict([cmd, want, extra = {}]: Row): Promise<{ ok: boolean; got: string[] }> {
